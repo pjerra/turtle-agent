@@ -66,11 +66,8 @@ type zgW38HallLimit struct {
 // in a lone mistress's shot is inside the 10 yd family ring of the other and of the guard), so the plan keeps
 // the original ceilings and walk 39 GM-clears these groups (leg 6 pull groups 9-12 and 16).
 var zgW38HallLimits = map[int]zgW38HallLimit{
-	8:  {Over: 1, Boss: true},  // the guard's eight + the north camp's east four + Jin'do: 15 over 14
-	9:  {Over: 1, Boss: true},  // the north camp's eight + the two lone mistresses + Jin'do: 11 over 10
-	10: {Over: 2, Boss: true},  // the lone 49403 + 49402 + Jin'do: 3 over 1
-	11: {Over: 1, Boss: true},  // the lone 49402 + Jin'do: 2 over 1
-	15: {Over: 1, Boss: false}, // the corridor's 49714 row + the 51881/51946 pair: 10 over 9 (A-3's 10 is reverted)
+	10: {Over: 0, Boss: true},  // the combined honour guard (8) + escorts (2) + Jin'do: 11 at max_bodies 11
+	14: {Over: 1, Boss: false}, // the corridor's 49714 row + the 51881/51946 pair: 10 over 9 (A-3's 10 is reverted)
 }
 
 // zgW38Group is the plan pull group an exported row's comment names ("pull group 8; stand pull" -> 8), or -1.
@@ -295,10 +292,9 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 	// exactly its units, so a GM clear of one group kills one whole pack; 49402/49403 belong to their own row
 	// only and the boss row carries no adds.
 	wantOwned := map[int][]uint64{
-		8:  {49421, 49573, 49574, 49575, 49576, 49577, 49609, 49650},         // the honour guard's eight
-		9:  {49383, 49384, 49385, 49386, 1173078, 1173079, 1173080, 1173081}, // the north camp
-		10: {49403},                                                          // the lone mistress
-		11: {49402},                                                          // the lone mistress
+		8:  {49383, 49384, 49385, 49386},                                           // the north-north four
+		9:  {1173078, 1173079, 1173080, 1173081},                                   // the south-north four (1173080)
+		10: {49421, 49573, 49574, 49575, 49576, 49577, 49609, 49650, 49403, 49402}, // the combined honour guard + escorts
 	}
 	for group, guids := range wantOwned {
 		row, ok := groupRow[group]
@@ -322,8 +318,8 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 		if o == bossRow {
 			t.Errorf("the lone mistress %d is owned by the Jin'do boss row: it must be its own pull group", guid)
 		}
-		if g := zgW38Group(rows.rows[o].Comment); g != 10 && g != 11 {
-			t.Errorf("the lone mistress %d is owned by row %d (%s): it is a member of a pull other than its own group", guid, o, rows.rows[o].Comment)
+		if g := zgW38Group(rows.rows[o].Comment); g != 10 {
+			t.Errorf("the lone mistress %d is owned by row %d (%s): it is a member of a pull other than the combined guard+escorts group", guid, o, rows.rows[o].Comment)
 		}
 	}
 	br := rows.rows[bossRow]

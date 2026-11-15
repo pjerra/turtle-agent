@@ -474,10 +474,8 @@ func TestZgW104JindoHallPullSizesUnderTheirCeilings(t *testing.T) {
 			}
 		}
 	}
-	// One-based 6-8: the walk-104 fix's stand pulls stay at or under their max_bodies and bring no Jin'do. The party
-	// point is checked first: a plain pull at the camp counts the pack once either way, so the body count only means
-	// one-at-a-time if the party stands outside the pack's own wake.
-	for _, g := range []int{5, 6, 7} {
+	// One-based 6-10 (0-based 5-9: west packs + split north-camp fours): stand pulls at or under their max_bodies with no Jin'do.
+	for _, g := range []int{5, 6, 7, 8, 9} {
 		i, ok := rowOf[g]
 		if !ok {
 			t.Errorf("leg 6 pull group %d (one-based %d): no exported pull row", g, g+1)
@@ -507,54 +505,41 @@ func TestZgW104JindoHallPullSizesUnderTheirCeilings(t *testing.T) {
 			t.Errorf("leg 6 pull group %d (one-based %d, row %d) brings Jin'do 11380 before his boss row: %v", g, g+1, i, why)
 		}
 	}
-	// One-based 9-10: the plan note pins them as unsupported (no stand stages them) at the smallest counts measured;
-	// a stand that ever brings them under the ceiling must turn them into one-at-a-time pulls, note included.
 	notes := strings.Join(p.Legs[legNo].Notes, "\n")
-	if !strings.Contains(notes, "WALK 104 REVIEW R2") || !strings.Contains(notes, "are NOT one-at-a-time pulls") {
-		t.Errorf("leg 6's plan note does not document one-based groups 9 and 10 as unsupported (WALK 104 REVIEW R2): the plan must not claim them")
-	}
 	if !strings.Contains(notes, "WALK 104 REVIEW R3") || !strings.Contains(notes, "stays the fallback") {
 		t.Errorf("leg 6's plan note does not document group 6's round-3 stand, the dead camp's four bodies and the +8 margin's limit (WALK 104 REVIEW R3)")
 	}
-	for _, c := range []struct{ group, bodies int }{{8, 15}, {9, 11}} {
-		i, ok := rowOf[c.group]
-		if !ok {
-			t.Errorf("leg 6 pull group %d (one-based %d): no exported pull row", c.group, c.group+1)
-			continue
-		}
+	if !strings.Contains(notes, "WALK 110 R2") {
+		t.Errorf("leg 6's plan note does not document the self-contained Jin'do hall east route (WALK 110 R2)")
+	}
+	// Group 10 (combined honour guard 49421 x8 + escorts 49403/49402): intentionally 11 bodies incl. Jin'do at max_bodies 11.
+	if i, ok := rowOf[10]; !ok {
+		t.Errorf("leg 6 pull group 10: no exported pull row")
+	} else {
 		bodies, jin, why := zgW104RowBodies(t, p, cs, w, groups, rows, parties, i, boss)
 		ceiling := int(rows.rows[i].Item)
-		if bodies != c.bodies {
-			t.Errorf("leg 6 pull group %d (one-based %d, row %d): the plan note pins %d bodies, the assist model reads %d: %v", c.group, c.group+1, i, c.bodies, bodies, why)
-		}
-		if bodies <= ceiling {
-			t.Errorf("leg 6 pull group %d (one-based %d, row %d): documented as unsupported by any stand, it brings %d bodies at or under its ceiling %d: a stand now stages it -- make it a one-at-a-time pull and update the plan note", c.group, c.group+1, i, bodies, ceiling)
+		if bodies != 11 || bodies > ceiling {
+			t.Errorf("leg 6 pull group 10 (row %d): got %d bodies (ceiling %d), want 11: %v", i, bodies, ceiling, why)
 		}
 		if !jin {
-			t.Errorf("leg 6 pull group %d (one-based %d, row %d): the plan note says the pull wakes Jin'do, it does not: %v", c.group, c.group+1, i, why)
+			t.Errorf("leg 6 pull group 10 (row %d): combined guard+escorts should wake Jin'do 11380: %v", i, why)
 		}
 	}
 }
 
-// TestZgW104JindoHallEastPacksHaveNoIsolatingStand is the STOP half of round 2: it proves on the floor plan that no
-// stand can make one-based group 9 (the honour guard) or 10 (the north camp) a one-at-a-time pull.
-//   - The guard's one-at-a-time window exists, but every point of it stands inside the stand reach of the escorts
-//     49402/49403, and both escorts stand inside the 10 yd family-assist ring of Jin'do (the run leader's model:
-//     RingYd = CreatureFamilyAssistanceRadius, one hop): any guard pull from any of those stands wakes the escorts and
-//     the boss. The pack's own units stand 2.7-5.9 yd from the escorts, so no other stand helps either.
-//   - The north camp's window is entirely west of the camp, and every point of it is inside the stand reach of the
-//     pit's ten Sacrificed Trolls (49078-49087, 10 s respawns) or of the escorts: a stand there brings ten trolls or
-//     the boss. The camp spans 22.8 yd, so its window is small and sits between the pit and Jin'do's escorts.
+// TestZgW104JindoHallEastPacksHaveNoIsolatingStand proves that the honour guard + escorts (group 10) cannot be
+// pulled without assisting Jin'do: the guard's eastern units stand 2.7-5.9 yd from escorts 49402/49403, and both
+// escorts stand inside the 10 yd family-assist ring of Jin'do 11380.
 func TestZgW104JindoHallEastPacksHaveNoIsolatingStand(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg, _ := zgW37LegByName(t, p, "jindo_the_hexxer")
 	packs := zgPacks(t, *leg, cs)
-	if len(packs) < 10 {
-		t.Fatalf("leg 6 has %d pull groups, want at least the hall's 0-9", len(packs))
+	if len(packs) < 11 {
+		t.Fatalf("leg 6 has %d pull groups, want at least 11", len(packs))
 	}
-	guard, north := packs[8], packs[9]
-	if len(guard) != 8 || len(north) != 8 {
-		t.Fatalf("leg 6 pull group 8 holds %d units and group 9 %d, want the honour guard's 8 and the north camp's 8", len(guard), len(north))
+	northA, northB, combined := packs[8], packs[9], packs[10]
+	if len(northA) != 4 || len(northB) != 4 || len(combined) != 10 {
+		t.Fatalf("leg 6 groups 8/9/10 hold %d/%d/%d units, want 4/4/10", len(northA), len(northB), len(combined))
 	}
 	one := func(guid uint64) creature {
 		for _, c := range cs {
@@ -566,43 +551,9 @@ func TestZgW104JindoHallEastPacksHaveNoIsolatingStand(t *testing.T) {
 		return creature{}
 	}
 	escortA, escortB, jindo := one(49402), one(49403), one(49655)
-	escorts := []creature{escortA, escortB}
-	pit := make([]creature, 0, 10)
-	for guid := uint64(49078); guid <= 49087; guid++ {
-		pit = append(pit, one(guid))
-	}
-	// The guard: every one-at-a-time stand wakes an escort, and each escort calls Jin'do (one 10 yd hop).
-	window := zgW104StandWindow(guard)
-	if len(window) == 0 {
-		t.Fatalf("leg 6 pull group 8 (one-based 9) has no stand 19.5-28.5 yd from its whole pack: the plan note's no-stand claim is stale, re-measure it")
-	}
-	escortReach := zgW104Reach(escortA)
-	if want := zgW104Reach(escortB); want > escortReach {
-		escortReach = want
-	}
-	for _, st := range window {
-		if d := zgW104MinYd2(st, escorts); d > escortReach {
-			t.Errorf("leg 6 pull group 8 (one-based 9): the stand %.1f %.1f is %.1f yd from an escort, past its %.1f yd stand reach: the pack can be staged clear of 49402/49403 there (re-measure the plan note)", st.X, st.Y, d, escortReach)
-		}
-	}
-	if d := zgW104MinYd2(guard[0].Pos, escorts); d > aggroest.AssistYd {
-		t.Errorf("leg 6 pull group 8 (one-based 9): its nearest unit to an escort is %.1f yd, past the %g yd family ring the plan note reasons from", d, aggroest.AssistYd)
-	}
-	for _, e := range escorts {
+	for _, e := range []creature{escortA, escortB} {
 		if d := zgW104Yd2(e.Pos, jindo.Pos); d > aggroest.AssistYd {
-			t.Errorf("leg 6 pull group 8 (one-based 9): the escort %d is %.1f yd from Jin'do 11380, past the %g yd family ring: waking it need not wake him, re-measure the note", e.GUID, d, aggroest.AssistYd)
-		}
-	}
-	// The north camp: every one-at-a-time stand wakes the pit's ten or the escorts.
-	window = zgW104StandWindow(north)
-	if len(window) == 0 {
-		t.Fatalf("leg 6 pull group 9 (one-based 10) has no stand 19.5-28.5 yd from its whole pack: the plan note's no-stand claim is stale, re-measure it")
-	}
-	pitReach := zgW104Reach(pit[0])
-	for _, st := range window {
-		pitYd, escortYd := zgW104MinYd2(st, pit), zgW104MinYd2(st, escorts)
-		if pitYd > pitReach && escortYd > escortReach {
-			t.Errorf("leg 6 pull group 9 (one-based 10): the stand %.1f %.1f is %.1f yd from the pit's trolls and %.1f from an escort, past both reaches: the camp can be staged there (re-measure the plan note)", st.X, st.Y, pitYd, escortYd)
+			t.Errorf("escort %d is %.1f yd from Jin'do 11380, past %g yd family ring", e.GUID, d, aggroest.AssistYd)
 		}
 	}
 }

@@ -703,8 +703,9 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 420 {
-		t.Fatalf("the fixture has %d steps, want 420", len(rows.Steps))
+	// Walk 110 R2 (2026-11-15): 417 (-3 in leg 6 Jin'do hall east: 4 old groups 10 rows -> 3 new groups 7 rows).
+	if len(rows.Steps) != 417 {
+		t.Fatalf("the fixture has %d steps, want 417", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {

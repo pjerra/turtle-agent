@@ -2157,7 +2157,38 @@
           "max_bodies": 4
         },
         {
-          "entries": [14883, 14883, 14882, 14882, 14882, 14882, 14825, 14825],
+          "entries": [14825, 14825, 14882, 14825],
+          "positions": [
+            {"x": -11547, "y": -1250.59, "z": 78.55},
+            {"x": -11552, "y": -1248.28, "z": 78.6},
+            {"x": -11545.2, "y": -1246.18, "z": 78.71},
+            {"x": -11549.8, "y": -1243.92, "z": 78.41}
+          ],
+          "radius": 4.5,
+          "approach": [
+            {"x": -11556, "y": -1310, "z": 78},
+            {"x": -11552, "y": -1223, "z": 78.5}
+          ],
+          "stand_pull": true,
+          "max_bodies": 4
+        },
+        {
+          "entries": [14825, 14825, 14825, 14825],
+          "positions": [
+            {"x": -11543.8, "y": -1265.9, "z": 78.38},
+            {"x": -11546.3, "y": -1262.71, "z": 78.54},
+            {"x": -11544.3, "y": -1263.2, "z": 78.48},
+            {"x": -11542.2, "y": -1263.87, "z": 78.45}
+          ],
+          "radius": 4.0,
+          "approach": [
+            {"x": -11547, "y": -1238, "z": 78.5}
+          ],
+          "stand_pull": true,
+          "max_bodies": 4
+        },
+        {
+          "entries": [14883, 14883, 14882, 14882, 14882, 14882, 14825, 14825, 14825, 14825],
           "positions": [
             {"x": -11534.8, "y": -1282.44, "z": 78.7332},
             {"x": -11534.2, "y": -1269.71, "z": 78.6456},
@@ -2166,59 +2197,16 @@
             {"x": -11528.5, "y": -1270.31, "z": 79.4239},
             {"x": -11528.7, "y": -1281.83, "z": 79.4193},
             {"x": -11525.6, "y": -1270.86, "z": 79.571},
-            {"x": -11525.4, "y": -1281.18, "z": 79.6252}
-          ],
-          "radius": 7,
-          "approach": [
-            {"x": -11550.8, "y": -1283.6, "z": 77.9}
-          ],
-          "stand_pull": true,
-          "max_bodies": 14
-        },
-        {
-          "entries": [14825, 14825, 14882, 14825, 14825, 14825, 14825, 14825],
-          "positions": [
-            {"x": -11547, "y": -1250.59, "z": 78.55},
-            {"x": -11552, "y": -1248.28, "z": 78.6},
-            {"x": -11545.2, "y": -1246.18, "z": 78.71},
-            {"x": -11549.8, "y": -1243.92, "z": 78.41},
-            {"x": -11543.8, "y": -1265.9, "z": 78.38},
-            {"x": -11546.3, "y": -1262.71, "z": 78.54},
-            {"x": -11544.3, "y": -1263.2, "z": 78.48},
-            {"x": -11542.2, "y": -1263.87, "z": 78.45}
-          ],
-          "radius": 13,
-          "approach": [
-            {"x": -11552, "y": -1270, "z": 78.26}
-          ],
-          "stand_pull": true,
-          "max_bodies": 10
-        },
-        {
-          "entries": [14825],
-          "positions": [
-            {"x": -11522.8, "y": -1280.45, "z": 79.6704}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11558, "y": -1290, "z": 77.96},
-            {"x": -11548.2, "y": -1292.3, "z": 78.18}
-          ],
-          "stand_pull": true,
-          "max_bodies": 1
-        },
-        {
-          "entries": [14825],
-          "positions": [
+            {"x": -11525.4, "y": -1281.18, "z": 79.6252},
+            {"x": -11522.8, "y": -1280.45, "z": 79.6704},
             {"x": -11522.8, "y": -1271.63, "z": 79.6408}
           ],
-          "radius": 1,
+          "radius": 9.5,
           "approach": [
-            {"x": -11556, "y": -1282, "z": 77.91},
-            {"x": -11547, "y": -1257.6, "z": 78.81}
+            {"x": -11554, "y": -1288, "z": 78}
           ],
           "stand_pull": true,
-          "max_bodies": 1
+          "max_bodies": 11
         },
         {
           "entries": [14532, 11351, 11830, 14532],
@@ -2319,7 +2307,8 @@
         "WALK 38 REVIEW R2 (2026-11-05, leg 6; review round 2, decided: undo the boss-row fold; RingYd 10 = CreatureFamilyAssistanceRadius, one hop). The hall's east side is its own pull groups again and the Jin'do boss row carries no adds (no first, no radius): group 8 the honour guard 49421's eight (max_bodies 14, stand -11550.8 -1283.6, 36.0 yd from him), group 9 the north camp (the east four 1173078-81 and the mistresses 49383-86, max_bodies 10, stand -11552 -1270, 36.6 yd), group 10 the lone 49403 (max_bodies 1, stand -11548.2 -1292.3, 36.5 yd) and group 11 the lone 49402 (max_bodies 1, stand -11547 -1257.6, 36.0 yd). Each is a stand pull with its walk-38-fix-1 stand, no stand is inside his 35 yd route reach, and each group is gm-clearable on its own (the lone rows' radius 1 keeps the guard's 49576/49577 out of them). No geometry stages them under their ceilings: a stand in the tank's 28.5 yd shot of the guard (it spans 9.5 yd) or of the 22 yd north camp is inside the lone mistresses' 22+10 yd reach, and a stand in a lone mistress's shot is inside the 10 yd family ring of the other and of the guard (49421 stands 5.9 yd from 49402), so each pull's assist wakes Jin'do. The known limit is pinned per group by TestZgW38JindosHallPullsStayUnderTheirCeilings, which keeps the assist model: group 8 brings 15 bodies over its ceiling 14 (+1: the north camp's east four join), group 9 11 over 10 (+1), group 10 3 over 1 (+2: 49402 and Jin'do) and group 11 2 over 1 (+1: Jin'do). The corridor's 49714 row keeps its original max_bodies 9: its pull rings in the 51881/51946 pair, 10 bodies over 9 (+1). Walk 39 gm-clears leg 6 pull groups 9-12 (the guard, the north camp and the two lone mistresses) and 16 (the 49714 row) instead of pulling them. A-6: 49402/49403 are members of their own rows only, and no pre-boss stand is inside Jin'do's reach.",
         "WALK 104 FIX (2026-11-14, leg 6; TortoiseBots-audit tests/raid-zg-walk104 fz6d/fz5c, briefs-omp/zg-route-T29.md): step 471 (walk-104 numbering) walked the party to group 5's approach -11614.4 -1282.1, which is the 49373-49382 cluster's own centre: fz6d-1 22:46:01 read \"ahead: pull 472 brings 14 (ceiling 10)\", 22:46:11 \"the tank engages 14882 on arrival (0.0 yd)\" -- the ten woke mid-move, 18.7-33.9 yd out, with no CC orders and no stand; the fight drifted north-east and the 1173082 four joined at 22:46:56 (23.4-30.1 yd) and the 49363 ten at 22:47:05 (23.4-27.1 yd): 24 bodies (12x14825, 7x14882, 5x14883) with 3 Corrupted Infernals from Voodoo Slave spell 23426, 20 dead in 88 s. Group 6's stand -11581 -1334.8 sat 18.6 yd from its nearest unit (49370) and 2.6 yd above it, so the 474 move woke that camp too (fz6d-3 23:05:11 \"reading the last point outside the pack's wake reach\", 23:05:20 475 \"engaged 10 over 6\", 5 dead; the same rows in fz5c-1). Groups 5, 6 and 7 are stand pulls now, from walked floor points (a frame position at each; z the navmesh floor): 5 at (-11610 -1306 79.2) -- own pack 21.3-26.8 yd, 31.9 from group 4's camp, 32.2 from the 1173082 four; 6 at (-11590 -1329.2 77.75) -- 21.1-27.9, 35.8 from group 4, 36.4 from 1173082; 7 at (-11599 -1307 77.7) -- 22.8-27.7, 26.8 from the 49363 camp. Every walk-in keeps at least 21.1 yd from its own pack and at least 23 from every pack pulled later (its own 30.4 and 68.7 on the two later walks; the old 471 walk ended on the camp), each stand has line of sight to every unit of its pack (raycast) and the navmesh path to it is complete (path-check type 0x1 ok; the old -11614.4 -1282.1 and -11577.5 -1293.6 were server NOPATH). The floor plan sets group 7's ceiling at 26.8: the 1173082 four are 15.5 yd from the 49363 ten and 20.5 from the honour guard, so no stand reaches the estimate's 22 yd aggro plus the raid's 10 yd spread against every neighbour. Out of this fix: the 478/479 stop (fz5c-1 19 dead) is group 8's staging point, whose walk ends 16.1 yd from the guard and whose camp lives 8-18 yd from Jin'do -- the WALK 38 REVIEW R2 known limit (walk 39/104 gm-clear groups 8-11; the guard's 14.8 yd spread cannot fit the 21-28.5 yd window any stand needs).",
         "WALK 104 REVIEW R2 (2026-11-15, leg 6; TortoiseBots-audit briefs-omp/zg-route-T29-r2.md): one-based groups 9 and 10 are NOT one-at-a-time pulls and no stand makes them so; walk 104's --gm-clear jindo_the_hexxer:9,10 stays. Group 9 (the honour guard 49421's eight, 9.4 x 12.7 yd) has a 19.5-28.5 yd own window that is a 0.5 x 2.1 yd patch at (-11553.5..-11553.0, -1276.6..-1274.5): all 47 points of it (0.1 yd lattice, all on the navmesh floor) have line of sight and a complete path in, and every one brings 19 bodies WITH Jin'do -- the escorts 49402/49403 stand 30.4-31.0 yd from the patch (inside the stand's reach: detection 20 at party level 58 vs level 60 is 22 yd, plus the raid's 10 yd spread) and 49402 is 8.0 yd from him; the pack's own 49577/49576 stand 2.7/2.9 yd from 49403/49402, so any wake rings the escorts in. The walk-104 frame point in that patch (-11553.3 -1275.9) reads the same 19. The row keeps its stand (-11550.8 -1283.6, 16.1 yd from 49650, inside the pack's own 22 yd wake): 15 bodies (8 own + the north camp's east four + the two escorts + Jin'do), the smallest count measured for the row; every window point brings 19 and the row's own point as a plain pull 19. Group 10 (the north camp: the north four 49383-86 and the east four 1173078-81, 12.1 yd apart at the nearest, 22.8 yd across) has 2247 of its 3964 window points off the navmesh (the east side); all 1717 walkable points (x -11570.3..-11565.6, y -1266.0..-1256.5) stand 11-19 yd from the pit's ten Sacrificed Trolls (49078-49087, 10 s respawn): 1023 have no line of sight to the whole pack and the 694 that have bring 18 bodies (the ten trolls join the stand). The four walk-104 frame points inside the window (-11569.2/-11569.3 -1257.9, -11566.6 -1263.2, -11567.9 -1261.7) all sit 11.7-16.3 yd from them. Its stand (-11552 -1270, 9.2 yd from 1173080, inside the pack's own wake) keeps the fewest bodies, 11 (8 own + the two escorts + Jin'do). Splitting group 10 into its two fours is the only other route (each pulls 4 cleanly) and would add a row and move every later step number, so it is not taken here. tools/dungeongen/zg_w104_test.go pins the two east rows' body counts and the two no-stand proofs.",
-        "WALK 104 REVIEW R3 (2026-11-15, leg 6; TortoiseBots-audit briefs-omp/zg-route-T29-r3.md): one-based group 6's stand moves 9.5 yd west, from -11610 -1306 79.2 to -11619.5 -1306 79.17 (the navmesh floor). The old stand sat 31.9 yd from group 4's 49397-49400 camp, inside the raid model's stand reach (detection 20 at the plan's party level 58 vs level 60 is 22 yd, plus the raid's 10 yd spread, 32 yd), and 32.2 yd from the 1173082 four, 0.2 yd past it, so the row's pull-size estimate read 14 -- its own ten plus the 49397-49400 four -- with no margin to the live four-mob camp. The new stand keeps 21.2-27.6 yd from its own pack (inside the run leader's 28.5 yd shot), 41.2 yd from the 1173082 four (that camp's 32 yd reach plus 8), at least 41 from every pack pulled later, 61.7 from the pit's Sacrificed Trolls and past Jin'do's 35 yd route reach; line of sight to all ten (raycast), a complete navmesh path in, and the walk in from group 4's camp keeps 21.2 yd from its own pack and 41.2 from the 1173082 four. The 49397-49400 four are pulled first: row pull group 4 (the camp's own plain pull) walks the party onto them and kills them before this row, so the row's live estimate (assist model, earlier rows dead, RingYd 10 = CreatureFamilyAssistanceRadius) is its own ten, and the pull-size estimate's four extra bodies are that dead camp. No stand removes them: of the 300 floor points (0.1 yd lattice) that the walk reaches (21-28.5 yd from the pack, 21+ along the walk, line of sight to all ten, a complete path, outside every live unit's reach) and that stand 40+ yd from the 1173082 four, the farthest from the 49397-49400 camp is 28.4 yd, inside its 32 yd reach; the only points 32+ from both camps are a three-point lip at the old stand (-11609.9 -1305.8 79.22, 32.0/32.1). That is the window's limit, so walk 104's gm-clear of groups 6-10 stays the fallback. tools/dungeongen/zg_w104_test.go pins the stand, the 40 yd camp margin, the live ten and this window limit."
+        "WALK 104 REVIEW R3 (2026-11-15, leg 6; TortoiseBots-audit briefs-omp/zg-route-T29-r3.md): one-based group 6's stand moves 9.5 yd west, from -11610 -1306 79.2 to -11619.5 -1306 79.17 (the navmesh floor). The old stand sat 31.9 yd from group 4's 49397-49400 camp, inside the raid model's stand reach (detection 20 at the plan's party level 58 vs level 60 is 22 yd, plus the raid's 10 yd spread, 32 yd), and 32.2 yd from the 1173082 four, 0.2 yd past it, so the row's pull-size estimate read 14 -- its own ten plus the 49397-49400 four -- with no margin to the live four-mob camp. The new stand keeps 21.2-27.6 yd from its own pack (inside the run leader's 28.5 yd shot), 41.2 yd from the 1173082 four (that camp's 32 yd reach plus 8), at least 41 from every pack pulled later, 61.7 from the pit's Sacrificed Trolls and past Jin'do's 35 yd route reach; line of sight to all ten (raycast), a complete navmesh path in, and the walk in from group 4's camp keeps 21.2 yd from its own pack and 41.2 from the 1173082 four. The 49397-49400 four are pulled first: row pull group 4 (the camp's own plain pull) walks the party onto them and kills them before this row, so the row's live estimate (assist model, earlier rows dead, RingYd 10 = CreatureFamilyAssistanceRadius) is its own ten, and the pull-size estimate's four extra bodies are that dead camp. No stand removes them: of the 300 floor points (0.1 yd lattice) that the walk reaches (21-28.5 yd from the pack, 21+ along the walk, line of sight to all ten, a complete path, outside every live unit's reach) and that stand 40+ yd from the 1173082 four, the farthest from the 49397-49400 camp is 28.4 yd, inside its 32 yd reach; the only points 32+ from both camps are a three-point lip at the old stand (-11609.9 -1305.8 79.22, 32.0/32.1). That is the window's limit, so walk 104's gm-clear of groups 6-10 stays the fallback. tools/dungeongen/zg_w104_test.go pins the stand, the 40 yd camp margin, the live ten and this window limit.",
+        "WALK 110 R2 (2026-11-15, leg 6; TortoiseBots-audit briefs-omp/zg-route-w110-r2.md): the Jin'do hall east route is self-contained without GM clears. The 8-mob north camp (old group 9) is split into two 4-mob stand pulls before the honour guard: group 8 (49383-49386, max_bodies 4, stand -11552 -1223 78.5 via -11556 -1310 78 to clear the pit) and group 9 (formation 1173080, 1173078-1173081, max_bodies 4, stand -11547 -1238 78.5). Each pulls only its own 4 bodies. The honour guard (49421 x8) and the two escorts (49403, 49402) are combined into group 10 (10 mobs, radius 9.5, stand -11554 -1288 78, 20.0 yd from 49650, 32.1 yd from 49403, 40.2 yd from Jin'do 11380, max_bodies 11) because 49576/49577 stand 2.7-2.9 yd from 49402/49403 and 49402/49403 stand 8.0-8.6 yd from Jin'do (inside the 10 yd family-assist ring), so pulling the guard always assists the escorts and Jin'do."
       ]
     },
     {
