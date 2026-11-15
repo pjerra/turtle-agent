@@ -28,14 +28,14 @@
   "kill_first": [6220, 6226, 6227, 7849, 6223],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 90 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "Leg 0's cave chain (the 6223 Leprous Defender and 6233 Mechanized Sentry camps at x -517..-427, y 226..273, z -211.5..-207.8) is pulled from its east end westwards, one camp per step, radius 8, with an approach point on each camp's own floor 18-23 yd from it (first live run r20-19z39 slot 4: the tank pulled from the Holdout landing 21-36 yd above the packs and the ranged party stayed 60-70 yd behind while the whole cave joined the step). The two same-camp pairs (6223/6233 at 10.1 yd and the two 6233 rows at 6.7 yd) are one group each. Route into the cave: from the Holdout landing the navmesh goes (-548 147) (-530 115) east and up to (-448 240); it passes the 6220 at -445 174 and the 6220 at -477 165 (leg 0 pull groups 30-31 after the reorder) within 1-8 yd, so the walk to the first cave pull can still wake them: the mapping walk decides whether those packs move in front of the chain.",
-    "The event NPCs 7897 (Alarm-a-bomb 2600, spawn 30134 at -573.6 126.1 -202.1) and 7849 (Mobile Alert System, spawns 30141 at -759.1 399.5 -272.6, 30144 at -804.3 531.5 -297.4 and 30143 at -738.3 655.9 -321.8) cannot be attacked by the party, so they are never pulled: the draft's pull groups that held them are gone (leg 0 group 60, leg 2 group 0, leg 3 groups 0 and 16), and every leg whose pull radius or route reaches a spawn skips it (leg 0 skips 7897; legs 2 and 3 skip 7849). First live run r21-19z40e slot 4: step 180 (leg 0) paused four times on 'a fight lasted more than 180 s' with 'entry 7897 ... is not on the tank yet; the party is held back' and 'attack ... refused: invalid-target: The group cannot attack that target'.",
+    "The cave chain (moved from leg 0 to leg 1 by the route order fix: the 6223 Leprous Defender and 6233 Mechanized Sentry camps at x -517..-427, y 226..273, z -211.5..-207.8) is pulled from its east end westwards, one camp per step, radius 8, with an approach point on each camp's own floor 18-23 yd from it (first live run r20-19z39 slot 4: the tank pulled from the Holdout landing 21-36 yd above the packs and the ranged party stayed 60-70 yd behind while the whole cave joined the step). The two same-camp pairs (6223/6233 at 10.1 yd and the two 6233 rows at 6.7 yd) are one group each. Route into the cave: from the Holdout landing the navmesh goes (-548 147) (-530 115) east and up to (-448 240); it passes the 6220 at -445 174 within 1-8 yd; that pack is leg 1 pull group 4, ahead of the chain, so the chain's first pull only comes after it. The 6220 at -477 165 is not walked.",
+    "The event NPCs 7897 (Alarm-a-bomb 2600, spawn 30134 at -573.6 126.1 -202.1) and 7849 (Mobile Alert System, spawns 30141 at -759.1 399.5 -272.6, 30144 at -804.3 531.5 -297.4 and 30143 at -738.3 655.9 -321.8) cannot be attacked by the party, so they are never pulled: the draft's pull groups that held them are gone (the 6329 pack at -582 137 -202 that held 7897's walk, the 6226 packs at -788 420 -273 and -798 538 -296, and the 6212 pack at -727 652 -309 beside the 7849 spawns), and every leg whose pull radius or route reaches a spawn skips it (leg 0 skips 7897; legs 2 and 3 skip 7849). First live run r21-19z40e slot 4: step 180 (leg 0) paused four times on 'a fight lasted more than 180 s' with 'entry 7897 ... is not on the tank yet; the party is held back' and 'attack ... refused: invalid-target: The group cannot attack that target'. The 7897's patrol corridor (x -573..-557, y 74..126, bomb at -561 110) lies 15-23 yd west of the tunnel walk's packs (-548 138 and -534 121): an approach hop that stopped inside it failed three times (r23 slot 4, 2026-10-23, at -566.8 78.8), so keep stands and approach hops out of it.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: the gnome-face doors and their six buttons (GO_GNOME_FACE_1-6, GO_BUTTON_1-6) and the bomb faces before Thermaplugg",
     "Needs: Explosive Charges (GO_EXPLOSIVE_CHARGE) to open the north and south cave-ins (GO_CAVE_IN_NORTH/SOUTH) on the way in",
     "Needs: Grubbis (7361) has no spawn row",
     "The Back Entrance (trigger 523) puts the party deep inside; this plan starts at the front.",
-    "Step 181's stand (leg 0 pull group 66, the 6329/6211/6329 pack at -575 40): the run leader's own approach hop stopped at -566.8 78.8, inside the Alarm-a-bomb 7897's patrol corridor (x -573..-557, y 74..126), and the gather then failed three times on Varcus and Helmina, held in combat by the unattackable bomb at -561 110 (r23 slot 4, 2026-10-23, step 181 of 621, 0 deaths). The pull now has an approach stand at -572 58 (16.0 yd south of the corridor's y 74 edge, 11.8 yd from the nearest member, 18.6 yd from the pack's centre), on the same route south from the corridor to the pack: a complete navmesh path from group 65's point (21.2 yd) and to the pack (18.6 yd) on the server's filter. The stand is where the party gathers and pulls from; the bomb's corridor stays on the walk."
+    "Leg 3's lower-deck 6212/6232 pack at -738.7 659.8 -323.4 (the pre-short-route rows' pull group 15) is no pull of this route: from leg 3's own walk the only way to it is the 265 yd lower-deck loop, which crosses the leg's -734.65 709.46 and -691.75 720.44 pulls and the packs at -724 698 and -706 693 this route drops, and the corridor above has no line to it (a navmesh ray hits 5 yd out, so the tank has no shot from there)."
   ],
   "legs": [
     {
@@ -146,44 +146,13 @@
           "radius": 14.6
         },
         {
-          "entries": [6329],
+          "entries": [6391, 6392, 6391],
           "positions": [
-            {"x": -532.052, "y": 164.641, "z": -155.236}
+            {"x": -503.532, "y": 221.496, "z": -193.613},
+            {"x": -501.96, "y": 222.333, "z": -193.613},
+            {"x": -500.113, "y": 223.078, "z": -193.612}
           ],
-          "radius": 10
-        },
-        {
-          "entries": [6206],
-          "positions": [
-            {"x": -531.673, "y": 160.769, "z": -155.153}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329, 6329, 6329],
-          "positions": [
-            {"x": -554.399, "y": 169.332, "z": -155.153},
-            {"x": -555.872, "y": 176.441, "z": -155.154},
-            {"x": -558.493, "y": 172.266, "z": -155.153}
-          ],
-          "radius": 13.9
-        },
-        {
-          "entries": [6391, 6391],
-          "positions": [
-            {"x": -549.924, "y": 170.193, "z": -193.654},
-            {"x": -543.691, "y": 167.098, "z": -193.654}
-          ],
-          "radius": 13.5
-        },
-        {
-          "entries": [6392, 6392, 6407],
-          "positions": [
-            {"x": -563.7, "y": 183.698, "z": -193.653},
-            {"x": -566.097, "y": 182.016, "z": -193.654},
-            {"x": -565.122, "y": 184.7, "z": -193.653}
-          ],
-          "radius": 11.9
+          "radius": 12
         },
         {
           "entries": [6391, 6391],
@@ -202,21 +171,115 @@
           "radius": 12
         },
         {
-          "entries": [6407, 6407],
+          "entries": [6391, 6391],
           "positions": [
-            {"x": -492.279, "y": 195.693, "z": -193.619},
-            {"x": -491.399, "y": 198.038, "z": -193.618}
+            {"x": -549.924, "y": 170.193, "z": -193.654},
+            {"x": -543.691, "y": 167.098, "z": -193.654}
           ],
-          "radius": 11.3
+          "radius": 13.5
         },
         {
-          "entries": [6391, 6392, 6391],
+          "entries": [6329, 6329],
           "positions": [
-            {"x": -503.532, "y": 221.496, "z": -193.613},
-            {"x": -501.96, "y": 222.333, "z": -193.613},
-            {"x": -500.113, "y": 223.078, "z": -193.612}
+            {"x": -550.351, "y": 137.763, "z": -202.068},
+            {"x": -546.082, "y": 137.754, "z": -202.068}
           ],
-          "radius": 12
+          "radius": 12.2
+        },
+        {
+          "entries": [6211],
+          "positions": [
+            {"x": -534.307, "y": 121.363, "z": -204.515}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6219],
+          "positions": [
+            {"x": -491.239, "y": 82.373, "z": -206.368}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6220],
+          "positions": [
+            {"x": -472.186, "y": 67.6719, "z": -208.471}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6219],
+          "positions": [
+            {"x": -472.893, "y": 49.6316, "z": -207.855}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6219],
+          "positions": [
+            {"x": -409.443, "y": 73.7753, "z": -211.022}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6218],
+          "positions": [
+            {"x": -401.565, "y": 51.417, "z": -209.094}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6219],
+          "positions": [
+            {"x": -392.84, "y": 66.0599, "z": -209.767}
+          ],
+          "radius": 10
+        }
+      ],
+      "skip": [7897],
+      "boss": {
+        "entry": 7079,
+        "position": {"x": -430.182, "y": 42.5239, "z": -208.719}
+      }
+    },
+    {
+      "name": "electrocutioner_6000",
+      "to": {"x": -460.06668, "y": 69.59998, "z": -210.75957},
+      "pull_groups": [
+        {
+          "entries": [6218],
+          "positions": [
+            {"x": -456.826, "y": 92.256, "z": -210.002}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6220],
+          "positions": [
+            {"x": -452.865, "y": 118.505, "z": -210.293}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6218],
+          "positions": [
+            {"x": -475.912, "y": 108.416, "z": -210.486}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6218],
+          "positions": [
+            {"x": -429.852, "y": 137.976, "z": -211.669}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6220],
+          "positions": [
+            {"x": -444.961, "y": 174.409, "z": -208.732}
+          ],
+          "radius": 10
         },
         {
           "entries": [6233, 6223, 6233],
@@ -296,453 +359,6 @@
           ]
         },
         {
-          "entries": [6220],
-          "positions": [
-            {"x": -444.961, "y": 174.409, "z": -208.732}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6220],
-          "positions": [
-            {"x": -477.542, "y": 165.387, "z": -208.442}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -497.661, "y": 130.632, "z": -209.168}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -475.912, "y": 108.416, "z": -210.486}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -456.826, "y": 92.256, "z": -210.002}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6220],
-          "positions": [
-            {"x": -452.865, "y": 118.505, "z": -210.293}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -429.852, "y": 137.976, "z": -211.669}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -407.507, "y": 159.097, "z": -209.509}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6220],
-          "positions": [
-            {"x": -398.085, "y": 137.244, "z": -210.625}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -373.518, "y": 131.856, "z": -208.89}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6220],
-          "positions": [
-            {"x": -380.697, "y": 97.865, "z": -210.394}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -409.037, "y": 107.892, "z": -210.274}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6219],
-          "positions": [
-            {"x": -430.123, "y": 94.1727, "z": -209.397}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6219],
-          "positions": [
-            {"x": -409.443, "y": 73.7753, "z": -211.022}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6219],
-          "positions": [
-            {"x": -392.84, "y": 66.0599, "z": -209.767}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6218],
-          "positions": [
-            {"x": -401.565, "y": 51.417, "z": -209.094}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6207],
-          "positions": [
-            {"x": -367.842, "y": 79.4234, "z": -154.728}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6206],
-          "positions": [
-            {"x": -368.251, "y": 84.5512, "z": -154.66}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6206],
-          "positions": [
-            {"x": -367.079, "y": 101.611, "z": -154.743}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329],
-          "positions": [
-            {"x": -367.322, "y": 126.659, "z": -154.66}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6206],
-          "positions": [
-            {"x": -425.096, "y": 111.061, "z": -156.425}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329],
-          "positions": [
-            {"x": -436.441, "y": 122.539, "z": -156.443}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329],
-          "positions": [
-            {"x": -463.033, "y": 110.822, "z": -151.173}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329],
-          "positions": [
-            {"x": -434.69, "y": 84.9587, "z": -151.747}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6220],
-          "positions": [
-            {"x": -472.186, "y": 67.6719, "z": -208.471}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6219],
-          "positions": [
-            {"x": -472.893, "y": 49.6316, "z": -207.855}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6219],
-          "positions": [
-            {"x": -491.239, "y": 82.373, "z": -206.368}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6211, 6206],
-          "positions": [
-            {"x": -545.883, "y": 72.0569, "z": -200.725},
-            {"x": -547.073, "y": 78.8734, "z": -201.248}
-          ],
-          "radius": 13.5
-        },
-        {
-          "entries": [6329, 6329],
-          "positions": [
-            {"x": -556.832, "y": 96.8535, "z": -201.481},
-            {"x": -555.172, "y": 102.537, "z": -201.659}
-          ],
-          "radius": 13
-        },
-        {
-          "entries": [6206, 6211],
-          "positions": [
-            {"x": -571.131, "y": 114.998, "z": -201.73},
-            {"x": -569.119, "y": 119.554, "z": -201.877}
-          ],
-          "radius": 12.5
-        },
-        {
-          "entries": [6329, 6329],
-          "positions": [
-            {"x": -582.384, "y": 137.274, "z": -202.052},
-            {"x": -577.393, "y": 139.893, "z": -202.054}
-          ],
-          "radius": 12.9
-        },
-        {
-          "entries": [6329, 6329],
-          "positions": [
-            {"x": -550.351, "y": 137.763, "z": -202.068},
-            {"x": -546.082, "y": 137.754, "z": -202.068}
-          ],
-          "radius": 12.2
-        },
-        {
-          "entries": [6211],
-          "positions": [
-            {"x": -534.307, "y": 121.363, "z": -204.515}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6206],
-          "positions": [
-            {"x": -579.958, "y": 98.1969, "z": -202.035}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6206, 6211],
-          "positions": [
-            {"x": -594.108, "y": 96.128, "z": -199.458},
-            {"x": -594.156, "y": 94.788, "z": -199.414}
-          ],
-          "radius": 10.7
-        },
-        {
-          "entries": [6206, 6206],
-          "positions": [
-            {"x": -573.965, "y": 77.0107, "z": -203.874},
-            {"x": -570.635, "y": 80.1587, "z": -204.094}
-          ],
-          "radius": 12.3
-        },
-        {
-          "entries": [6329, 6211, 6329],
-          "positions": [
-            {"x": -575.288, "y": 46.7761, "z": -200.157},
-            {"x": -572.245, "y": 36.1417, "z": -196.701},
-            {"x": -577.057, "y": 35.9964, "z": -197.327}
-          ],
-          "radius": 17.5,
-          "approach": [
-            {"x": -572, "y": 58, "z": -198.75}
-          ]
-        },
-        {
-          "entries": [6211, 6329, 6206],
-          "positions": [
-            {"x": -591.135, "y": 25.0292, "z": -179.599},
-            {"x": -588.034, "y": 18.7032, "z": -179.596},
-            {"x": -600.52, "y": 24.6008, "z": -179.598}
-          ],
-          "radius": 17.6
-        },
-        {
-          "entries": [6211, 6329, 6211],
-          "positions": [
-            {"x": -560.054, "y": 22.1415, "z": -179.654},
-            {"x": -555.28, "y": 20.0494, "z": -179.653},
-            {"x": -550.133, "y": 18.5031, "z": -179.652}
-          ],
-          "radius": 15.4
-        },
-        {
-          "entries": [6329, 6211, 6211],
-          "positions": [
-            {"x": -540.361, "y": 33.9657, "z": -196.964},
-            {"x": -536.721, "y": 40.5053, "z": -199.526},
-            {"x": -542.011, "y": 44.5614, "z": -200.109}
-          ],
-          "radius": 16.1
-        },
-        {
-          "entries": [6329],
-          "positions": [
-            {"x": -524.084, "y": 17.8809, "z": -156.404}
-          ],
-          "radius": 10,
-          "approach": [
-            {"x": -536.32, "y": 183.47, "z": -193.66}
-          ]
-        },
-        {
-          "entries": [6206],
-          "positions": [
-            {"x": -619.84, "y": 58.4296, "z": -199.565}
-          ],
-          "radius": 10,
-          "approach": [
-            {"x": -509, "y": 128, "z": -154.52},
-            {"x": -520, "y": 210, "z": -188.9}
-          ]
-        },
-        {
-          "entries": [6329],
-          "positions": [
-            {"x": -634.547, "y": 73.0335, "z": -195.492}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6211],
-          "positions": [
-            {"x": -640.63, "y": 60.9319, "z": -192.837}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329],
-          "positions": [
-            {"x": -642.76, "y": 76.9467, "z": -183.17}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6211],
-          "positions": [
-            {"x": -635.808, "y": 89.3161, "z": -183.187}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6206],
-          "positions": [
-            {"x": -651.76, "y": 88.2629, "z": -179.263}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329, 6211, 6206, 6329],
-          "positions": [
-            {"x": -641.7, "y": 101.709, "z": -192.37},
-            {"x": -633.632, "y": 101.509, "z": -195.888},
-            {"x": -641.052, "y": 113.123, "z": -192.667},
-            {"x": -633.396, "y": 113.62, "z": -195.992}
-          ],
-          "radius": 17.6
-        },
-        {
-          "entries": [6206, 6329, 6329],
-          "positions": [
-            {"x": -632.206, "y": 125.874, "z": -183.795},
-            {"x": -630.458, "y": 132.447, "z": -183.796},
-            {"x": -636.738, "y": 135.03, "z": -183.794}
-          ],
-          "radius": 15.4
-        },
-        {
-          "entries": [6207],
-          "positions": [
-            {"x": -606.302, "y": 124.539, "z": -188.085}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6211],
-          "positions": [
-            {"x": -612.973, "y": 143.538, "z": -199.573}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6329, 6329, 6211],
-          "positions": [
-            {"x": -606.562, "y": 193.586, "z": -172.299},
-            {"x": -601.919, "y": 197.694, "z": -171.666},
-            {"x": -598.314, "y": 201.79, "z": -169.966}
-          ],
-          "radius": 16.1
-        },
-        {
-          "entries": [6211, 6329],
-          "positions": [
-            {"x": -569.925, "y": 231.347, "z": -159.345},
-            {"x": -565.925, "y": 233.393, "z": -159.345}
-          ],
-          "radius": 12.3
-        },
-        {
-          "entries": [6207],
-          "positions": [
-            {"x": -546.168, "y": 216.54, "z": -156.761}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6206, 6329],
-          "positions": [
-            {"x": -528.462, "y": 205.603, "z": -155.156},
-            {"x": -530.666, "y": 201.902, "z": -155.156}
-          ],
-          "radius": 12.2
-        },
-        {
-          "entries": [6329, 6329, 6206],
-          "positions": [
-            {"x": -468.348, "y": 177.182, "z": -154.653},
-            {"x": -465.155, "y": 179.25, "z": -154.745},
-            {"x": -455.935, "y": 178.529, "z": -154.66}
-          ],
-          "radius": 17.3
-        },
-        {
-          "entries": [6329, 6329],
-          "positions": [
-            {"x": -429.105, "y": 180, "z": -154.743},
-            {"x": -425.039, "y": 178.295, "z": -154.66}
-          ],
-          "radius": 12.3
-        }
-      ],
-      "skip": [7897],
-      "boss": {
-        "entry": 7079,
-        "position": {"x": -430.182, "y": 42.5239, "z": -208.719}
-      }
-    },
-    {
-      "name": "electrocutioner_6000",
-      "to": {"x": -474.707, "y": 281.476, "z": -211.459},
-      "pull_groups": [
-        {
           "entries": [6233],
           "positions": [
             {"x": -474.707, "y": 281.476, "z": -211.459}
@@ -805,113 +421,6 @@
           "radius": 17.1
         },
         {
-          "entries": [6225],
-          "positions": [
-            {"x": -538.906, "y": 449.608, "z": -273.08}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6230],
-          "positions": [
-            {"x": -531.531, "y": 481.758, "z": -273.068}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6222, 6225, 6222],
-          "positions": [
-            {"x": -505.07, "y": 482.81, "z": -273.08},
-            {"x": -503.192, "y": 479.869, "z": -273.08},
-            {"x": -502.385, "y": 483.743, "z": -273.08}
-          ],
-          "radius": 12.3
-        },
-        {
-          "entries": [6225],
-          "positions": [
-            {"x": -503.215, "y": 527.958, "z": -273.08}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [7603, 7603, 7603, 6222, 7603],
-          "positions": [
-            {"x": -520.587, "y": 537.734, "z": -273.074},
-            {"x": -519.507, "y": 540.309, "z": -273.074},
-            {"x": -521.4, "y": 539.471, "z": -273.074},
-            {"x": -523.258, "y": 538.648, "z": -273.073},
-            {"x": -522.189, "y": 541.254, "z": -273.074}
-          ],
-          "radius": 12.1
-        },
-        {
-          "entries": [6222, 6225, 6222],
-          "positions": [
-            {"x": -539.803, "y": 554.096, "z": -273.079},
-            {"x": -539.224, "y": 556.1, "z": -273.08},
-            {"x": -539.798, "y": 558.085, "z": -273.08}
-          ],
-          "radius": 12.1
-        },
-        {
-          "entries": [6225],
-          "positions": [
-            {"x": -584.71, "y": 548.082, "z": -273.078}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6230],
-          "positions": [
-            {"x": -587.104, "y": 508.355, "z": -273.063}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6222, 6225],
-          "positions": [
-            {"x": -603.687, "y": 507.389, "z": -273.063},
-            {"x": -605.78, "y": 507.486, "z": -273.063}
-          ],
-          "radius": 11.1
-        },
-        {
-          "entries": [6222, 6225, 6222],
-          "positions": [
-            {"x": -586.528, "y": 465.276, "z": -273.081},
-            {"x": -586.658, "y": 464.285, "z": -273.081},
-            {"x": -585.701, "y": 464.577, "z": -273.081}
-          ],
-          "radius": 10.7
-        },
-        {
-          "entries": [6222],
-          "positions": [
-            {"x": -622.269, "y": 451.15, "z": -273.062}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [7603, 7603, 7603, 7603, 6222, 6222],
-          "positions": [
-            {"x": -626.295, "y": 448.169, "z": -272.978},
-            {"x": -630.799, "y": 450, "z": -272.979},
-            {"x": -631.247, "y": 444.701, "z": -272.979},
-            {"x": -634.205, "y": 453.489, "z": -273.063},
-            {"x": -633.882, "y": 447.407, "z": -273.063},
-            {"x": -639.105, "y": 450.504, "z": -273.062}
-          ],
-          "radius": 16.7
-        },
-        {
-          "entries": [6222],
-          "positions": [
-            {"x": -613.609, "y": 433.56, "z": -230.601}
-          ],
-          "radius": 10
-        },
-        {
           "entries": [7603, 6222, 7603, 7603, 7603],
           "positions": [
             {"x": -603.907, "y": 422.628, "z": -230.518},
@@ -923,30 +432,9 @@
           "radius": 14.7
         },
         {
-          "entries": [6233],
+          "entries": [6222],
           "positions": [
-            {"x": -639.68, "y": 402.122, "z": -233.581}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6233],
-          "positions": [
-            {"x": -653.546, "y": 420.784, "z": -230.541}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6223],
-          "positions": [
-            {"x": -617.462, "y": 370.696, "z": -247.188}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6233],
-          "positions": [
-            {"x": -639.608, "y": 353.948, "z": -255.521}
+            {"x": -613.609, "y": 433.56, "z": -230.601}
           ],
           "radius": 10
         },
@@ -1009,64 +497,6 @@
             {"x": -505.002, "y": 596.776, "z": -230.601}
           ],
           "radius": 17.4
-        },
-        {
-          "entries": [7603, 7603, 7603, 6233, 6222, 7603],
-          "positions": [
-            {"x": -484.079, "y": 561.437, "z": -230.602},
-            {"x": -489.812, "y": 559.961, "z": -230.602},
-            {"x": -480.532, "y": 560.66, "z": -230.601},
-            {"x": -479.992, "y": 553.159, "z": -230.602},
-            {"x": -487.225, "y": 549.376, "z": -230.602},
-            {"x": -479.445, "y": 548.944, "z": -230.518}
-          ],
-          "radius": 17.8
-        },
-        {
-          "entries": [7603, 7603, 7603, 6222, 7603],
-          "positions": [
-            {"x": -472.045, "y": 527.063, "z": -230.602},
-            {"x": -466.408, "y": 527.329, "z": -230.602},
-            {"x": -464.437, "y": 527.62, "z": -230.601},
-            {"x": -464.458, "y": 518.547, "z": -230.602},
-            {"x": -467.899, "y": 517.033, "z": -230.518}
-          ],
-          "radius": 16.6
-        },
-        {
-          "entries": [7603, 7603, 7603, 6233, 7603, 6222, 7603, 6222, 7603, 7603, 7603],
-          "positions": [
-            {"x": -464.858, "y": 487.472, "z": -230.601},
-            {"x": -469.989, "y": 486.403, "z": -230.602},
-            {"x": -469.306, "y": 480.047, "z": -230.602},
-            {"x": -466.97, "y": 475.331, "z": -230.601},
-            {"x": -473.96, "y": 471.998, "z": -230.518},
-            {"x": -468.093, "y": 468.025, "z": -230.601},
-            {"x": -456.864, "y": 466.615, "z": -230.601},
-            {"x": -461.171, "y": 464.069, "z": -230.601},
-            {"x": -467.127, "y": 458.6, "z": -230.518},
-            {"x": -464.134, "y": 453.529, "z": -230.518},
-            {"x": -460.763, "y": 451.258, "z": -230.517}
-          ],
-          "radius": 28.9
-        },
-        {
-          "entries": [6230],
-          "positions": [
-            {"x": -474.714, "y": 453.097, "z": -230.601}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [7603, 7603, 6233, 7603, 7603],
-          "positions": [
-            {"x": -474.927, "y": 443.173, "z": -230.518},
-            {"x": -480.313, "y": 440.908, "z": -230.518},
-            {"x": -472.927, "y": 439.53, "z": -230.518},
-            {"x": -486.311, "y": 435.922, "z": -230.518},
-            {"x": -481.016, "y": 430.803, "z": -230.518}
-          ],
-          "radius": 17.6
         }
       ],
       "boss": {
@@ -1080,11 +510,39 @@
     },
     {
       "name": "crowd_pummeler_9-60",
-      "to": {"x": -759.105, "y": 399.505, "z": -272.578},
+      "to": {"x": -646.2001, "y": 419.99988, "z": -230.55956},
       "via": [
         {"x": -544.9, "y": 551.8, "z": -219.18}
       ],
       "pull_groups": [
+        {
+          "entries": [6233],
+          "positions": [
+            {"x": -653.546, "y": 420.784, "z": -230.541}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6233],
+          "positions": [
+            {"x": -639.68, "y": 402.122, "z": -233.581}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6223],
+          "positions": [
+            {"x": -617.462, "y": 370.696, "z": -247.188}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6233],
+          "positions": [
+            {"x": -639.608, "y": 353.948, "z": -255.521}
+          ],
+          "radius": 10
+        },
         {
           "entries": [6226],
           "positions": [
@@ -1105,172 +563,6 @@
             {"x": -834.252, "y": 423.218, "z": -272.513}
           ],
           "radius": 19.4
-        },
-        {
-          "entries": [6226],
-          "positions": [
-            {"x": -844.277, "y": 432.41, "z": -312.281}
-          ],
-          "radius": 10,
-          "approach": [
-            {"x": -704, "y": 426.6665, "z": -273.06},
-            {"x": -672.8, "y": 417.3, "z": -273.06},
-            {"x": -671.10754, "y": 524.2145, "z": -272.87},
-            {"x": -751.2637, "y": 548.34406, "z": -290.81}
-          ]
-        },
-        {
-          "entries": [6227, 6224],
-          "positions": [
-            {"x": -823.162, "y": 402.095, "z": -316.433},
-            {"x": -823.79, "y": 401.27, "z": -316.433}
-          ],
-          "radius": 10.6
-        },
-        {
-          "entries": [6226, 6224],
-          "positions": [
-            {"x": -797.001, "y": 384.529, "z": -316.433},
-            {"x": -798.065, "y": 382.68, "z": -316.433}
-          ],
-          "radius": 11.1
-        },
-        {
-          "entries": [6226, 6224],
-          "positions": [
-            {"x": -858.712, "y": 391.157, "z": -316.43},
-            {"x": -858.925, "y": 389.898, "z": -316.43}
-          ],
-          "radius": 10.7
-        },
-        {
-          "entries": [6224, 6224, 6227],
-          "positions": [
-            {"x": -876.962, "y": 365.196, "z": -316.433},
-            {"x": -877.407, "y": 363.953, "z": -316.433},
-            {"x": -876.693, "y": 363.197, "z": -316.433}
-          ],
-          "radius": 11.1
-        },
-        {
-          "entries": [6226, 6224, 7603, 7603, 7603, 7603, 6233],
-          "positions": [
-            {"x": -867.12, "y": 333.94, "z": -316.433},
-            {"x": -867.086, "y": 332.016, "z": -316.431},
-            {"x": -860.844, "y": 330.92, "z": -316.433},
-            {"x": -860.153, "y": 328.662, "z": -316.413},
-            {"x": -858.642, "y": 320.32, "z": -316.407},
-            {"x": -855.923, "y": 319.543, "z": -316.408},
-            {"x": -859.42, "y": 317.601, "z": -316.407}
-          ],
-          "radius": 19.8
-        },
-        {
-          "entries": [7603, 7603, 6233, 7603, 6224, 6226, 6224, 7603],
-          "positions": [
-            {"x": -859.787, "y": 292.404, "z": -272.513},
-            {"x": -846.367, "y": 294.08, "z": -272.513},
-            {"x": -852.587, "y": 290.918, "z": -272.61},
-            {"x": -847.354, "y": 289.447, "z": -272.611},
-            {"x": -840.707, "y": 290.14, "z": -272.607},
-            {"x": -837.74, "y": 291.732, "z": -272.605},
-            {"x": -838.863, "y": 289.553, "z": -272.606},
-            {"x": -847.694, "y": 284.091, "z": -272.605}
-          ],
-          "radius": 23.6,
-          "approach": [
-            {"x": -656.0925, "y": 520.0519, "z": -272.87},
-            {"x": -672.8, "y": 417.3, "z": -273.06},
-            {"x": -700, "y": 426.6665, "z": -273.06}
-          ]
-        },
-        {
-          "entries": [6227],
-          "positions": [
-            {"x": -795.208, "y": 283.37, "z": -272.596}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6227, 6224, 7603, 7603, 6224, 7603, 7603, 6224, 6233],
-          "positions": [
-            {"x": -767.642, "y": 346.271, "z": -272.596},
-            {"x": -768.508, "y": 347.22, "z": -272.596},
-            {"x": -756.644, "y": 340.992, "z": -272.596},
-            {"x": -761.42, "y": 345.627, "z": -272.596},
-            {"x": -768.453, "y": 349.162, "z": -272.596},
-            {"x": -763.268, "y": 346.868, "z": -272.596},
-            {"x": -761.55, "y": 355.004, "z": -272.596},
-            {"x": -763.52, "y": 358.724, "z": -272.596},
-            {"x": -758.589, "y": 358.368, "z": -272.513}
-          ],
-          "radius": 21.1
-        },
-        {
-          "entries": [7603, 6227, 6224, 7603, 7603, 6233, 7603],
-          "positions": [
-            {"x": -732.509, "y": 241.083, "z": -272.997},
-            {"x": -743.622, "y": 238.119, "z": -273.08},
-            {"x": -742.334, "y": 235.533, "z": -273.08},
-            {"x": -740.041, "y": 235.315, "z": -272.997},
-            {"x": -734.406, "y": 234.689, "z": -272.403},
-            {"x": -738.034, "y": 230.835, "z": -272.997},
-            {"x": -738.795, "y": 225.476, "z": -272.997}
-          ],
-          "radius": 19
-        },
-        {
-          "entries": [7603, 6224, 6224, 6227, 7603, 7603, 7603],
-          "positions": [
-            {"x": -779.544, "y": 216.3, "z": -272.999},
-            {"x": -784.163, "y": 210.624, "z": -272.999},
-            {"x": -781.707, "y": 204.067, "z": -273.081},
-            {"x": -781.462, "y": 200.618, "z": -273.081},
-            {"x": -788.239, "y": 205.013, "z": -272.999},
-            {"x": -791.334, "y": 202.494, "z": -273.082},
-            {"x": -797.803, "y": 205.898, "z": -272.999}
-          ],
-          "radius": 22
-        },
-        {
-          "entries": [6224],
-          "positions": [
-            {"x": -798.383, "y": 192.561, "z": -273.081}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6227, 7603, 7603, 7603, 7603, 6224],
-          "positions": [
-            {"x": -811.979, "y": 179.635, "z": -273.079},
-            {"x": -814.707, "y": 172.722, "z": -272.996},
-            {"x": -810.541, "y": 167.407, "z": -272.674},
-            {"x": -814.842, "y": 167.411, "z": -272.673},
-            {"x": -812.808, "y": 161.384, "z": -271.228},
-            {"x": -817.881, "y": 161.435, "z": -271.241}
-          ],
-          "radius": 21.5
-        },
-        {
-          "entries": [7603, 7603, 6224, 7603, 7603],
-          "positions": [
-            {"x": -811.106, "y": 103.936, "z": -264.648},
-            {"x": -816.426, "y": 101.189, "z": -264.648},
-            {"x": -811.597, "y": 100.217, "z": -264.648},
-            {"x": -806.775, "y": 99.9191, "z": -264.648},
-            {"x": -810.912, "y": 95.8048, "z": -264.648}
-          ],
-          "radius": 15.2
-        },
-        {
-          "entries": [6224, 6233, 6224, 6226],
-          "positions": [
-            {"x": -764.095, "y": 56.176, "z": -257.347},
-            {"x": -766.442, "y": 53.0244, "z": -256.694},
-            {"x": -760.483, "y": 56.4322, "z": -257.402},
-            {"x": -758.346, "y": 52.8884, "z": -256.668}
-          ],
-          "radius": 14.5
         }
       ],
       "skip": [7849],
@@ -1281,91 +573,11 @@
     },
     {
       "name": "thermaplugg_route",
-      "to": {"x": -804.261, "y": 531.519, "z": -297.366},
+      "to": {"x": -672.8, "y": 417.3, "z": -273.06},
       "via": [
-        {"x": -704, "y": 426.6665, "z": -273.06},
-        {"x": -672.8, "y": 417.3, "z": -273.06},
-        {"x": -656, "y": 437.5, "z": -273},
-        {"x": -683.9, "y": 524.3, "z": -273.93},
-        {"x": -690, "y": 526, "z": -276.4}
+        {"x": -704, "y": 426.6665, "z": -273.06}
       ],
       "pull_groups": [
-        {
-          "entries": [6226],
-          "positions": [
-            {"x": -797.69, "y": 538.168, "z": -295.578}
-          ],
-          "radius": 10
-        },
-        {
-          "entries": [6234, 6212],
-          "positions": [
-            {"x": -765.398, "y": 561.056, "z": -290.977},
-            {"x": -768.671, "y": 568.882, "z": -291.06}
-          ],
-          "radius": 14.3
-        },
-        {
-          "entries": [6232, 6212],
-          "positions": [
-            {"x": -755.014, "y": 576.683, "z": -303.783},
-            {"x": -755.573, "y": 580.21, "z": -303.699}
-          ],
-          "radius": 11.8
-        },
-        {
-          "entries": [6212, 6212, 6212],
-          "positions": [
-            {"x": -744.315, "y": 580.863, "z": -291.06},
-            {"x": -742.329, "y": 579.152, "z": -290.977},
-            {"x": -742.175, "y": 581.596, "z": -290.977}
-          ],
-          "radius": 11.6
-        },
-        {
-          "entries": [6212, 6232],
-          "positions": [
-            {"x": -740.86, "y": 558.484, "z": -303.699},
-            {"x": -735.933, "y": 556.045, "z": -303.699}
-          ],
-          "radius": 12.8
-        },
-        {
-          "entries": [6212, 6234, 6234],
-          "positions": [
-            {"x": -746.574, "y": 542.956, "z": -290.977},
-            {"x": -741.779, "y": 541.255, "z": -290.977},
-            {"x": -733.908, "y": 539.547, "z": -291.06}
-          ],
-          "radius": 17.1,
-          "approach": [
-            {"x": -760, "y": 552, "z": -290.69}
-          ]
-        },
-        {
-          "entries": [6212, 6234],
-          "positions": [
-            {"x": -706.772, "y": 549.348, "z": -295.519},
-            {"x": -701.913, "y": 547.059, "z": -294.699}
-          ],
-          "radius": 12.8
-        },
-        {
-          "entries": [6212, 6234],
-          "positions": [
-            {"x": -677.469, "y": 541.743, "z": -285.982},
-            {"x": -672.532, "y": 539.306, "z": -285.699}
-          ],
-          "radius": 12.8
-        },
-        {
-          "entries": [6212, 6234],
-          "positions": [
-            {"x": -643.658, "y": 531.464, "z": -272.977},
-            {"x": -646.241, "y": 524.73, "z": -272.977}
-          ],
-          "radius": 13.7
-        },
         {
           "entries": [7603, 7603, 7603, 6222, 7603],
           "positions": [
@@ -1378,12 +590,79 @@
           "radius": 19.8
         },
         {
+          "entries": [7603, 7603, 7603, 7603, 6222, 6222],
+          "positions": [
+            {"x": -626.295, "y": 448.169, "z": -272.978},
+            {"x": -630.799, "y": 450, "z": -272.979},
+            {"x": -631.247, "y": 444.701, "z": -272.979},
+            {"x": -634.205, "y": 453.489, "z": -273.063},
+            {"x": -633.882, "y": 447.407, "z": -273.063},
+            {"x": -639.105, "y": 450.504, "z": -273.062}
+          ],
+          "radius": 16.7,
+          "approach": [
+            {"x": -656, "y": 437.5, "z": -273}
+          ]
+        },
+        {
+          "entries": [6222],
+          "positions": [
+            {"x": -622.269, "y": 451.15, "z": -273.062}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6222, 6225, 6222],
+          "positions": [
+            {"x": -586.528, "y": 465.276, "z": -273.081},
+            {"x": -586.658, "y": 464.285, "z": -273.081},
+            {"x": -585.701, "y": 464.577, "z": -273.081}
+          ],
+          "radius": 10.7
+        },
+        {
+          "entries": [6230],
+          "positions": [
+            {"x": -587.104, "y": 508.355, "z": -273.063}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [6222, 6225],
+          "positions": [
+            {"x": -603.687, "y": 507.389, "z": -273.063},
+            {"x": -605.78, "y": 507.486, "z": -273.063}
+          ],
+          "radius": 11.1
+        },
+        {
+          "entries": [6212, 6234],
+          "positions": [
+            {"x": -643.658, "y": 531.464, "z": -272.977},
+            {"x": -646.241, "y": 524.73, "z": -272.977}
+          ],
+          "radius": 13.7
+        },
+        {
+          "entries": [6212, 6234, 6234],
+          "positions": [
+            {"x": -746.574, "y": 542.956, "z": -290.977},
+            {"x": -741.779, "y": 541.255, "z": -290.977},
+            {"x": -733.908, "y": 539.547, "z": -291.06}
+          ],
+          "radius": 17.1,
+          "approach": [
+            {"x": -683.9, "y": 524.3, "z": -273.93},
+            {"x": -690, "y": 526, "z": -276.4}
+          ]
+        },
+        {
           "entries": [6234, 6212],
           "positions": [
-            {"x": -751.043, "y": 599.917, "z": -304.005},
-            {"x": -751.021, "y": 604.79, "z": -306.048}
+            {"x": -765.398, "y": 561.056, "z": -290.977},
+            {"x": -768.671, "y": 568.882, "z": -291.06}
           ],
-          "radius": 12.7
+          "radius": 14.3
         },
         {
           "entries": [6212, 6212, 6212],
@@ -1417,45 +696,6 @@
           "radius": 11.6
         },
         {
-          "entries": [6212, 6232, 6212],
-          "positions": [
-            {"x": -739.926, "y": 655.718, "z": -321.699},
-            {"x": -737.309, "y": 659.8, "z": -323.456},
-            {"x": -738.731, "y": 663.921, "z": -325.031}
-          ],
-          "radius": 14.7
-        },
-        {
-          "entries": [6212, 6212, 6212],
-          "positions": [
-            {"x": -726.655, "y": 651.998, "z": -308.977},
-            {"x": -727.748, "y": 648.272, "z": -308.977},
-            {"x": -725.276, "y": 649.705, "z": -309.06}
-          ],
-          "radius": 12.1
-        },
-        {
-          "entries": [6234, 6212, 6212],
-          "positions": [
-            {"x": -745.388, "y": 625.978, "z": -312.699},
-            {"x": -743.108, "y": 622.601, "z": -312.699},
-            {"x": -748.046, "y": 624.546, "z": -312.699}
-          ],
-          "radius": 13
-        },
-        {
-          "entries": [6234, 6212, 6232],
-          "positions": [
-            {"x": -727.201, "y": 693.357, "z": -330.699},
-            {"x": -724.26, "y": 698.946, "z": -330.699},
-            {"x": -721.026, "y": 703.277, "z": -330.699}
-          ],
-          "radius": 16,
-          "approach": [
-            {"x": -732.04, "y": 671.15, "z": -328.66}
-          ]
-        },
-        {
           "entries": [6212, 6212, 6212, 6232],
           "positions": [
             {"x": -731.227, "y": 710.28, "z": -317.977},
@@ -1464,22 +704,6 @@
             {"x": -738.366, "y": 705.214, "z": -317.977}
           ],
           "radius": 15.7
-        },
-        {
-          "entries": [6212, 6212, 6212],
-          "positions": [
-            {"x": -708.767, "y": 693.423, "z": -317.977},
-            {"x": -705.796, "y": 692.904, "z": -317.977},
-            {"x": -703.428, "y": 694.964, "z": -317.977}
-          ],
-          "radius": 12.9
-        },
-        {
-          "entries": [6212],
-          "positions": [
-            {"x": -688.181, "y": 704.648, "z": -330.699}
-          ],
-          "radius": 10
         },
         {
           "entries": [6234, 6234],

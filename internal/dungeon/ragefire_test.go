@@ -603,16 +603,34 @@ var ragefireLavaDeaths = []Point{
 	{-199.8, -53.9, -65.5}, {-206.2, -26.9, -64.9}, {-217.7, -56.7, -65.8}, // 1d: the tank, the healer, a dps
 }
 
-// The plan's avoid box holds every lava death of the two runs, and the floors the route walks next to the basin stay outside it.
+// The plan's avoid boxes hold every lava death of the two runs and the tunnel's shelf, and the floors the route walks next to the basin
+// stay outside them.
 func TestRagefireLavaBoxHoldsTheDeaths(t *testing.T) {
 	p := loadPlan(t, ragefirePlan)
-	if len(p.Avoid) != 1 {
-		t.Fatalf("avoid %+v, want the lava basin", p.Avoid)
+	if len(p.Avoid) != 2 {
+		t.Fatalf("avoid %+v, want the lava basin and the tunnel's shelf", p.Avoid)
+	}
+	shelf := p.Avoid[1]
+	if shelf.Name != "the tunnel's lava shelf under the deck" {
+		t.Errorf("avoid box 2 is %q, want the tunnel's lava shelf under the deck", shelf.Name)
 	}
 	for _, at := range ragefireLavaDeaths {
-		if _, in := p.InAvoid(at); !in {
-			t.Errorf("the lava death at %v is outside the avoid box", at)
+		if b, in := p.InAvoid(at); !in || b.Name != p.Avoid[0].Name {
+			t.Errorf("the lava death at %v is not in the basin box: %q %v", at, b.Name, in)
 		}
+	}
+	// The shelf's north-west corner under the tunnel's lava (surface z -30.1) is the box's ground, and the deck the party holds on is not.
+	for _, at := range []Point{{-101, -25.3, -30.1}, {-103, -27, -30.5}, {-99, -23.5, -29.7}} {
+		if b, in := p.InAvoid(at); !in || b != shelf {
+			t.Errorf("the shelf point %v is not in the tunnel shelf box: %q %v", at, b.Name, in)
+		}
+	}
+	if len(p.Legs) < 2 || len(p.Legs[1].PullGroups) == 0 || len(p.Legs[1].PullGroups[0].Approach) == 0 {
+		t.Fatalf("leg 1 has no pull group 0 approach point")
+	}
+	stand := p.Legs[1].PullGroups[0].Approach[0]
+	if b, in := p.InAvoid(stand); in {
+		t.Errorf("the deck approach point %v lies in the avoid box %q", stand, b.Name)
 	}
 	// The strip and the ramp foot (leg 2's last packs and its end), the ramp stand of leg 3 and the south rim (-219.8 -64.2, where 1e's
 	// tank fought) are walkable.
