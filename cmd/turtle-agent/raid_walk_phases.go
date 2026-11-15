@@ -2257,10 +2257,8 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			continue
 		}
 		if w.opts.prepullAuraTopup {
-			// A death strips every aura, so a top-up read from before it says nothing: the count frees the read cache
-			// and the per-bot mark names the death as the cause of the missing ids.
+			// A death strips every aura: the per-bot mark names the death as the cause of the missing ids.
 			if dead := p.Dead || p.State == "d"; dead && !w.botAt[p.Name].dead {
-				w.prepullTopupDeaths++
 				if w.prepullTopupDied == nil {
 					w.prepullTopupDied = map[string]bool{}
 				}

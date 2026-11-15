@@ -344,11 +344,6 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 	return true, fireErr
 }
 
-// prepullTopupReadGap is how old the last top-up read may be and still answer the next pull step: two pulls less than a
-// minute apart have not eaten a 15-minute food buff and are not worth a second round of unit reads, unless a hire died
-// since (a death strips every aura, so the read from before it says nothing).
-var prepullTopupReadGap = 60 * time.Second
-
 // prepullTopupStep is --prepull-aura-topup's gate: the pull row a status stands before. It is the row after the
 // status's own step (the rest, gather, walk or approach before a pull) or, when the run passed that row too fast to
 // stand there, the status's own row while that row is a pull row and still before its pull. prePullOK keeps the top-up
@@ -397,8 +392,9 @@ func (w *walk) prepullRowAt(step int) planexport.StepRow {
 //
 // One run.log line names the pull step and every upgraded bot with the number of ids put back and the cause the walk
 // can tell: "death" when the frames saw that hire die since its last read (a death strips every aura), "expired"
-// otherwise (food lasts ~15 min, the elixirs and world buffs longer). A read is made at most once per pull step, and a
-// read under prepullTopupReadGap old and clear, with no death since, answers the next pull step too.
+// otherwise (food lasts ~15 min, the elixirs and world buffs longer). A read is made at most once per pull step and is
+// never reused across pull steps: an aura that was present at one pull can expire seconds later, so only a read at the
+// pull itself says what the hires carry (prepullTopupRead holds the steps already read).
 func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 	if w.prepullTopupRead[pullStep] {
 		return
@@ -408,12 +404,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 	}
 	w.prepullTopupRead[pullStep] = true
 	where := fmt.Sprintf("topup before step %d", pullStep)
-	now := w.env.now()
-	if w.prepullTopupReadClear && !w.prepullTopupReadAt.IsZero() &&
-		now.Sub(w.prepullTopupReadAt) < prepullTopupReadGap && w.prepullTopupDeaths == w.prepullTopupReadDeaths {
-		// The last read was clear, recent and no hire died since: the same raid still carries its lists.
-		return
-	}
 	raid, err := w.prepullRaid(ctx)
 	if err != nil {
 		w.prepullAuraTopupStop(where, err)
@@ -454,10 +444,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		cause   string
 	}
 	var targets []topupTarget
-	// covered says this read left every living hire of the walk with its list (and every hire was in the view): only
-	// then may a pull step under prepullTopupReadGap later reuse the read. A dead hire, an absent one, an unknown role
-	// or a unit read that does not answer makes the read no answer for the next pull, so the next pull reads again.
-	covered := true
 	seenNames := make(map[string]bool, len(roster))
 	for _, m := range raid {
 		if m.GUID == 0 || m.GUID == st.GUID || m.Name == "" {
@@ -470,10 +456,7 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 			seenNames[name] = true
 		}
 		if m.Dead || m.State == "d" {
-			// Never for a dead bot: it cannot carry an aura, and its revival is its own step. It is not covered either:
-			// a pull after its revival must read again (the frames' death count already frees the cache, and this keeps
-			// a body the frames never saw die from answering for the revived bot).
-			covered = false
+			// Never for a dead bot: it cannot carry an aura, and its revival is its own step.
 			continue
 		}
 		if !ok {
@@ -483,7 +466,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		}
 		u, seen := port.ViewUnit(ctx, unit)
 		if seen && (u.Dead || u.Ghost) {
-			covered = false
 			continue
 		}
 		watch = append(watch, unit)
@@ -491,7 +473,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		switch {
 		case seen && u.Class == 0:
 			w.prepullAuraTopupLine("prepull-aura: %s: %s: its unit row carries no class, so its aura role is unknown: skipped", where, name)
-			covered = false
 			continue
 		case seen:
 			role, why = w.prepullRole(name, u.Class)
@@ -503,25 +484,21 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		}
 		if role == "" {
 			w.prepullAuraTopupLine("prepull-aura: %s: %s: %s: skipped", where, name, why)
-			covered = false
 			continue
 		}
 		want := w.prepullAuras.For(role)
 		if len(want) == 0 {
 			w.prepullAuraTopupLine("prepull-aura: %s: %s has no list (role %q): skipped", where, name, role)
-			covered = false
 			continue
 		}
 		if !seen {
 			// The roster named the role, but only the unit row carries the auras: no read, no top-up.
 			w.prepullAuraTopupLine("prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
-			covered = false
 			continue
 		}
 		missing, ok := dungeon.AurasMissing(ctx, port, unit, want)
 		if !ok {
 			w.prepullAuraTopupLine("prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
-			covered = false
 			continue
 		}
 		if len(missing) == 0 {
@@ -539,11 +516,9 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 	for _, name := range roster {
 		if !seenNames[name] {
 			w.prepullAuraTopupLine("prepull-aura: %s: %s is not in the commander's view: skipped", where, name)
-			covered = false
 		}
 	}
 	if len(targets) == 0 {
-		w.prepullTopupRemember(covered)
 		return
 	}
 	// The watch and the send kernel's own combat recheck: the commander and every living member, list or no list. The
@@ -555,7 +530,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		w.prepullAuraCombatWaitEnd = time.Time{}
 	}()
 	if err := w.prepullAuraCombatClear(ctx, where); err != nil {
-		w.prepullTopupRemember(false)
 		w.prepullAuraTopupStop(where, err)
 		return
 	}
@@ -565,7 +539,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 	for i := range targets {
 		tg := &targets[i]
 		if oc, err := dungeon.ApplyAuras(ctx, port, tg.unit, tg.missing, cfg, w.env.now); err != nil {
-			covered = false
 			w.prepullAuraTopupStop(where, err)
 			break
 		} else if oc != dungeon.AuraTaken {
@@ -577,8 +550,8 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 	if len(parts) > 0 {
 		w.prepullAuraTopupLine("prepull-aura: %s: %s", where, strings.Join(parts, ", "))
 	}
-	// One read-back of the ids just sent: an aura the store does not show is on disk as missing, and the next pull
-	// frees the read again instead of trusting a read that left a bot short.
+	// One read-back of the ids just sent: an aura the store does not show is on disk as missing, so the record says so
+	// instead of trusting a send that left a bot short.
 	for deadline := w.env.now().Add(prepullAuraVerifyWait); ; {
 		over := 0
 		for _, i := range sent {
@@ -594,13 +567,9 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 			}
 		}
 		if over == 0 || !w.env.now().Before(deadline) {
-			if over > 0 {
-				covered = false
-			}
 			break
 		}
 		if err := w.env.sleep(ctx, prepullAuraVerifyPoll); err != nil {
-			w.prepullTopupRemember(false)
 			w.prepullAuraTopupStop(where, err)
 			return
 		}
@@ -608,18 +577,9 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 	for _, i := range sent {
 		delete(w.prepullTopupDied, strings.ToLower(targets[i].rec.Bot))
 	}
-	w.prepullTopupRemember(covered)
 	if err := w.prepullAuraWrite(); err != nil {
 		w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, err)
 	}
-}
-
-// prepullTopupRemember records the top-up read: when, the death count it saw and whether it left every living hire
-// covered (a read with a bot skipped for an unreadable row, an unknown role or an aura that did not land is no answer
-// for the next pull step).
-func (w *walk) prepullTopupRemember(clear bool) {
-	w.prepullTopupReadAt, w.prepullTopupReadDeaths = w.env.now(), w.prepullTopupDeaths
-	w.prepullTopupReadClear = clear
 }
 
 // prepullAuraTopupStop logs a top-up that did not go out. Unlike the boss-row fire it never stops the walk: the pull
@@ -1479,8 +1439,6 @@ func (w *walk) prepullAuraClear() {
 	}
 	w.prepullAuraSent = nil
 	w.prepullTopupRead = nil
-	w.prepullTopupReadAt = time.Time{}
-	w.prepullTopupReadClear = false
 }
 
 // prepullAuraRecordFor is the bot's accumulating record, created on its first fire.

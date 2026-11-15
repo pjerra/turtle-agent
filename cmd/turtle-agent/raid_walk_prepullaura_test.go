@@ -2719,7 +2719,8 @@ func prepullNotes(w *walk, substr string) []string {
 	return out
 }
 
-// prepullFrame feeds one bot_view frame row to the walk's tracker: the death counter the top-up's read cache reads.
+// prepullFrame feeds one bot_view frame row to the walk's tracker: the frames' death marks are what name a hire's
+// missing ids as a death's doing.
 func prepullFrame(t *testing.T, w *walk, rec tbm.PartyRec) {
 	t.Helper()
 	if w.botAt == nil {
@@ -2733,8 +2734,8 @@ func prepullFrame(t *testing.T, w *walk, rec tbm.PartyRec) {
 }
 
 // (a) A bot dies at a pull and is revived: the next pull's top-up puts its whole list back on it, and only its list,
-// while every other bot still carries its own. The frames' death frees the read the previous pull made 30 s earlier
-// (under the 60 s reuse window), so the death, not the clock, is what makes the read happen.
+// while every other bot still carries its own. Every pull step reads the raid, so the death is not what makes the read
+// happen; it is what names the cause.
 func TestPrepullAuraTopupRebuffsARevivedBot(t *testing.T) {
 	a := newPrepullAgent(t)
 	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
@@ -2776,8 +2777,8 @@ func TestPrepullAuraTopupRebuffsARevivedBot(t *testing.T) {
 	}
 }
 
-// (a2) One aura on one living bot expires: only that id is sent again before the next pull. The clock is past the read
-// reuse window and nobody died, so the read happens because the pull is a new one, and the missing id is the only one.
+// (a2) One aura on one living bot expires: only that id is sent again before the next pull, and nobody died, so the
+// cause is the expiry. Every pull step reads the raid, so the read happens because the pull is a new one.
 func TestPrepullAuraTopupResendsOnlyAnExpiredId(t *testing.T) {
 	a := newPrepullAgent(t)
 	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
@@ -2806,6 +2807,39 @@ func TestPrepullAuraTopupResendsOnlyAnExpiredId(t *testing.T) {
 	}
 }
 
+// (a3) An aura expires between two pulls less than a minute apart: the second pull reads again and resends it. A read
+// taken at one pull says nothing about the next one: an aura can expire a few seconds later, so the top-up never
+// reuses a read across pull steps. On r1 this failed (the read of pull step 3 answered pull step 4 as well):
+//
+//	the top-up sent [] (want only the expired 22888 on Flitz)
+func TestPrepullAuraTopupResendsAnExpiryUnderAMinute(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	flitz := a.bots[3]
+	if flitz.Name != "Flitz" {
+		t.Fatalf("the fourth fake bot is %s, not Flitz", flitz.Name)
+	}
+	// The world buff runs out 5 s after the read, well inside a minute.
+	delete(a.auras[flitz.GUID], 22888)
+	a.advance(5 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the pull after the expiry: %v", err)
+	}
+	tail := a.sent[first:]
+	if strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the top-up sent %v (want only the expired 22888 on Flitz)", tail)
+	}
+	want := "prepull-aura: topup before step 4: Flitz +1 (expired)"
+	if lines := prepullNotes(w, "topup before step 4:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+}
+
 // (b) Nothing is missing: the pull is read and nothing goes out, and no top-up line is written.
 func TestPrepullAuraTopupNothingMissingSendsNothing(t *testing.T) {
 	a := newPrepullAgent(t)
@@ -2818,7 +2852,6 @@ func TestPrepullAuraTopupNothingMissingSendsNothing(t *testing.T) {
 	if first == 0 {
 		t.Fatal("the first top-up sent nothing")
 	}
-	a.advance(61 * time.Second) // past the reuse window: this pull's read really happens
 	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
 		t.Fatalf("the covered pull: %v", err)
 	}
