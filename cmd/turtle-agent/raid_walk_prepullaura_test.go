@@ -3116,3 +3116,149 @@ func TestPrepullAuraTopupOffByDefault(t *testing.T) {
 		t.Fatalf("the flag was off and the walk wrote %q", lines)
 	}
 }
+
+// (h) Two adjacent pull rows in boss mode: a pre-pull status on the FIRST pull row must read that row, not the next
+// one. On r4 the gate picked st.Step+1 before st.Step, so the rest on pull row 2 recorded row 3 as done; Rank died in
+// pull 2's fight, was revived, and pull 3's rest found its step settled and sent nothing:
+//
+//	the top-up sent [] (want only Rank's list: 17538, 22888)
+func TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentPulls(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	w.rows = prepullPullRows(2, 3)
+	ctx := context.Background()
+	// Pull 2's rest (the move before it): every hire gets its list.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("pull 2's rest: fired %v err %v", fired, err)
+	}
+	first := len(a.sent)
+	if first != 12 {
+		t.Fatalf("%d line(s) before pull 2, want 12: %v", first, a.sent)
+	}
+	// The rest ON pull row 2, its pull not started and row 3 a pull too: nothing is missing, so nothing goes out —
+	// and pull 3 is NOT recorded as read.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(2), false); err != nil || fired {
+		t.Fatalf("the rest on pull row 2: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != first {
+		t.Fatalf("the rest on pull row 2 sent %v", a.sent[first:])
+	}
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 0 {
+		t.Fatalf("the rest on pull row 2 read pull 3 ahead of its fight: %q", lines)
+	}
+	// Pull 2's fight: Rank dies, every aura stripped, and the party is in combat.
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	mt := a.bots[0]
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", Dead: true, State: "d"})
+	prepullFrame(t, w, tbm.PartyRec{GUID: mt.GUID, Name: "Mtbot", State: "c"})
+	// No top-up during the fight: neither a fighting note nor a rest-phase status with a member in a fresh in-combat
+	// frame sends anything.
+	for _, st := range []tbm.RunStatus{
+		{State: tbm.RunRunning, Step: 2, Kind: planexport.KindMove, Phase: "fight", Note: "fighting 11338"},
+		prepullRest(2),
+	} {
+		if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+			t.Fatalf("a status in the fight (phase %q): fired %v err %v", st.Phase, fired, err)
+		}
+	}
+	if len(a.sent) != first {
+		t.Fatalf("a status in the fight sent %v", a.sent[first:])
+	}
+	// Rank is revived before pull 3: its own list goes back, and only its own.
+	a.advance(30 * time.Second)
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", State: "n"})
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+		t.Fatalf("pull 3's rest: fired %v err %v", fired, err)
+	}
+	tail := a.sent[first:]
+	if strings.Join(tail, " | ") != "Rank 17538 | Rank 22888" {
+		t.Fatalf("the top-up sent %v (want only Rank's list after the death in pull 2: 17538, 22888)", tail)
+	}
+	want := "prepull-aura: topup before step 3: Rank +2 (death)"
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+	// The run was never paused: the top-up is the one fire that runs with the raid.
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("the top-up asked the run for %v", verbs)
+	}
+}
+
+// (i) The same two adjacent rows as boss rows under --prepull-aura-when start: the rest on boss row 2 must read boss
+// row 2, not record boss row 3. On r4 the false step made the top-up mark boss row 3 read, so a bot that died in the
+// first boss fight got no list before the second boss pull:
+//
+//	the top-up sent [] (want only Rank's world buff: 22888)
+func TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentBossRowsInStartMode(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	w.rows = prepullRows(2, 3)
+	ctx := context.Background()
+	walk := func(step int) tbm.RunStatus {
+		return tbm.RunStatus{State: tbm.RunRunning, Step: step, Kind: planexport.KindMove, Phase: "walk", Note: "walking"}
+	}
+	// Boss row 2's approach: every hire gets the world buff.
+	if _, err := w.prepullAuraSendPending(ctx, walk(1), false); err != nil {
+		t.Fatalf("boss row 2's approach: %v", err)
+	}
+	first := len(a.sent)
+	if first != 6 {
+		t.Fatalf("%d line(s) before boss row 2, want 6: %v", first, a.sent)
+	}
+	// The walk status on boss row 2 itself, its pull not started and row 3 a boss row too: nothing is missing, nothing
+	// goes out, and boss row 3 is NOT recorded as read.
+	if _, err := w.prepullAuraSendPending(ctx, walk(2), false); err != nil {
+		t.Fatalf("the walk on boss row 2: %v", err)
+	}
+	if len(a.sent) != first {
+		t.Fatalf("the walk on boss row 2 sent %v", a.sent[first:])
+	}
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 0 {
+		t.Fatalf("the walk on boss row 2 read boss row 3 ahead of its fight: %q", lines)
+	}
+	// Boss row 2's fight: Rank dies, its aura stripped, the party in combat.
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	mt := a.bots[0]
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", Dead: true, State: "d"})
+	prepullFrame(t, w, tbm.PartyRec{GUID: mt.GUID, Name: "Mtbot", State: "c"})
+	for _, st := range []tbm.RunStatus{
+		{State: tbm.RunRunning, Step: 2, Kind: planexport.KindMove, Phase: "fight", Note: "fighting 14834"},
+		walk(2),
+	} {
+		if _, err := w.prepullAuraSendPending(ctx, st, false); err != nil {
+			t.Fatalf("a status in the fight (phase %q): %v", st.Phase, err)
+		}
+	}
+	if len(a.sent) != first {
+		t.Fatalf("a status in the fight sent %v", a.sent[first:])
+	}
+	// Revived before boss row 3: the world buff goes back, before the second boss pull.
+	a.advance(30 * time.Second)
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", State: "n"})
+	if _, err := w.prepullAuraSendPending(ctx, walk(3), false); err != nil {
+		t.Fatalf("boss row 3's walk: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Rank 22888" {
+		t.Fatalf("the top-up sent %v (want only Rank's world buff after the death in boss row 2: 22888)", tail)
+	}
+	want := "prepull-aura: topup before step 3: Rank +1 (death)"
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("the top-up asked the run for %v", verbs)
+	}
+}

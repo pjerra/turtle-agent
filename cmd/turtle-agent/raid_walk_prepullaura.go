@@ -345,14 +345,21 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 	return true, fireErr
 }
 
-// prepullTopupStep is --prepull-aura-topup's gate: the pull row a status stands before. It is the row after the
-// status's own step (the rest, gather, walk or approach before a pull) or, when the run passed that row too fast to
-// stand there, the status's own row while that row is a pull row and still before its pull. A boss row is a pull row
-// here too (the boss pull): its statuses before the pull get the top-up, which is the only thing that reads the hires
-// there under --prepull-aura-when start. In boss mode the boss row's own fire owns it (prepullTopupBossFires), so the
-// top-up stays out of that row. prePullOK keeps the top-up out of the pull and the fight (phase pull/fight, a pulling
-// or fighting note, a later pull line of the page, a party bot in combat in a fresh frame); 0 means no pull row to top
-// up before.
+// prepullTopupStep is --prepull-aura-topup's gate: the pull row a status stands before. The status's OWN row comes
+// first: a pull row whose pull has not started is the pull this status stands before, and the row after it is a later
+// pull. Only a row that is not itself a pull row lets the gate look one ahead, at the pull the rest, gather, walk or
+// approach leads to — and a status on that pull row itself (the run passed the rest too fast) then still names it. A
+// boss row is a pull row here too (the boss pull): its statuses before the pull get the top-up, which is the only thing
+// that reads the hires there under --prepull-aura-when start. In boss mode the boss row's own fire owns it
+// (prepullTopupBossFires), so the top-up stays out of that row. prePullOK keeps the top-up out of the pull and the
+// fight (phase pull/fight, a pulling or fighting note, a later pull line of the page, a party bot in combat in a fresh
+// frame); 0 means no pull row to top up before.
+//
+// Reading the LATER pull from a status on the earlier one is what this row order fixes: adjacent pull rows (a trash
+// pull and the next pull, or a boss row and the next pull) had the gate pick st.Step+1 before st.Step, so a pre-pull
+// status on the current row recorded the NEXT pull as done — and a bot that died in the current fight was never
+// re-buffed before that next pull (test: TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentPulls). Completion is per
+// (step, hire) (prepullTopupDone), so the next pull is read again after the current fight.
 func (w *walk) prepullTopupStep(st tbm.RunStatus, later bool) int {
 	if !w.opts.prepullAuraTopup || len(w.prepullAuras) == 0 {
 		return 0
@@ -364,10 +371,10 @@ func (w *walk) prepullTopupStep(st tbm.RunStatus, later bool) int {
 		return 0
 	}
 	step := 0
-	if w.prepullPullRow(w.prepullRowAt(st.Step + 1)) {
-		step = st.Step + 1
-	} else if w.prepullPullRow(w.prepullRowAt(st.Step)) {
+	if w.prepullPullRow(w.prepullRowAt(st.Step)) {
 		step = st.Step
+	} else if w.prepullPullRow(w.prepullRowAt(st.Step + 1)) {
+		step = st.Step + 1
 	}
 	if step == 0 || w.prepullTopupBossFires(st, step) {
 		return 0
