@@ -68,7 +68,11 @@
             "period_s": 133.4,
             "period_estimate": true,
             "source": "guid 1176440"
-          }
+          },
+          "approach": [
+            {"x": -175, "y": -275, "z": -4.03}
+          ],
+          "stand_pull": true
         },
         {
           "entries": [13022, 13022, 13022, 13022, 13022, 13022, 13022],
