@@ -74,7 +74,7 @@ var (
 const walkPIDFile = "walk.pid"
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--no-place-revive] [--gm-instance-data LEG:"A B[;A B]"] [--prepull-aura role=ROLE:ID,ID|PRESET|FILE.json] [--prepull-aura-tolerance N] [--prepull-aura-when start|boss] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--no-place-revive] [--gm-instance-data LEG:"A B[;A B]"] [--prepull-aura role=ROLE:ID,ID|PRESET|FILE.json] [--prepull-aura-tolerance N] [--prepull-aura-when start|boss] [--prepull-aura-topup] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--practice ENTRY] [--practice-cycles N] [--practice-max 20m] [--practice-rest 30s] [--practice-boss-floor N] [--practice-sustain=on|off] [--practice-window 120s]
@@ -115,6 +115,10 @@ type raidWalkOptions struct {
 	// prepullAuraWhen is --prepull-aura-when: "boss" (the default) fires the lists before each boss row; "start"
 	// fires them once, after the placement and before the run's first move, and only reads the coverage at each pull.
 	prepullAuraWhen string
+	// prepullAuraTopup is --prepull-aura-topup: before every pull row (trash or boss), out of combat, the walk reads
+	// each living hire's auras and puts back only the ids a death or an expiry took from its role's list. It never
+	// pauses the run and a top-up that cannot go out only logs: unlike the boss-row fire it never fails the walk.
+	prepullAuraTopup bool
 	// --practice: a boss-mechanic practice run on a test server (TEST SERVERS ONLY). practice is the boss entry as
 	// given; practiceEntry is its number, 0 when no practice runs.
 	practice          string
@@ -321,6 +325,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.Var(&o.prepullAura, "prepull-aura", "TEST SERVERS ONLY, off by default: \"role=<tank|melee|ranged|caster|healer|all>:<id,id,...|preset>\" or a \"tb-prepull-auras\" file (dungeons/prepull/zg-preraid.json: one list per role under roles), repeatable (one list per role). Before EACH boss row (at the step before it whatever that step's phase, or on the boss row itself when the run passed that step too fast to pause, both only before the pull) the commander puts the role's auras on every living bot of its raid that lacks them (read from the commander's view: the walk's player is not in the bots' raid), and a fire whose lists do not reach every bot the walk hired fails (exit 18) instead of being recorded, with a GM select-then-\".aura\" under a confirmed run pause (resumed after; a pause that does not hold sends no aura, and before each `.aura` the commander and every living party member are re-read for combat: an in-combat unit or an unreadable unit stops the batch; on the boss row itself the boss's arena is read fresh, and a failed read, an engaged boss or a unit row without its combat state sends no aura); the tank/ot batches are \"tank\" and every other bot's role comes per bot from the module's `.bot roster` TBM:BOTSTATE `specs=` kit (a bot with no row or a kit naming no single role fails the fire). \"world\" is the world-raid preset (the classic world buffs a Turtle raid keeps, Warchief's Blessing left out); every other preset is dungeon_run's buffs list. prepull-auras.json records the boss rows that verified, the failed attempts with their reason and each bot's ids sent and seen; by default every requested aura must verify, and a missing one fails the walk (exit 18); --prepull-aura-when start fires the lists once before run start instead")
 	fs.IntVar(&o.prepullAuraTolerance, "prepull-aura-tolerance", 0, "TEST SERVERS ONLY, needs --prepull-aura: the most auras one bot may miss after a fire. 0 (the default) requires every requested aura to verify; any missing list is still written to prepull-auras.json")
 	fs.StringVar(&o.prepullAuraWhen, "prepull-aura-when", prepullAuraWhenBoss, "TEST SERVERS ONLY, needs --prepull-aura: boss (the default) fires the lists before EACH boss row; start fires them ONCE, after the hire, the gear and the placement and before the run's first move, only when `run status` positively confirms no run (state none or done; a refused answer, a missing status line, a paused run and any running state send nothing), and as the boss row reaches the pull or fight-start phase only READS and logs which auras are still up on each bot. The start fire goes out as start_row in prepull-auras.json (same coverage rules, same tolerance)")
+	fs.BoolVar(&o.prepullAuraTopup, "prepull-aura-topup", false, "TEST SERVERS ONLY, needs --prepull-aura: before EVERY pull row (trash or boss), out of combat, read each living hire's auras and put back only the ids of its role's list that are gone (a death strips the auras, food, elixirs and the world buffs expire), then read them back. ONE run.log line per top-up (\"prepull-aura: topup before step N: <bot> +<k> (<death|expired|never had>), ...\"). Completion is tracked per pull step and hire: a hire is read and topped up once per step (a dead, unseen or unreadable one is retried on the later pre-pull statuses of the same step), nothing is carried to the next step, and a hire still missing an id after 3 tries is given up for that step with a line naming the ids. The run is paused only while there is something to send, at most 15 s (resumed right after, or at the cap), and a top-up never fails the walk: combat during the top-up stops it quietly and the pull goes on")
 	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: ~/.local/share/turtle-agent/world/map<N>, else the checkout's <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -569,6 +574,10 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	if o.prepullAuraWhen != prepullAuraWhenBoss && len(o.prepullAura) == 0 {
 		fmt.Fprintf(stderr, "raid-walk: --prepull-aura-when needs --prepull-aura\n")
+		return o, exitUsage
+	}
+	if o.prepullAuraTopup && len(o.prepullAura) == 0 {
+		fmt.Fprintf(stderr, "raid-walk: --prepull-aura-topup needs --prepull-aura\n")
 		return o, exitUsage
 	}
 	return o, exitOK
@@ -1238,6 +1247,19 @@ type walk struct {
 	// hires never pauses the run for more than two of them, however many rows are missing.
 	prepullAuraUnitWaitEnd   time.Time
 	prepullAuraCombatWaitEnd time.Time
+	// --prepull-aura-topup: prepullTopupDone holds, per pull step, each hire's place in that step's top-up — read once
+	// its auras were read and the ids it lacked were sent and read back, so a hire left out by a failed, dead or
+	// unseen read is retried at the next pre-pull status of the same step and a later status reads nothing once every
+	// hire is done. prepullTopupDied marks the hires the frames saw die, which names the death as the cause of their
+	// missing ids (a death strips every aura). prepullTopupSeen tracks per hire (lowercased name) the spell ids ever
+	// seen on that hire in this run, distinguishing "(expired)" from "(never had)". prepullTopupUnheld records pull
+	// steps that already logged an unheld top-up warning so it is emitted once per step. prepullTopupPauseDeadline
+	// caps a top-up's run pause at 15 s.
+	prepullTopupDone          map[int]map[string]*prepullTopupHire
+	prepullTopupDied          map[string]bool
+	prepullTopupSeen          map[string]map[uint32]bool
+	prepullTopupUnheld        map[int]bool
+	prepullTopupPauseDeadline time.Time
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
@@ -2033,6 +2055,9 @@ func (w *walk) printPlan(out io.Writer) {
 			when = "once, before the run starts; then a read at each boss pull"
 		}
 		fmt.Fprintf(out, "  6b prepull-aura when: %s\n", when)
+		if w.opts.prepullAuraTopup {
+			fmt.Fprintf(out, "  6b prepull-aura topup: before every pull row, out of combat, only the ids a death or an expiry took (pauses the run only while sending, at most 15 s; never fails the walk)\n")
+		}
 	}
 	fmt.Fprintf(out, "  7 commander: bind <hire> raid\n")
 	fmt.Fprintf(out, "  7 commander: view on\n")
