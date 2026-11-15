@@ -685,6 +685,8 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // 694, one fewer, because the lip replaces a path row the cutter used to add). Walk 71 fast (t1106k): 416, leg 8's
 // entry drops its second via and `to` is the placement row the placed walk already starts on. The Arlokk gong fix
 // (2026-11-14): 414, the step's stand moves onto the gong's own floor and the boss approach drops its two ramp vias.
+// Walk 104's T25 fix (2026-11-15): 416, the Arlokk ledge's west row gains a top waypoint and the ring row a second stair
+// point (the three stands moved out of their own packs' wake).
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -695,8 +697,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 414 {
-		t.Fatalf("the fixture has %d steps, want 414", len(rows.Steps))
+	if len(rows.Steps) != 416 {
+		t.Fatalf("the fixture has %d steps, want 416", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {

@@ -46,7 +46,7 @@ func TestZulGurubArlokkTerraceIsSplitPerFormation(t *testing.T) {
 		21: {31, 6}, // top east: 4 Panthers + 2 Shadow Hunters (51369), stand pull, max_bodies 6
 		22: {37, 8}, // top south: 4 Panthers (49331), unsized (the lint's raid default 8)
 		23: {31, 8}, // top north: 4 Panthers (51588), unsized
-		24: {32, 6}, // middle landing: 4 Panthers + 2 Blood Drinkers (49343), stand pull, max_bodies 6
+		24: {31, 6}, // middle landing: 4 Panthers + 2 Blood Drinkers (49343), stand pull, max_bodies 6; 32 -> 31 in walk 104's T25 fix (the row's stand moved from the landing to the top, so the walk no longer passes the z 71 terrace's 51353/51363)
 		25: {27, 5}, // middle west: 5 (49329), max_bodies 5
 		26: {27, 6}, // lower ledge: 6 (51365), max_bodies 6
 	}
