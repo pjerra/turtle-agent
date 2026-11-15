@@ -1,9 +1,11 @@
 // The route order of maraudon_purple (Sagiroth/TortoiseBots#1542, 2026-11-14): each pack sits on the leg whose walk
-// passes it, in the order along that walk, and the packs no leg passes are gone. This test pins the order itself, not
-// just its size: the six bosses and their order, every retained pack (its entries and first position) on its leg in
-// plan order, the exact set of the 40 dropped packs, the five moved leg anchors, and the walk the exported rows take
-// on the map 349 navmesh (one complete path per consecutive party row). The measurements and the per-pack tables are
-// in the route-order audit (~/TortoiseBots-audit/tests/route-audit-1112/order/maraudon_purple-FIX.md, 2026-11-14).
+// passes it, in the order along that walk, and the packs no leg passes within aggro reach are gone. This test pins the
+// order itself, not just its size: the six bosses and their order, every retained pack (its entries and first
+// position) on its leg in plan order, the exact set of the 35 dropped packs, the five moved leg anchors, and the walk
+// the exported rows take on the map 349 navmesh (one complete path per consecutive party row). The ledge under the
+// ring is walked because the deck above the -62 pack at 771 -353 wakes it; its four neighbours the detour passes come
+// with it. The measurements and the per-pack tables are in the route-order audit
+// (~/TortoiseBots-audit/tests/route-audit-1112/order/maraudon_purple-FIX.md, 2026-11-15).
 package main
 
 import (
@@ -21,11 +23,11 @@ const (
 	// maraudonPlan is the plan under test.
 	maraudonPlan = "../../dungeons/maraudon_purple.json"
 
-	// maraudonRouteYd caps the routed walk: 8,624.2 yd measured here, the sum of a complete navmesh path between each
-	// consecutive party row of the export (the route-order audit measured 8,711 yd on its floor-aware export of the
-	// same plan, against a 7,168 yd straight route). Room for a cut point that moves, not for a detour: the order
-	// before this one exports 35,441.3 yd here (36,333 on its deployed rows).
-	maraudonRouteYd = 8900.0
+	// maraudonRouteYd caps the routed walk: 9,354.8 yd measured here, the sum of a complete navmesh path between each
+	// consecutive party row of the export (the route-order audit measured 9,371.4 yd on its floor-aware export of the
+	// same plan, against a 7,168 yd straight route). Room for a cut point that moves, not for a detour: origin/dev's
+	// plan exports 35,441.3 yd here (36,333 on its deployed rows).
+	maraudonRouteYd = 9600.0
 )
 
 // maraudonBosses are the bosses of the six legs, in leg order: lord_vyletongue, celebras_the_cursed, landslide,
@@ -73,6 +75,11 @@ var maraudonLegs = [][]string{
 		"12216,12217,12216,11791,12216,11790@876.26 -337.36 -50.21",
 		"12217,12216,11790,12217,11791,12217@830.12 -354.75 -51.97",
 		"12217,12216,12216,11791,12216,11790@797.70 -341.59 -51.52",
+		"13141@855.32 -382.35 -64.00",
+		"12216,11790,12217,12216,11790@791.65 -424.88 -53.70",
+		"13141@816.50 -376.74 -59.10",
+		"13141@796.36 -373.90 -59.07",
+		"13142@771.38 -352.87 -61.57",
 		"11791,12217,12216,12217,12216,11790@735.15 -342.54 -50.71",
 		"13142@697.09 -372.95 -51.94",
 		"11790,12216,12217,12216,11791,11792@674.10 -344.02 -51.55",
@@ -172,15 +179,10 @@ var maraudonLegs = [][]string{
 	},
 }
 
-// maraudonDropped are the 40 packs the re-order drops (85 units): no part of the walk comes within the pack's aggro
-// reach, so the trash-check of the new rows never wakes one. They are origin/dev's 141 packs minus the 101 retained;
-// none may come back without a leg that walks to it. The number is the pack's origin/dev leg and pull group.
+// maraudonDropped are the 35 packs the re-order drops (74 units): the trash-check of the new rows wakes none of them.
+// They are origin/dev's 141 packs minus the 106 retained; none may come back without a leg that walks to it. The
+// number is the pack's origin/dev leg and pull group.
 var maraudonDropped = []string{
-	"12216,11790,12217,12216,11790@791.65 -424.88 -53.70",      // dev leg 0 group 8
-	"13141@816.50 -376.74 -59.10",                              // dev leg 0 group 9
-	"13141@796.36 -373.90 -59.07",                              // dev leg 0 group 10
-	"13142@771.38 -352.87 -61.57",                              // dev leg 0 group 11
-	"13141@855.32 -382.35 -64.00",                              // dev leg 0 group 14
 	"12220,12220,12220@889.73 -282.18 -45.84",                  // dev leg 0 group 18
 	"12220,12220,12220@859.51 -250.14 -52.67",                  // dev leg 0 group 19
 	"12219,12219@852.39 -234.65 -54.56",                        // dev leg 0 group 20
@@ -275,8 +277,8 @@ func TestMaraudonPurpleRouteOrder(t *testing.T) {
 			kept[id] = true
 		}
 	}
-	if len(maraudonDropped) != 40 {
-		t.Fatalf("the dropped pin is %d packs, want 40", len(maraudonDropped))
+	if len(maraudonDropped) != 35 {
+		t.Fatalf("the dropped pin is %d packs, want 35", len(maraudonDropped))
 	}
 	pinned := map[string]bool{}
 	for _, id := range maraudonDropped {
@@ -315,10 +317,10 @@ func TestMaraudonPurpleRouteOrder(t *testing.T) {
 	for i := 1; i < len(stops); i++ {
 		total += maraudonPath(t, pl, p.Map, stops[i-1], stops[i], names[i])
 	}
-	t.Logf("maraudon_purple walk %.1f yd on the navmesh over %d hops (%d packs; the route-order audit measured 8,711 yd; origin/dev exports 35,441.3 here)",
+	t.Logf("maraudon_purple walk %.1f yd on the navmesh over %d hops (%d packs; the route-order audit measured 9,371.4 yd; origin/dev exports 35,441.3 here)",
 		total, len(stops), len(kept))
 	if total > maraudonRouteYd {
-		t.Errorf("the walk is %.1f yd (cap %.0f, the route order of 2026-11-14: 8,624.2 here, 8,711 on the audit's export; origin/dev exports 35,441.3 here, 36,333 on its deployed rows): a leg walks away from the packs on its way",
+		t.Errorf("the walk is %.1f yd (cap %.0f, the route order of 2026-11-14: 9,354.8 here, 9,371.4 on the audit's export; origin/dev exports 35,441.3 here, 36,333 on its deployed rows): a leg walks away from the packs on its way",
 			total, maraudonRouteYd)
 	}
 }

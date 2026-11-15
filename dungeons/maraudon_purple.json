@@ -33,7 +33,7 @@
     "Route risks no plan field fixes: 56 hostile Vile Larvae (12218, non-elite 45-47) are not in any pull (the generator left them to the orange wing) and the leg-0 approach path passes within 0.7-6 yd of seven 7-larva linked groups; friendly NPCs stand on the route: Spirit of Maraudos 12242 at 2.3 yd (leg 0), Elder Splitrock 15556 at 3.3 yd (leg 4), Celebras the Redeemed 13716 at 0.0 yd on the Celebras boss point. Princess Theradras summons 12238 on aggro (script); no door, lever or key is in the wing. The Scepter of Celebras event and the Vylestem vines are optional and not in the plan.",
     "Still open: the rotgrip boss point needs the mapping walk (needs_walk), and the run-leader hop notices remain.",
     "Fix round 2026-10-24 (r28b maraudon_purple slotA, the steps 70-74 wipes: the run walked its approach into the patrolling slime pair at 762 -181 and fought the sludge, the lurker and the satyr mix as one 6-8 unit pack): the four pulls at 763 -188, 793 -161, 779 -145 and 737 -115 are in route order, radius 5, one approach stand each on the pack's floor 15-25 yd from the pack and outside the later packs' aggro reach: the slime pair 12221 first with its own patrol block (source 54580, pulled first or waited out), then the Sisters 11794, the sludge 12222, and the lone lurker 12223 folded into the satyr mix (6 units) with the Meshlok patrol. kill_first 12217 and cc_priority 11794 already cover the mix's Corruptor and the Sisters at plan level. The route order of 2026-11-14 keeps three of these four (763 -188, 779 -145, 737 -115); the Sisters' 793 -161 pack stands 18 yd below the walk, on the layer beneath, and is dropped.",
-    "Route order (2026-11-14, Sagiroth/TortoiseBots#1542). Same six bosses, legs and order; every pack keeps its entries, positions and radius; 101 of the 141 pull groups stay, each on the leg whose walk passes it and in the order along that walk, and 40 off-route groups are dropped. Leg 1-5 `to` move to the deployed plan's first row after the previous boss (leg 1 709 -211, leg 2 660 78, leg 3 303 -175, leg 4 167 -308, leg 5 -22 -433, all existing rows), so no leg walks to a point inside itself and back. The measurements and the per-pack table are in the route-order audit of 2026-11-12 (maraudon_purple-FIX.md)."
+    "Route order (2026-11-14, Sagiroth/TortoiseBots#1542). Same six bosses, legs and order; every pack keeps its entries, positions and radius; 106 of the 141 pull groups stay, each on the leg whose walk passes it and in the order along that walk, and 35 off-route groups are dropped. Leg 1-5 `to` move to the deployed plan's first row after the previous boss (leg 1 709 -211, leg 2 660 78, leg 3 303 -175, leg 4 167 -308, leg 5 -22 -433, all existing rows), so no leg walks to a point inside itself and back. The measurements and the per-pack table are in the route-order audit of 2026-11-12 (maraudon_purple-FIX.md). The ledge under the ring is walked too: the deck above the -62 pack at 771 -353 wakes it through the floor (trash-check step 23 to 24), so its pull keeps the deployed plan's own stand 788 -365 (leg 0 seq 42), and the four packs the detour passes within aggro reach of (855 -382, 791 -425, 817 -377, 796 -374) are pulled on the way."
   ],
   "legs": [
     {
@@ -424,6 +424,48 @@
             "period_estimate": true,
             "source": "creature_movement of spawn 54767 (Putridus Shadowstalker, 12 points, 259 yd at 2.5 yd/s)"
           }
+        },
+        {
+          "entries": [13141],
+          "positions": [
+            {"x": 855.316, "y": -382.354, "z": -64.0031}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [12216, 11790, 12217, 12216, 11790],
+          "positions": [
+            {"x": 791.652, "y": -424.879, "z": -53.7028},
+            {"x": 789.526, "y": -424.056, "z": -53.5349},
+            {"x": 789.389, "y": -419.179, "z": -53.5493},
+            {"x": 793.614, "y": -413.387, "z": -53.4507},
+            {"x": 790.499, "y": -413.405, "z": -53.3356}
+          ],
+          "radius": 5
+        },
+        {
+          "entries": [13141],
+          "positions": [
+            {"x": 816.502, "y": -376.739, "z": -59.101}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [13141],
+          "positions": [
+            {"x": 796.36, "y": -373.903, "z": -59.0663}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [13142],
+          "positions": [
+            {"x": 771.383, "y": -352.868, "z": -61.5713}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": 788.1852, "y": -365.43832, "z": -59.882713}
+          ]
         },
         {
           "entries": [11791, 12217, 12216, 12217, 12216, 11790],

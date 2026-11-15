@@ -87,7 +87,7 @@ var pullSizeKnownCounts = map[string]int{
 	"stormwrought_ruins":   169,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
 	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.
 	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 120, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
-	"maraudon_orange": 57, "maraudon_purple": 62, "blackrock_depths": 228, "scholomance": 163, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts. Route order 2026-11-14 (issue #1542): 101 packs instead of 141, so 13 fewer pulls stand over the ceiling.
+	"maraudon_orange": 57, "maraudon_purple": 64, "blackrock_depths": 228, "scholomance": 163, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts. Route order 2026-11-14 (issue #1542): 106 packs instead of 141, so 11 fewer pulls stand over the ceiling (the five ledge packs of round 3 add two).
 	"razorfen_kraul": 84, "dire_maul_north": 58, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
 	"blackfathom_deeps": 58, "gnomeregan": 88, "lower_blackrock_spire": 106, "stormwind_vault": 55,
 	"frostmane_hollow": 47, "dire_maul_east": 50, "dire_maul_west": 58, "razorfen_downs": 60, "sunken_temple": 65,
