@@ -257,11 +257,19 @@ func (g *giveFake) BotLines(ctx context.Context, command string, wait time.Durat
 	return append(lines, "TBM:INV_END|"+f[1]+"|10|16"), true, nil
 }
 
-func (g *giveFake) GiveItem(_ context.Context, who string, guid packet.GUID, entry uint32) error {
-	g.log("additem %s %d", who, entry)
-	g.gave = append(g.gave, fmt.Sprintf("%s %d %d", who, uint32(guid), entry))
+func (g *giveFake) GiveItem(_ context.Context, who string, guid packet.GUID, entry uint32, count int) error {
+	if count <= 0 {
+		count = 1
+	}
+	if count == 1 {
+		g.log("additem %s %d", who, entry)
+		g.gave = append(g.gave, fmt.Sprintf("%s %d %d", who, uint32(guid), entry))
+	} else {
+		g.log("additem %s %d %d", who, entry, count)
+		g.gave = append(g.gave, fmt.Sprintf("%s %d %d %d", who, uint32(guid), entry, count))
+	}
 	if !g.loseGive {
-		g.bag(who)[entry]++
+		g.bag(who)[entry] += count
 	}
 	return nil
 }
@@ -290,6 +298,35 @@ func TestGiveItemsSendsAdditemAndChecksTheBag(t *testing.T) {
 	}
 	if st := rep.Prepare.Steps; len(st) != 1 || st[0].Name != "give_items" || !strings.Contains(st[0].Detail, "Tanky got Mallet of Zul'Farrak") {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestGiveItemsCount(t *testing.T) {
+	g := newGiveFake(t)
+	rep, err := g.run([]GiveItem{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if len(g.gave) != 1 || !strings.HasPrefix(g.gave[0], "Tanky ") || !strings.HasSuffix(g.gave[0], " 19975 5") {
+		t.Fatalf("gave %v", g.gave)
+	}
+	if g.bag("Tanky")[19975] != 5 {
+		t.Fatalf("bag %d, want 5", g.bag("Tanky")[19975])
+	}
+	want := "additem 19975 5 on Tanky (test setup: Zulian Mudskunk)"
+	if len(rep.SetupShortcuts) != 1 || rep.SetupShortcuts[0] != want {
+		t.Fatalf("setup %v, want %q", rep.SetupShortcuts, want)
+	}
+	// Fewer than Count in the bag still sends .additem; at least Count skips.
+	g = newGiveFake(t)
+	g.bag("Tanky")[19975] = 2
+	if _, err := g.run([]GiveItem{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}}); err != nil || len(g.gave) != 1 {
+		t.Fatalf("partial bag: err=%v gave=%v", err, g.gave)
+	}
+	g = newGiveFake(t)
+	g.bag("Tanky")[19975] = 5
+	if _, err := g.run([]GiveItem{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}}); err != nil || len(g.gave) != 0 {
+		t.Fatalf("full bag: err=%v gave=%v", err, g.gave)
 	}
 }
 
@@ -404,6 +441,7 @@ func TestValidateGiveItems(t *testing.T) {
 		{[]GiveItem{{Bot: "the lead", Item: 1}}, "neither"},
 		{[]GiveItem{{Bot: " lead", Item: 1}}, "spaces"},
 		{[]GiveItem{{Bot: "Tanky", Item: 1, Name: "a\nb"}}, "give_items[0].name"},
+		{[]GiveItem{{Bot: "Tanky", Item: 19975, Count: -1}}, "give_items[0].count"},
 		{make([]GiveItem, 5), "at most 4"},
 	} {
 		if err := ValidateGiveItems(c.g); err == nil || !strings.Contains(err.Error(), c.want) {

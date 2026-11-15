@@ -195,6 +195,7 @@ func TestCheckModeGiveItems(t *testing.T) {
 		{Mode: "observe", LeadBot: "Lcwarra", Observe: &observeParam{}, GiveItems: give},
 		{Mode: "remote", LeadBot: "Lcwarra", Bots: []string{"Lcpriest"}, GiveItems: []dungeon.GiveItem{{Bot: "lead"}}},
 		{Mode: "remote", LeadBot: "Lcwarra", Bots: []string{"Lcpriest"}, GiveItems: []dungeon.GiveItem{{Bot: "not a name", Item: 1}}},
+		{Mode: "remote", LeadBot: "Lcwarra", Bots: []string{"Lcpriest"}, GiveItems: []dungeon.GiveItem{{Bot: "lead", Item: 19975, Count: -1}}},
 	} {
 		if _, err := checkMode(bad); err == nil {
 			t.Errorf("%+v was accepted", bad)
@@ -202,16 +203,17 @@ func TestCheckModeGiveItems(t *testing.T) {
 	}
 }
 
-// remoteGame's GiveItem (dungeon.ItemGiver, the run option give_items) refuses what is not a bot name, a GUID and an item entry before it
-// touches the session.
+// remoteGame's GiveItem (dungeon.ItemGiver, the run option give_items) refuses what is not a bot name, a GUID, an item entry and a
+// non-negative count before it touches the session.
 func TestRemoteGameGiveItemRefusesBadArguments(t *testing.T) {
 	g := remoteGame{}
 	for _, c := range []struct {
-		who  string
-		guid packet.GUID
-		item uint32
-	}{{"not a name", 1, 9240}, {"Lcwarra", 0, 9240}, {"Lcwarra", 1, 0}} {
-		if err := g.GiveItem(context.Background(), c.who, c.guid, c.item); err == nil || !strings.Contains(err.Error(), "additem") {
+		who   string
+		guid  packet.GUID
+		item  uint32
+		count int
+	}{{"not a name", 1, 9240, 1}, {"Lcwarra", 0, 9240, 1}, {"Lcwarra", 1, 0, 1}, {"Lcwarra", 1, 19975, -1}} {
+		if err := g.GiveItem(context.Background(), c.who, c.guid, c.item, c.count); err == nil || !strings.Contains(err.Error(), "additem") {
 			t.Errorf("%+v: %v", c, err)
 		}
 	}

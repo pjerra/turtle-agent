@@ -16,10 +16,10 @@ import (
 // without a GM account of level DeveloperLevel (`.additem` is SEC_DEVELOPER), because a player's `.additem` is no command at all and would be
 // said aloud in chat.
 
-// ItemGiver is the optional part of a Preparer that sends `.additem <entry>` to a selected player: as one operation, with the GUID selected and
-// confirmed first, like UnbindInstances. who is the name, for errors.
+// ItemGiver is the optional part of a Preparer that sends `.additem <entry> [count]` to a selected player: as one operation, with the GUID
+// selected and confirmed first, like UnbindInstances. who is the name, for errors; count <= 1 sends `.additem <entry>`.
 type ItemGiver interface {
-	GiveItem(ctx context.Context, who string, guid packet.GUID, entry uint32) error
+	GiveItem(ctx context.Context, who string, guid packet.GUID, entry uint32, count int) error
 }
 
 // giveBagWait is how long the bag is read until the item shows after the `.additem`.
@@ -146,7 +146,11 @@ func (e *prepEnv) giveItems(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("give_items: %w", err)
 		}
-		if inv.Count(g.Item) > 0 {
+		need := g.Count
+		if need <= 0 {
+			need = 1
+		}
+		if inv.Count(g.Item) >= need {
 			e.note(fmt.Sprintf("prepare give_items: %s carries %s already; no .additem sent", who, name))
 			done = append(done, fmt.Sprintf("%s has %s", who, name))
 			continue
@@ -155,27 +159,37 @@ func (e *prepEnv) giveItems(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("give_items: %w", err)
 		}
-		if err := ig.GiveItem(ctx, who, guid, g.Item); err != nil {
+		if err := ig.GiveItem(ctx, who, guid, g.Item, need); err != nil {
+			if need > 1 {
+				return "", fmt.Errorf(".additem %d %d on %s: %w", g.Item, need, who, err)
+			}
 			return "", fmt.Errorf(".additem %d on %s: %w", g.Item, who, err)
 		}
-		e.gmLine(fmt.Sprintf("additem %d on %s (test setup: %s)", g.Item, who, name))
-		if err := e.waitBag(ctx, bl, who, g.Item); err != nil {
-			return "", fmt.Errorf("give_items: .additem %d was sent for %s but %w", g.Item, who, err)
+		if need > 1 {
+			e.gmLine(fmt.Sprintf("additem %d %d on %s (test setup: %s)", g.Item, need, who, name))
+			if err := e.waitBag(ctx, bl, who, g.Item, need); err != nil {
+				return "", fmt.Errorf("give_items: .additem %d %d was sent for %s but %w", g.Item, need, who, err)
+			}
+		} else {
+			e.gmLine(fmt.Sprintf("additem %d on %s (test setup: %s)", g.Item, who, name))
+			if err := e.waitBag(ctx, bl, who, g.Item, need); err != nil {
+				return "", fmt.Errorf("give_items: .additem %d was sent for %s but %w", g.Item, who, err)
+			}
 		}
 		done = append(done, fmt.Sprintf("%s got %s", who, name))
 	}
 	return strings.Join(done, ", "), nil
 }
 
-// waitBag reads the bot's bags until the item shows, within giveBagWait.
-func (e *prepEnv) waitBag(ctx context.Context, bl BotLiner, who string, item uint32) error {
+// waitBag reads the bot's bags until the item shows at least need times, within giveBagWait.
+func (e *prepEnv) waitBag(ctx context.Context, bl BotLiner, who string, item uint32, need int) error {
 	deadline := e.now().Add(giveBagWait)
 	for {
 		inv, err := botInventory(ctx, bl, who)
 		if err != nil {
 			return err
 		}
-		if inv.Count(item) > 0 {
+		if inv.Count(item) >= need {
 			return nil
 		}
 		if !e.now().Before(deadline) {

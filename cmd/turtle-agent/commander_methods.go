@@ -443,14 +443,19 @@ func (g remoteGame) UnbindInstances(ctx context.Context, who string, guid packet
 	return g.selectThenGM(ctx, guid, ".instance unbind all")
 }
 
-// GiveItem implements dungeon.ItemGiver: it selects the bot by GUID, waits until the server shows that selection, and sends ".additem <entry>"
-// as one operation of the session (GMOn), so the line acts on that bot and never on whatever the agent had selected. The core runs it on the
-// selected player (HandleAddItemCommand), from account level 3; the caller checks the level and the bag afterwards.
-func (g remoteGame) GiveItem(ctx context.Context, who string, guid packet.GUID, entry uint32) error {
-	if !botName.MatchString(who) || guid == 0 || entry == 0 {
-		return fmt.Errorf("additem: %q (%v) item %d is not a character name, a GUID and an item entry", who, guid, entry)
+// GiveItem implements dungeon.ItemGiver: it selects the bot by GUID, waits until the server shows that selection, and sends
+// ".additem <entry>" (or ".additem <entry> <count>" when count > 1) as one operation of the session (GMOn), so the line acts on that bot
+// and never on whatever the agent had selected. The core runs it on the selected player (HandleAddItemCommand), from account level 3;
+// the caller checks the level and the bag afterwards.
+func (g remoteGame) GiveItem(ctx context.Context, who string, guid packet.GUID, entry uint32, count int) error {
+	if !botName.MatchString(who) || guid == 0 || entry == 0 || count < 0 {
+		return fmt.Errorf("additem: %q (%v) item %d count %d is not a character name, a GUID, an item entry and a non-negative count", who, guid, entry, count)
 	}
-	return g.selectThenGM(ctx, guid, fmt.Sprintf(".additem %d", entry))
+	cmd := fmt.Sprintf(".additem %d", entry)
+	if count > 1 {
+		cmd = fmt.Sprintf(".additem %d %d", entry, count)
+	}
+	return g.selectThenGM(ctx, guid, cmd)
 }
 
 // GroupUnbind selects the player with the GUID, waits for the server to show the selection, sends ".instance groupunbind all" as one

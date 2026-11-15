@@ -18,8 +18,11 @@ import (
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
-// zgArlokkLeg is the leg's index in dungeons/zul_gurub.json.
-const zgArlokkLeg = 4
+// zgArlokkLeg is the leg's index in dungeons/zul_gurub.json; zgArlokkRowLeg is its row leg when optional legs are omitted.
+const (
+	zgArlokkLeg    = 5
+	zgArlokkRowLeg = 4
+)
 
 // zgArlokkDevWalkYd is the walk of the leg before the 2026-11-05 re-route (the dev plan's rows, measured the same way:
 // the sum of the navmesh path between consecutive move/pull/boss party points). The re-route must cut it.
@@ -61,7 +64,7 @@ func zgArlokkRows(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner) []planexpo
 	}
 	var rows []planexport.StepRow
 	for _, r := range res.Rows.Steps {
-		if r.Leg == zgArlokkLeg {
+		if r.Leg == zgArlokkRowLeg {
 			rows = append(rows, r)
 		}
 	}

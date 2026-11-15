@@ -32,7 +32,7 @@
     "FIX 7 (2026-10-30, leg 0 only; TortoiseBots-audit tests/raid-zg-walk8 and raid-zg-walk9, specs/rl-patrol-timed-pull.md section 6): walk 9's Headhunter pull (step 22) was a timed pull with F3 45-51 yd from the lead bot but 19-24 yd from the pulled Witch Doctor: F3 came 3-5 s later with no bot near it, then F4 (8 bats, 3 riders); walk 8's same row took F3 too. The static pack's pull (step 33) drew F5 22 s into the fight (walk 8: F7), F7 walked into its stand (30.8 yd) with F6 35.7 yd off (walk 9 step 35), and walk 8's F5 row took F6. The run leader now also holds a stand pull while another patrol is within 30 yd of the pulled unit or its way to the party; the static pack is a stand_pull row too (held while F5/F7 pass by), and the stands move out of walk-in range of their own target (32-34 yd, the near follower still in the tank's 28.5 yd shot): F2 from -12090 -1446 (32.6; F3 41.6, F4 45.5), F3 from -12093 -1464 on the plateau (32.4; F4 38.4; the stairs detour is gone), F7 from -12198 -1494 (32.6; F5 43.6, F6 42.8), F5 from -12180 -1452 (33.0; F6 37.1).",
     "FIX 9 (2026-10-31, leg 0 only; TortoiseBots-audit tests/raid-zg-walk13, specs/rl-patrol-timed-pull.md section 8): step 31 (the Witch Doctor row, point -12218 -1440 radius 33) pulled F7 with F6 (its spawns lie inside the radius: 49129 0.86 yd from 49131) and F5: all three raids fought 9 Bloodseeker Bats + 4 Bat Riders, 4/10/20 dead (s7 wiped). The extra pack F5 is now pulled first from its own stand -12180 -1452 (F7 32.4, F6 37.1 yd; the gate holds for both), then F7's row. F6 cannot be split from F7 by any plan radius (49129's spawn is 0.86 yd from 49131's), so the F7 pull stays F7+F6 (10 units); the F5 split removes 4 bats and 2 riders. The F7 stand is reached from F5's stand by the dogleg -12180 -1494 (the direct walk passes 22.3 yd from F7's lane; the dogleg keeps 29.5+). 1104 steps (the dogleg adds one move row), reordered: the F5 pull at step 33, F7 at 36, F6 at 38.",
     "FIX 8 (2026-10-30/31, leg 0 only; TortoiseBots-audit tests/raid-zg-walk10 and raid-zg-walk11 a-c): from -12090 -1446 the Headhunter formation's nearest unit came no closer than 30.6-30.8 yd in all four walks (its followers walk almost in line with the leader), so the 28.5 yd shot never went out and the row paused at 600 s; the stand is back at walk 9's -12093 -1446 (lane 30.1; the shot went out there at 28.5-29 yd, no walk-in; F3 39.1, F4 42.8). The Witch Doctor formation's stand moves in to -12204 -1494 (lane 29.2; F5 40.2, F6 40.4) for the same reason (troll followers in line); the bat formations keep 32-34 yd (followers 6 yd round the leader: the near one comes within 27-28 yd). The static Bat Rider pack woke as the party walked to its stand 23.3 yd from bat 49138 once the row held the shot (walk 10 step 28): its stand is -12183 -1488, 27.5 yd from its nearest unit (bat 49138, still in the 28.5 yd shot; F7 40.4, F5 47.4, F6 46.9).",
-    "Raid plan: 20 players (3 tanks, 5 healers, 12 damage). Boss order: Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar. Gahz'ranka (15114) is optional and has no step: his summon is fishing Muddy Churning Waters (180369) with Zulian Mudskunk (17321), which the plan format cannot express. Edge of Madness (15082-15085) has no spawn and instance_zulgurub::SpawnRandomBoss is deactivated: no leg.",
+    "Raid plan: 20 players (3 tanks, 5 healers, 12 damage). Boss order: Jeklik, Venoxis, Mar'li, Thekal, (optional edge_of_madness), Arlokk, Mandokir, Jin'do, Hakkar (optional gahzranka after hakkar_outer).",
     "ARLOKK GONG (2026-11-03): Arlokk (14515) has no spawn row. The gong go_gong_of_bethekk (180526 at -11569.2 -1627.87 41.28; gameobject guid 28667) is a goober (type 10) whose event id 9066 runs event_scripts row 9066 (10, 14515, 900000 ms, at -11540.7 -1627.71 41.27), a temp summon of her; core: GameObject::Use starts the goober's event script (src/game/Objects/GameObject.cpp:1613-1616), and GOHello_go_gong_of_bethekk sets instance TYPE_ARLOKK IN_PROGRESS (src/scripts/dungeons/zulgurub/boss_arlokk.cpp:28-38). The leg carries a use_object step for 180526 before the boss; its stand was 69.4 yd from the goober until walk 100b (ARLOKK GONG FIX below).",
     "ARLOKK GONG FIX (2026-11-14, leg 4; walk 100b T13, TortoiseBots-audit tests/raid-zg-walk100b ar10b1-1/-2/-3 and ar13b1-1): the gong step's stand was the ring's north-east bend -11502.9 -1609.1 z 49.63, 69.4 yd 3D from the goober and 8.3 yd above it on another floor; every attempt paused at `cmd open|unreachable|The bot stopped short of the object and cannot get closer.` (4+ tries on 2 slots), the lead bot left on the arena floor 70 yd from the gong. The stand is the gong's own floor now, -11566.5 -1626.5 z 41.33: 3.03 yd from the goober, inside the core's INTERACTION_DISTANCE (5 yd) less the commander's 0.5 yd margin, so the open has no walk of its own to survive (plan-check: the server path to the stand ends 0.5 yd short on the stand's own polygon). The party gets there by the temple's arena descent, the leg's only way in: the last pull (-11518.37 -1639.82 49.61) to the stand is 167.7 yd of navmesh path over 50.6 yd straight, walked by the run leader in its 40 yd approach hops (zgArlokkGongApproachYd is that hop's cap). No other terrace point reaches the gong: -11466.9 -1656 49.6 and -11456.2 -1609.9 49.1 are 462 and 486 yd around the temple and end 9.6-13.7 yd short, and the ramp foot -11491.2 -1621.3 41.3 is 85.1 yd from the stand. The boss approach keeps only -11521.6 -1621.6 41.3 (45.1 yd from the stand, 20 yd to her spawn): its old ramp vias -11492.3 -1634.9 49.5 and -11491.2 -1621.3 41.3 would walk the party 104 yd back up the ramp and down again after the gong. A resume at the paused open lands on the stand row (a move row, so a place start) and the placement puts the party on the gong; the row after the open is the boss approach move, also a place start.",
     "Thekal (14599) is fought with his Zealots Lor'Khan 11347 and Zath 11348 and two Zulian Tigers 11361 (boss.first); Mar'li with the Witherbark Speaker 11388 and Venoxis with his four Razzashi Cobras 11373 (boss.first). They resurrect each other (boss_thekal.cpp), so the live run must kill the three within 7 s.",
@@ -1199,6 +1199,41 @@
           {"x": -11697, "y": -1967.5, "z": 59.7}
         ]
       }
+    },
+    {
+      "name": "edge_of_madness",
+      "to": {"x": -11888.8, "y": -1886.8, "z": 63.5},
+      "optional": {"item": 19931, "name": "Gurubashi Mojo Madness"},
+      "steps": [
+        {
+          "use_object": {
+            "entry": 180327,
+            "near": {"x": -11887.1, "y": -1889.8, "z": 63.5},
+            "stand": {"x": -11888.8, "y": -1886.8, "z": 63.5},
+            "requires_item": {"entry": 19931, "name": "Gurubashi Mojo Madness"},
+            "via_item": true
+          }
+        },
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [15082, 15083, 15084, 15085],
+              "state": "seen"
+            },
+            "timeout_s": 40,
+            "fail_text": "Edge of Madness boss (15082-15085) did not show within 40 s of the brazier: the active madness event may not match or the brazier was already used in this instance.",
+            "agent_only": "the boss row after it waits 60 s for an absent boss (the run leader's boss search), then pauses: that stands in for this wait"
+          }
+        }
+      ],
+      "boss": {
+        "entry": 15085,
+        "position": {"x": -11901.3, "y": -1906.52, "z": 65.36}
+      },
+      "notes": [
+        "OPTIONAL leg (spec A, 2026-11-15): Gurubashi Mojo Madness (19931, spell 24264 OPEN_LOCK_ITEM) used on the Brazier of Madness (180327, lock 1619, at -11887.1 -1889.8 63.50) temp-summons the active Edge of Madness boss at -11901.3 -1906.52 65.36 after 15 s (900000 ms). Thekal's leg already clears the Mad Servants (15111) and Blood Priests (11340) around the brazier.",
+        "boss.entry 15085 (Wushoolay) follows the active madness event (event 32 on 2026-11-15 until 11-17 07:00; the four events 29 Gri'lek 15082, 30 Hazza'rah 15083, 31 Renataki 15084, 32 Wushoolay 15085 rotate 14 days each). A later AnyOf flag (kPlanFlagBossAnyOf / Boss.AnyOf) will list all four entries on the boss row."
+      ]
     },
     {
       "name": "high_priestess_arlokk",
@@ -2566,6 +2601,38 @@
         "WALK 29 FIX 6 (2026-11-03, leg 7; research/zg-w29/WALK29-FIX-PLAN.md §5, lead decision): rows 620-637 walked the raid into the lake to pull single Hooktooth Frenzies (11374), which are fish: 14 of the leg's 38 groups were 11374-only (groups 3, 4, 5, 7, 8, 16, 17, 24, 25, 26, 30, 31, 33 and 37 at z -14.4 to +2.6) and all 30 spawns are in water. Runs e/e-r1..r3 had 0 deaths but stopped for good: the lead sat at -11855..-11858 -1506..-1508 z -13 at step 624 and -11885.5 -1488.1 z 7.8 at step 628, stuck 35.3-36.7 yd from the goal with its own move failing (lead in water: yes; cmd move path type 0x81). 11374 is in the leg's skip now and the 14 fish-only groups and their approach rows are gone; every remaining point of the leg is on land (z 2.2 and above in the lake basin). The leg's own route (vias z 78.7/65.3/51.0, to z 19.7) is unchanged.",
         "ROUTE-REGEN 0dec623+local (2026-11-03, audit §4.2): 8 points, minimum aggro margin 9.3 yd, minimum wall 4.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut",
         "WALK 38 FIX 2 (2026-11-05, leg 7; TortoiseBots-audit tests/raid-zg-walk38 f2/f3): every Hakkar attempt paused at step 601 \"no walkable path toward -11752 -1741.9 14.3\". The row was not a plan point: the approach-hop cutter's last-approach interpolation took the straight line from the floor-aware cut's only kept point (the wet south-lake corners are dropped) to the group-6 pull and stood 4.1 yd under the floor there, off the navmesh. The cutter no longer interpolates when its kept list is a single point (internal/planexport, TestApproachHopsDoesNotInterpolateACutGap); the group-6 pull is 114 yd from the last row and the run leader walks its own complete 199.8 yd path around the lake (TestZgW38HakkarOuterRowsWalkable)."
+      ]
+    },
+    {
+      "name": "gahzranka",
+      "to": {"x": -11682.8, "y": -1713.37, "z": 8.77},
+      "optional": {"item": 19974, "name": "Mudskunk Lure"},
+      "skip": [11374, 1420],
+      "steps": [
+        {
+          "use_item": {
+            "entry": 19974,
+            "name": "Mudskunk Lure"
+          }
+        },
+        {
+          "wait_for": {
+            "unit": {
+              "entries": [15114],
+              "state": "seen"
+            },
+            "timeout_s": 45,
+            "fail_text": "Gahz'ranka (15114) did not show within 45 s of Mudskunk Lure: the lure needs 5x Zulian Mudskunk (19975), or the instance already summoned him once.",
+            "agent_only": "the boss row after it waits 60 s for an absent boss (the run leader's boss search), then pauses: that stands in for this wait"
+          }
+        }
+      ],
+      "boss": {
+        "entry": 15114,
+        "position": {"x": -11688.95, "y": -1777.21, "z": 12.59}
+      },
+      "notes": [
+        "OPTIONAL leg (spec B, 2026-11-15): Mudskunk Lure (19974) casts spell 24325 Pagle's Point Cast (consumes 5x Zulian Mudskunk 19975, dummy target 309 -11682.8 -1713.37 8.77, SEND_EVENT 9104 -> event_summon_gahzranka), respawns spawn 2530122 (-11673.3 -1726.3 -5.9) in the water and walks him to his home on the beach (-11688.95 -1777.21 12.59). hakkar_outer already clears the lake trash (15043/11357/11359)."
       ]
     },
     {

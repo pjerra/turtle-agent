@@ -1770,9 +1770,10 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		l.AfterBoss = append(l.AfterBoss, c.step(sp, &s))
 	}
 	if o := l.Optional; o != nil && o.Item != 0 && !slices.ContainsFunc(append(slices.Clone(l.Steps), l.AfterBoss...), func(st Step) bool {
-		return st.UseObject != nil && st.UseObject.RequiresItem != nil && st.UseObject.RequiresItem.Entry == o.Item
+		return (st.UseObject != nil && st.UseObject.RequiresItem != nil && st.UseObject.RequiresItem.Entry == o.Item) ||
+			(st.UseItem != nil && st.UseItem.Entry == o.Item)
 	}) {
-		c.fail(path+".optional.item", "%d is required by no use_object step of the leg (requires_item): the leg would be skipped for an item it never uses", o.Item)
+		c.fail(path+".optional.item", "%d is required by no use_object step (requires_item) or use_item step of the leg: the leg would be skipped for an item it never uses", o.Item)
 	}
 	if rs := r.Rest; rs != nil {
 		for _, f := range []struct {

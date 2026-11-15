@@ -14,7 +14,7 @@ import (
 )
 
 // zgHakkarOuterLeg is the lake-basin leg's index in dungeons/zul_gurub.json.
-const zgHakkarOuterLeg = 7
+const zgHakkarOuterLeg = 8
 
 // zgHakkarOuterIslet is the box of the lake islet the two dropped 15043 packs stood on (x, y, z bounds): the packs'
 // positions sit on the islet's dry terrace at z 10.6-14.6, above the water the lead bot cannot cross.

@@ -54,11 +54,12 @@ type PrepareSpec struct {
 
 // GiveItem is one entry of dungeon_run's give_items: a GM `.additem` on a bot, for a test run whose plan has an optional leg that needs the item
 // (Leg.Optional). Bot is "lead" (the lead bot, also when empty), "carrier" (the run's carrier option, else the bot the object steps use) or a
-// bot's name. Name is the item's name for the setup_shortcuts line; empty takes the plan's own name for the item.
+// bot's name. Count defaults to 1 when 0. Name is the item's name for the setup_shortcuts line; empty takes the plan's own name for the item.
 type GiveItem struct {
-	Bot  string `json:"bot,omitempty"`
-	Item uint32 `json:"item"`
-	Name string `json:"name,omitempty"`
+	Bot   string `json:"bot,omitempty"`
+	Item  uint32 `json:"item"`
+	Count int    `json:"count,omitempty"`
+	Name  string `json:"name,omitempty"`
 }
 
 // maxGiveItems is the most entries give_items takes.
@@ -142,6 +143,9 @@ func ValidateGiveItems(gs []GiveItem) error {
 		case b == "" || b == GiveLead || b == GiveCarrier || botNameRe.MatchString(g.Bot):
 		default:
 			return fmt.Errorf("give_items[%d].bot: %q is neither %q, %q nor a character name", i, g.Bot, GiveLead, GiveCarrier)
+		}
+		if g.Count < 0 {
+			return fmt.Errorf("give_items[%d].count: must be >= 0", i)
 		}
 		if len(g.Name) > 60 || strings.ContainsAny(g.Name, "\r\n") {
 			return fmt.Errorf("give_items[%d].name: at most 60 characters on one line", i)
