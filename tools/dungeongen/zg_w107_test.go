@@ -191,3 +191,63 @@ func zgWalkClosest(pl *navmesh.Planner, from, to, watch dungeon.Point) (float64,
 	}
 	return closest, nil
 }
+
+// Walk 110 st10d wiped twice on bloodlord_mandokir step 418 (pull group 17):
+// the authored approach -12216 -1974 132.56 had no line of sight to the 5-mob
+// camp, forcing a 20 s hold and a fallback to firing stand 1 (-12211.1 -1974.6
+// 132.5), after which the plain pull pushed east into group 18 (14821 x6) and
+// group 19 (11391, waking Mandokir 11382). Moving the stand to firing stand 1
+// and marking it stand_pull holds the raid there with clear sight.
+func TestZgW110MandokirGroup17StandPullAndSight(t *testing.T) {
+	p, _ := zgLoadPlanAndExport(t)
+	leg := zgMandokirLeg(t, p)
+	if len(leg.PullGroups) < 20 {
+		t.Fatalf("the leg has %d pull groups, want at least 20", len(leg.PullGroups))
+	}
+	g16, g17, g18, g19 := leg.PullGroups[16], leg.PullGroups[17], leg.PullGroups[18], leg.PullGroups[19]
+	if !g17.StandPull {
+		t.Errorf("leg 5 pull group 17 (step 418) has stand_pull=false, want true so the raid holds at its firing stand instead of pushing into group 18 (14821) and group 19 (11391)")
+	}
+	if len(g17.Approach) == 0 {
+		t.Fatal("leg 5 pull group 17 has no approach")
+	}
+	stand := g17.Approach[len(g17.Approach)-1]
+	own := math.Inf(1)
+	for _, q := range g17.Positions {
+		if d := dist(stand, q); d < own {
+			own = d
+		}
+	}
+	if own < 19.5 || own > 28.0 {
+		t.Errorf("leg 5 pull group 17 stand %.1f %.1f %.1f is %.1f yd from its nearest unit, want 19.5-28.0", stand.X, stand.Y, stand.Z, own)
+	}
+	for _, q := range g18.Positions {
+		if d := dist(stand, q); d < 23 {
+			t.Errorf("leg 5 pull group 17 stand %.1f %.1f %.1f is %.1f yd from group 18 (14821), want >= 23", stand.X, stand.Y, stand.Z, d)
+		}
+	}
+	for _, q := range g19.Positions {
+		if d := dist(stand, q); d < 23 {
+			t.Errorf("leg 5 pull group 17 stand %.1f %.1f %.1f is %.1f yd from group 19 (11391), want >= 23", stand.X, stand.Y, stand.Z, d)
+		}
+	}
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Log("no map-309 mmaps on this machine: the ray and walk are not measured")
+		return
+	}
+	defer pl.Close()
+	// 11830 Hakkari Priest in group 17 is at index 1 (-12187, -1978.89, 133.47).
+	priest := g17.Positions[1]
+	if ray, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.6}, navmesh.Vec3{priest.X, priest.Y, priest.Z + 1.6}); err != nil {
+		t.Fatalf("raycast: %v", err)
+	} else if !ray.Clear {
+		t.Errorf("leg 5 pull group 17 stand %.1f %.1f %.1f has no clear ray to 11830 (hit at %.1f yd)", stand.X, stand.Y, stand.Z, ray.Hit)
+	}
+	prev := g16.Approach[len(g16.Approach)-1]
+	if path, err := pl.Plan(309, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{stand.X, stand.Y, stand.Z}); err != nil {
+		t.Fatalf("plan: %v", err)
+	} else if path.Status != navmesh.Complete {
+		t.Errorf("walk from group 16 stand %.1f %.1f %.1f to group 17 stand %.1f %.1f %.1f is %s (%s)", prev.X, prev.Y, prev.Z, stand.X, stand.Y, stand.Z, path.Status, path.Reason)
+	}
+}
