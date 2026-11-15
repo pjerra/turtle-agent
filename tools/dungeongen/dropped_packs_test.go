@@ -30,7 +30,8 @@ import (
 //		{-532, 165, -155}, // ...
 //	})
 //
-//	// TestGnomereganDroppedPacksAsleep walks the short route against them (its passes are pinned in droppedPackKnownPasses).
+//	// TestGnomereganDroppedPacksAsleep walks the short route against them (the spawns its walk makes distance-reachable
+//	// are listed in droppedPackKnownReachable, with the live run that proved them asleep).
 //	func TestGnomereganDroppedPacksAsleep(t *testing.T) {
 //		p, err := dungeon.Load("../../dungeons/gnomeregan.json")
 //		if err != nil {
@@ -56,17 +57,30 @@ import (
 //
 // Woken is the trash check's rule (internal/trashcheck): the 3D reach above, plus its floor filter. A spawn the walk
 // passes more than trashcheck.OtherFloorYd (15 yd) above or below on every sample within that reach in 2D stands on
-// another floor and never wakes (Check drops it from every segment), and here it is no pass. There is no line of sight
-// in either tool: the exports carry no vmap geometry and the trash check reports the same limit ("no LOS: through-wall
-// aggro is over-counted", internal/trashcheck/check.go), so a wall between the route and the pack is not modelled and
-// the check over-counts; a route that still passes its pin is clear in the strict sense.
+// another floor and never wakes (Check drops it from every segment), and here it is no pass.
 //
-// A remaining pass is a defect of the route, not of the record: the walk comes within aggro of a pack the order drops,
-// so the pack has to come back as a planned pull (or the walk has to move). The plan's record pins how many passes its
-// walk makes (droppedPackKnownPasses, the way routeAggroKnownFailing pins every hand-maintained plan's later-pack
-// passes): the test fails on one more, on one fewer and on a plan with no line at all, and prints the pass lines. A
-// route-order branch lands with 0 (every dropped pack asleep); a plan with passes it still has to fix records them
-// only as a worklist and fails, and no "known reachable" allowlist is kept without the lead's decision. The plan test:
+// There is no line of sight in either tool: the exports carry no vmap geometry and the trash check reports the same
+// limit ("no LOS: through-wall aggro is over-counted", internal/trashcheck/check.go). A wall between the route and a
+// pack is not modelled, so a pass is a distance-reachable spawn, not a proven wake: through-wall and lower-deck spawns
+// are over-counted. The test prints that limit in its output, and each plan's live dungeon run is what settles its
+// list.
+//
+// So per plan the record is a list, not a count: droppedPackKnownReachable holds the dropped spawns the walk makes
+// distance-reachable (guid + entry + the leg of the nearest hop), each plan's list naming the live dungeon run that
+// proved them asleep (gnomeregan: round 39 on test3, 159/159 in 4454 s, 0 wipes, 6 deaths). The test fails when a
+// dropped spawn becomes reachable that the list does not hold (a new risk: add it back as a planned pull, or let a live
+// run prove it), when a listed spawn is no longer reachable (moved, pulled, or on another floor), and when a listed
+// spawn's nearest hop moved to another leg (the list must stay honest). A plan with no list fails and prints the lines
+// to pin.
+//
+// Adding a route-order branch: keep the dropped set (packsAt) and its test as above, leave out the
+// droppedPackKnownReachable line, and run the test: it fails and prints every distance-reachable dropped spawn as
+// {GUID: <n>, Entry: <n>, Leg: <n>} with its pass line. Paste those as droppedReach entries under the plan's key, with
+// a comment naming the branch's own live dungeon run (round, server, result, wipes) that proved them asleep. A spawn the
+// run proves awake is not pinned: it comes back as a planned pull (or the walk moves), and the test fails until the plan
+// and the list agree.
+//
+// The plan test:
 //
 //	// TestGnomereganDroppedPacksAsleep walks the short route against the packs its order drops.
 //	func TestGnomereganDroppedPacksAsleep(t *testing.T) {
@@ -76,10 +90,6 @@ import (
 //		}
 //		droppedPacksAsleep(t, p, gnomerDropped, "")
 //	}
-//
-// There is no line of sight in this repo: the exports carry no vmap geometry, and the trash check reports the same limit
-// ("no LOS: through-wall aggro is over-counted", internal/trashcheck/check.go), so a wall between the route and the pack
-// is not modelled: the check over-counts, and a route that still passes the pinned count is clear in the strict sense.
 //
 // Without the server's navmesh (the mmaps argument, $TURTLE_AGENT_MMAPS, ~/turtle-agent-mmaps or the build VM's
 // ~/tb-ci/mmaps-turtle<map>) the check skips: RouteIntoLaterPacks' straight segments are not the walked path, and a walk
@@ -145,62 +155,164 @@ type droppedPass struct {
 	wander float64
 	dist   float64
 	to     dungeon.Point
+	leg    int
 	row    string
 }
 
-// line is the pass as the failure list and the pin print it.
+// line is the pass as the failure list prints it.
 func (f droppedPass) line(plan, pack string) string {
 	return fmt.Sprintf("%s: the walk passes %.1f yd from the dropped pack %s: %s, guid %d, entry %d, reach %.1f yd (aggro %.1f + spread %d + wander %.1f), on the hop to %.0f %.0f %.0f (%s)",
 		plan, f.dist, pack, f.spawn.Name, f.spawn.GUID, f.spawn.Entry, f.reach, f.aggro, droppedSpreadYd, f.wander,
 		f.to.X, f.to.Y, f.to.Z, f.row)
 }
 
-// droppedPackKnownPasses is, per plan, how many of its dropped packs' spawns its walk is allowed to wake: the recorded
-// state of a route-order plan, as routeAggroKnownFailing records every hand-maintained plan's later-pack passes. A plan
-// in here is a plan whose passes were measured: the number is what its branch took (0 when the walk keeps every dropped
-// pack asleep), and a plan with passes it has not fixed stays at 0 and fails, so its lines are the worklist. One more or
-// one fewer pass than the number is a failure, and a plan with no line here is a failure too, so a route-order branch
-// cannot land without its record.
-var droppedPackKnownPasses = map[string]int{
-	// 0: the short route's walk still wakes 48 spawns of the packs it drops, measured 2026-11-15 under the trash
-	// check's own rule (3D reach plus its 15 yd floor band: they are no other floor). They are not a taken pass: each
-	// one is a dropped pack the walk comes within aggro of, so it has to come back as a planned pull (or the walk has
-	// to move) in the follow-up branch, and until then the test fails with them as its worklist. The tail is the
-	// lower deck under Thermaplugg's last corridor (its 6212/6234/6232 packs, 13 yd below the corridor's walk), the
-	// Launch Bay's lower floor, and the dormitory's far rings
-	// (route-audit-1112/order/GNOMEREGAN-FIX.md, "The lower deck under the last corridor: 9 units 16.6-19.6 yd (3D)").
-	"gnomeregan": 0,
+// droppedReach is one dropped spawn a plan's record lists as distance-reachable: its guid and entry, and the leg of the
+// row the walk's nearest sample walks to. It records the plan's live-proven over-count (no line of sight in the export),
+// not a defect taken.
+type droppedReach struct {
+	GUID  uint64
+	Entry uint32
+	Leg   int
 }
 
-// droppedPacksAsleep walks the plan on the server's navmesh and fails when it wakes a dropped pack the plan's record does
-// not list. plan is the loaded plan (the export comes from tools/dungeongen/testdata/map<plan.Map>), dropped its dropped
-// set, and mmaps a folder with the server's mmaps for the plan's map ("" to use $TURTLE_AGENT_MMAPS, ~/turtle-agent-mmaps
-// or the build VM's ~/tb-ci/mmaps-turtle<map>). See the file comment for what the walk, the pack's spawns and the reach
-// are.
+// label names the record entry in a failure line.
+func (d droppedReach) label() string {
+	return fmt.Sprintf("guid %d, entry %d, leg %d", d.GUID, d.Entry, d.Leg)
+}
+
+// droppedSpawn identifies a spawn across the walk and the record: only its leg may move.
+type droppedSpawn struct {
+	GUID  uint64
+	Entry uint32
+}
+
+// droppedPackKnownReachable is, per plan, the dropped spawns its walk is known to come within reach of, by guid, entry
+// and the leg of the nearest hop: the plan's live-proven state, not a count. The list is honest in both directions: a
+// reachable spawn it does not hold is a new risk and fails, and an entry nothing makes reachable any more fails too.
+// Each list's comment names the live dungeon run that proved it; the file comment says how a route-order branch fills
+// its own.
+var droppedPackKnownReachable = map[string][]droppedReach{
+	// gnomeregan: the 48 spawns the short route's walk comes within reach of by distance alone, and that did not stop
+	// the run: dungeon round 39 on test3 cleared the route 159/159 in 4454 s, 0 wipes, 6 deaths. There is no line of
+	// sight in the export, so the lower deck under Thermaplugg's last corridor (13 yd below the walk), the Launch Bay's
+	// lower floor and through-wall spawns over-count. 10 are the viscous_fallout leg's dormitory far rings, 5 the
+	// electrocutioner leg, 32 the thermaplugg_route leg and 1 the mekgineer leg (the legs gnomerLegs pins).
+	"gnomeregan": {
+		{GUID: 30223, Entry: 6329, Leg: 0},  // Irradiated Pillager
+		{GUID: 30226, Entry: 6329, Leg: 0},  // Irradiated Pillager
+		{GUID: 30228, Entry: 6329, Leg: 0},  // Irradiated Pillager
+		{GUID: 30230, Entry: 6407, Leg: 0},  // Holdout Technician
+		{GUID: 30231, Entry: 6407, Leg: 0},  // Holdout Technician
+		{GUID: 30232, Entry: 6392, Leg: 0},  // Holdout Medic
+		{GUID: 30236, Entry: 6392, Leg: 0},  // Holdout Medic
+		{GUID: 30238, Entry: 6407, Leg: 0},  // Holdout Technician
+		{GUID: 30270, Entry: 6211, Leg: 0},  // Caverndeep Reaver
+		{GUID: 33453, Entry: 6206, Leg: 0},  // Caverndeep Burrower
+		{GUID: 30260, Entry: 6220, Leg: 1},  // Irradiated Horror
+		{GUID: 30263, Entry: 6218, Leg: 1},  // Irradiated Slime
+		{GUID: 30264, Entry: 6219, Leg: 1},  // Corrosive Lurker
+		{GUID: 32103, Entry: 7603, Leg: 1},  // Leprous Assistant
+		{GUID: 33390, Entry: 7603, Leg: 1},  // Leprous Assistant
+		{GUID: 30124, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 30126, Entry: 6234, Leg: 3},  // Mechanized Guardian
+		{GUID: 30127, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 30128, Entry: 6234, Leg: 3},  // Mechanized Guardian
+		{GUID: 30129, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 30132, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 30143, Entry: 7849, Leg: 3},  // Mobile Alert System
+		{GUID: 30250, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 30254, Entry: 6232, Leg: 3},  // Arcane Nullifier X-21
+		{GUID: 30334, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 30335, Entry: 6234, Leg: 3},  // Mechanized Guardian
+		{GUID: 30339, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 30340, Entry: 6232, Leg: 3},  // Arcane Nullifier X-21
+		{GUID: 30341, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 31981, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 31983, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 31987, Entry: 6234, Leg: 3},  // Mechanized Guardian
+		{GUID: 31988, Entry: 6234, Leg: 3},  // Mechanized Guardian
+		{GUID: 31989, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33454, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33459, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33460, Entry: 6232, Leg: 3},  // Arcane Nullifier X-21
+		{GUID: 33471, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33472, Entry: 6232, Leg: 3},  // Arcane Nullifier X-21
+		{GUID: 33473, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33490, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33493, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33494, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33497, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33498, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 33499, Entry: 6212, Leg: 3},  // Dark Iron Agent
+		{GUID: 590004, Entry: 6228, Leg: 3}, // Dark Iron Ambassador
+		{GUID: 33458, Entry: 6212, Leg: 4},  // Dark Iron Agent
+	},
+}
+
+// droppedPacksAsleep walks the plan on the server's navmesh and fails when the walk makes a dropped spawn reachable that
+// the plan's record does not list, or when a listed spawn is no longer reachable. plan is the loaded plan (the export
+// comes from tools/dungeongen/testdata/map<plan.Map>), dropped its dropped set, and mmaps a folder with the server's
+// mmaps for the plan's map ("" to use $TURTLE_AGENT_MMAPS, ~/turtle-agent-mmaps or the build VM's
+// ~/tb-ci/mmaps-turtle<map>). See the file comment for what the walk, the pack's spawns and the reach are.
 func droppedPacksAsleep(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps string) {
 	t.Helper()
 	passes, walked, samples, spawns, otherFloor := droppedPasses(t, plan, dropped, mmaps)
+	known, pinned := droppedPackKnownReachable[plan.Name]
 	lines := make([]string, 0, len(passes))
 	for _, f := range passes {
-		lines = append(lines, f.line(plan.Name, dropped[f.pack].label()))
+		lines = append(lines, fmt.Sprintf("{GUID: %d, Entry: %d, Leg: %d}: %s",
+			f.spawn.GUID, f.spawn.Entry, f.leg, f.line(plan.Name, dropped[f.pack].label())))
 	}
-	known, pinned := droppedPackKnownPasses[plan.Name]
+	t.Logf("%s: no LOS: distance only, through-wall spawns over-counted", plan.Name)
+	t.Logf("%s: %d dropped packs, %d of their spawns (%d on another floor, %d yd band, never wake), %.0f yd of navmesh path sampled every %d yd (%d samples): %d distance-reachable, %d recorded",
+		plan.Name, len(dropped), spawns, otherFloor, trashcheck.OtherFloorYd, walked, droppedSampleStep, samples, len(passes), len(known))
 	if !pinned {
-		t.Fatalf("%s: no dropped-pack record: add %q: %d to droppedPackKnownPasses with the passes this walk makes (0 is the aim; pin a number only for a pass the branch took):\n  %s",
+		t.Fatalf("%s: no dropped-pack record: add \"%s\" to droppedPackKnownReachable with these %d distance-reachable spawns and the live run that proves them asleep:\n  %s",
 			plan.Name, plan.Name, len(passes), strings.Join(lines, "\n  "))
 	}
-	t.Logf("%s: %d dropped packs, %d of their spawns (%d on another floor, %d yd band, never wake), %.0f yd of navmesh path sampled every %d yd (%d samples): %d passes (known %d)",
-		plan.Name, len(dropped), spawns, otherFloor, trashcheck.OtherFloorYd, walked, droppedSampleStep, samples, len(passes), known)
-	if len(passes) == known {
+
+	want := make(map[droppedReach]bool, len(known))
+	for _, d := range known {
+		want[d] = true
+	}
+	got := make(map[droppedReach]droppedPass, len(passes))
+	for _, f := range passes {
+		got[droppedReach{GUID: f.spawn.GUID, Entry: f.spawn.Entry, Leg: f.leg}] = f
+	}
+	var added []droppedPass
+	for k, f := range got {
+		if !want[k] {
+			added = append(added, f)
+		}
+	}
+	var gone []droppedReach
+	for _, d := range known {
+		if _, ok := got[d]; !ok {
+			gone = append(gone, d)
+		}
+	}
+	if len(added) == 0 && len(gone) == 0 {
 		return
 	}
-	if len(passes) > known {
-		t.Errorf("%s: %d dropped-pack passes, known %d: the walk wakes %d more spawns of the packs the order drops:\n  %s",
-			plan.Name, len(passes), known, len(passes)-known, strings.Join(lines, "\n  "))
-		return
+	nowLeg := map[droppedSpawn]int{}
+	for k := range got {
+		nowLeg[droppedSpawn{GUID: k.GUID, Entry: k.Entry}] = k.Leg
 	}
-	t.Errorf("%s: %d dropped-pack passes, known %d: %d passes are gone (a moved pin is fine: re-pin it):\n  %s",
-		plan.Name, len(passes), known, known-len(passes), strings.Join(lines, "\n  "))
+	sort.Slice(added, func(a, b int) bool { return added[a].spawn.GUID < added[b].spawn.GUID })
+	sort.Slice(gone, func(a, b int) bool { return gone[a].GUID < gone[b].GUID })
+	var b strings.Builder
+	for _, f := range added {
+		fmt.Fprintf(&b, "\n  new: {GUID: %d, Entry: %d, Leg: %d}: %s", f.spawn.GUID, f.spawn.Entry, f.leg, f.line(plan.Name, dropped[f.pack].label()))
+	}
+	for _, d := range gone {
+		why := "no longer reachable: the walk moved, the spawn is pulled now, or it stands on another floor"
+		if leg, ok := nowLeg[droppedSpawn{GUID: d.GUID, Entry: d.Entry}]; ok {
+			why = fmt.Sprintf("the nearest hop moved to leg %d", leg)
+		}
+		fmt.Fprintf(&b, "\n  stale: %s (%s)", d.label(), why)
+	}
+	t.Errorf("%s: the distance-reachable dropped spawns changed: %d new (a new risk: add each back as a planned pull, or let a live run prove it), %d recorded but no longer reachable (drop each from droppedPackKnownReachable):%s\n  (no LOS: distance only, through-wall spawns over-counted)",
+		plan.Name, len(added), len(gone), b.String())
 }
 
 // droppedPasses walks the plan and returns the closest sample of every dropped spawn it wakes, the walked yards, the
@@ -250,14 +362,18 @@ func droppedPasses(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps st
 		t.Fatalf("%s: export the route: %v", plan.Name, err)
 	}
 	hops := []dungeon.Point{plan.Entrance}
-	var rows []string
+	type hopRow struct {
+		label string
+		leg   int
+	}
+	var rows []hopRow
 	for _, q := range pts {
 		at := dungeon.Point{X: q.px, Y: q.py, Z: q.pz}
 		if len(hops) != 0 && dist(at, hops[len(hops)-1]) < 0.01 {
 			continue
 		}
 		hops = append(hops, at)
-		rows = append(rows, fmt.Sprintf("leg %d row %d (%s)", q.leg, q.seq, q.kind))
+		rows = append(rows, hopRow{label: fmt.Sprintf("leg %d row %d (%s)", q.leg, q.seq, q.kind), leg: q.leg})
 	}
 	if len(hops) < 2 {
 		t.Fatalf("%s: %d party points, want the walk", plan.Name, len(hops))
@@ -321,7 +437,7 @@ func droppedPasses(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps st
 			if cur, ok := best[s.spawn.GUID]; !ok || d < cur.dist {
 				cp := *s
 				cp.dist = d
-				cp.to, cp.row = hops[ws.hop+1], rows[ws.hop]
+				cp.to, cp.row, cp.leg = hops[ws.hop+1], rows[ws.hop].label, rows[ws.hop].leg
 				best[s.spawn.GUID] = &cp
 			}
 		}
