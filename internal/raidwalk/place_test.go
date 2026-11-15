@@ -692,6 +692,9 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // below.
 // Walk 104 T25 (2026-11-15): 419 (417 + 2), the Arlokk ledge's west row gains a top waypoint and the ring row a
 // second stair point (the three stands moved out of their own packs' wake).
+// Walk 107 T34 (2026-11-15): 415 on its own, the Mandokir leg pulls the Vilebranch Speaker last and its boss row
+// gains the arena-floor stand -12188 -1956 130.6 (one more row; the exporter's own cut loses a row, which this Build
+// does not add), so 420 combined.
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -702,8 +705,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 422 {
-		t.Fatalf("the fixture has %d steps, want 422", len(rows.Steps))
+	if len(rows.Steps) != 420 {
+		t.Fatalf("the fixture has %d steps, want 420", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
