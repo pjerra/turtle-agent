@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,8 +26,9 @@ const lbrsDevWalkYd = 16001.1
 const lbrsMaxWalkYd = 5200.0
 
 // lbrsPacks is the plan's pull-group count: 113 from the round-1 re-order, minus 1 dropped upper-ledge pack (leg 0 pg 20
-// at z=43, off the walk), plus 2 from splitting leg 1 pg 11 into its 3 natural 2-mob pairs (round 2, dr41).
-const lbrsPacks = 114
+// at z=43, off the walk), plus 2 from splitting leg 1 pg 11 into its 3 natural 2-mob pairs (round 2, dr41), minus the 2
+// back Vosh'gajin platform pairs folded into leg 1.boss (round 3: inside boss 9236's reach + raid-spread margin).
+const lbrsPacks = 112
 
 // lbrsPlan is the plan under test.
 const lbrsPlan = "../../dungeons/lower_blackrock_spire.json"
@@ -95,20 +97,47 @@ func TestLowerBlackrockSpireRouteOrder(t *testing.T) {
 			t.Errorf("leg 1 pg %d has %d entries (want <= 5; split the 6-mob Vosh'gajin platform pack, dr41 step 60)", i, len(pg.Entries))
 		}
 	}
-	if n := len(p.Legs[1].PullGroups); n < 3 {
-		t.Fatalf("leg 1 has %d pull_groups, want >= 3", n)
+	if n := len(p.Legs[1].PullGroups); n < 1 {
+		t.Fatalf("leg 1 has %d pull_groups, want >= 1", n)
 	} else {
-		boss := p.Legs[1].Boss.Position
-		for _, idx := range []int{n - 2, n - 1} {
-			pg := p.Legs[1].PullGroups[idx]
-			if len(pg.Approach) == 0 {
-				t.Errorf("leg 1 pg %d has no approach stand out of Vosh'gajin's aggro reach", idx)
-				continue
+		cs, err := readCreatures(filepath.Join("testdata", "map229", "creatures.tsv"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reach float64
+		for _, c := range cs {
+			if uint32(c.Entry) == p.Legs[1].Boss.Entry {
+				reach = routeReach(p, c)
+				break
 			}
-			st := pg.Approach[len(pg.Approach)-1]
-			dx, dy, dz := st.X-boss.X, st.Y-boss.Y, st.Z-boss.Z
-			if dx*dx+dy*dy+dz*dz < 27*27 {
-				t.Errorf("leg 1 pg %d stand (%.1f %.1f %.1f) is < 27 yd from boss 9236", idx, st.X, st.Y, st.Z)
+		}
+		if reach <= 0 {
+			t.Fatalf("boss %d not found in testdata/map229/creatures.tsv", p.Legs[1].Boss.Entry)
+		}
+		front := p.Legs[1].PullGroups[n-1]
+		var cx, cy, cz float64
+		for _, pt := range front.Positions {
+			cx += float64(pt.X)
+			cy += float64(pt.Y)
+			cz += float64(pt.Z)
+		}
+		cnt := float64(len(front.Positions))
+		cx, cy, cz = cx/cnt, cy/cnt, cz/cnt
+		boss := p.Legs[1].Boss.Position
+		dx, dy, dz := cx-float64(boss.X), cy-float64(boss.Y), cz-float64(boss.Z)
+		if dist := math.Sqrt(dx*dx + dy*dy + dz*dz); dist < reach {
+			t.Errorf("leg 1 front pair (%.2f %.2f %.2f) is %.2f yd from boss %d, want >= routeReach %.2f yd", cx, cy, cz, dist, p.Legs[1].Boss.Entry, reach)
+		}
+		if p.Legs[1].Boss.Radius < 24 {
+			t.Errorf("leg 1 boss radius %.1f, want >= 24 to cover the two back platform pairs pulled with %d", p.Legs[1].Boss.Radius, p.Legs[1].Boss.Entry)
+		}
+		first := map[uint32]bool{}
+		for _, e := range p.Legs[1].Boss.First {
+			first[e] = true
+		}
+		for _, want := range []uint32{9240, 9239, 9265, 9269} {
+			if !first[want] {
+				t.Errorf("leg 1 boss.first %v missing platform unit %d", p.Legs[1].Boss.First, want)
 			}
 		}
 	}

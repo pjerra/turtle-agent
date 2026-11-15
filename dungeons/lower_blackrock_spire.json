@@ -37,7 +37,7 @@
     "LBRS and UBRS share map 229; this plan is the lower half. UBRS is the raid plan upper_blackrock_spire.",
     "Route order 2026-11-14 (issue #1542; the measurements and per-pack tables are in the route-order audit of 2026-11-12): the packs are ordered along the seven boss-to-boss walks, not by nearest boss. Same seven bosses in the same order, the same 113 packs with their entries, positions, radii, patrol blocks and approach stands; only the pack order and the leg a pack belongs to changed (79 packs are pulled by another leg than the deployed plan's). The leg `to` points moved onto the walk (the deployed leg-0 point and the deployed path rows at steps 123, 238, 281, 311, 339 and 374) and Omokk's boss approach 10 -576.2 29.7, the far end of the pit corridor, is dropped: the leg ends at the boss. 183 steps (the deployed rows have 393, a fresh export of the old order 575), 4,830 yd against the 2,994 yd straight route; the only re-walked ground is the way out of Omokk's and Zigris's halls. Every hop passes plan-check (362 points) and the server path query (plan-probe: 183 steps, 0 bad).",
     "Server-path seams of the old order, kept for reference: the z 31 pit reaches the z 48.8 shelf only by the east loop and the ramp at 41.9 -434.9 -\u003e 43.9 -404.1; the z -7 ledge reaches the z 24 shelf Vosh'gajin stands on only by the 146 yd ramp, not from the z 11 spider floor (658 yd); the corridors at 39.2 -577.1 / 0 -576, 0 -448 -18.5 and -21.33 -533.33 split their long hops. The new order does not walk those stretches; if a later edit walks one again, cut its hops at those points.",
-    "Vosh'gajin's two 9240 Shadow Priests (linked to him, creature_groups leader 43522) are the boss's `first` units, not a pull: they cannot be pulled 20 yd from him. The 9239/9240 shelf pack at -99.1 -481.7 keeps its pull at the shelf's east end because the room has no wider stand on the mesh. Mother Smolderweb is killed in leg 3, before the 10374 patroller (-127.3 -520.3 11.8) is pulled on the spider floor in leg 4, so that pull no longer fights beside her."
+    "Vosh'gajin's front pair [9240, 9239] at (-93.23, -480.52, 24.42) stands 28.01 yd from boss 9236 (-121.19, -482.18, 24.71), outside his routeReach (22.0 yd at hire level 59, 26.0 yd at band low 55) though inside a 10 yd raid-spread margin (29-33 yd); no further-east data-backed floor point on the z ~ 24.4 platform with LOS exists in creatures.tsv/gameobjects.tsv (the next east spawn is 8 yd lower at the ramp foot without LOS). The two back pairs [9239, 9240] (19.3-21.5 yd from 9236) and [9265, 9269] (19.9-23.1 yd from 9236) sit inside boss 9236's routeReach + raid-spread margin and are folded into leg 1.boss (radius 24, first [9240, 9239, 9265, 9269]) to be pulled with him on purpose. Mother Smolderweb is killed in leg 3, before the 10374 patroller (-127.3 -520.3 11.8) is pulled on the spider floor in leg 4, so that pull no longer fights beside her."
   ],
   "legs": [
     {
@@ -484,34 +484,13 @@
             {"x": -93.27, "y": -483.15, "z": 24.42}
           ],
           "radius": 5
-        },
-        {
-          "entries": [9239, 9240],
-          "positions": [
-            {"x": -104.08, "y": -473.19, "z": 24.43},
-            {"x": -100.22, "y": -472.5, "z": 24.43}
-          ],
-          "radius": 5,
-          "approach": [
-            {"x": -93.2, "y": -477.9, "z": 24.42}
-          ]
-        },
-        {
-          "entries": [9265, 9269],
-          "positions": [
-            {"x": -103.79, "y": -491.78, "z": 24.43},
-            {"x": -100.07, "y": -491.54, "z": 24.43}
-          ],
-          "radius": 5,
-          "approach": [
-            {"x": -93.27, "y": -483.15, "z": 24.42}
-          ]
         }
       ],
       "boss": {
         "entry": 9236,
         "position": {"x": -121.19, "y": -482.18, "z": 24.71},
-        "first": [9240]
+        "radius": 24,
+        "first": [9240, 9239, 9265, 9269]
       }
     },
     {
