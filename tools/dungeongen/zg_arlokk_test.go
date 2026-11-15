@@ -13,7 +13,9 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 // zgArlokkLeg is the leg's index in dungeons/zul_gurub.json.
@@ -35,6 +37,14 @@ const zgArlokkMaxWalkYd = 2160.0
 // temple's east ramp: the party walks 167.7 yd of navmesh path over 50.6 yd straight to it (3.31x), and the run leader
 // walks it in its 40 yd approach hops (DungeonRunPolicy's ApproachHop) instead of one cut hop. Every other pair keeps 1.5x.
 const zgArlokkGongApproachYd = 175.0
+
+// zgArlokkLedgeDescentYd caps the second hop of the leg that may exceed 1.5x its straight distance: the walk from the
+// ledge's west stand on the top (the z 60 ledge's west 5, walk 104 T25) down to the north stair's ledge end, the first
+// point of the lower ring's approach. The temple descends only one way, the ledge's stair to the z 60 landing, the
+// landing's south corridor west and the north stair: 118.8 yd of navmesh path over 37.7 yd straight (3.15x). The hop's
+// own start is the top, so no authored corridor point sits within 20 yd of the lower pack (the walk's corridor is 10.9 yd
+// above it, outside the lints' 9 yd storey band). Every other pair keeps 1.5x, but the gong approach (zgArlokkGongApproachYd).
+const zgArlokkLedgeDescentYd = 130.0
 
 // zgArlokkPatrolShotYd is the tank's shot the stand-pull gate waits for a patroller in (TortoiseBots
 // DungeonRunPolicy.h's kStandPullShotYd): a stand must lie within it of a loop point for the gate to fire.
@@ -147,6 +157,14 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 		t.Fatal("the Arlokk leg has no use_object stand")
 	}
 
+	// The lower ring's first approach point: the hop that ends there is the ledge descent (capped at
+	// zgArlokkLedgeDescentYd, the temple's only route from the z 60 ledge to the north stair).
+	var ledgeDescentEnd *dungeon.Point
+	if gs := p.Legs[zgArlokkLeg].PullGroups; len(gs) > 0 && len(gs[len(gs)-1].Approach) > 0 {
+		p0 := gs[len(gs)-1].Approach[0]
+		ledgeDescentEnd = &p0
+	}
+
 	// Every pair is checked, the last pull->gong stand hop included: that one hop is the arena descent (capped at
 	// zgArlokkGongApproachYd), every other pair keeps 1.5x, so the run leader walks no uncut detour of its own.
 	total := 0.0
@@ -164,6 +182,15 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 			}
 			fmt.Printf("gong approach: %.1f yd of path over %.1f yd straight (%.2fx, cap %.0f yd)\n", pr.length, sd,
 				pr.length/sd, zgArlokkGongApproachYd)
+			continue
+		}
+		if ledgeDescentEnd != nil && zgArlokkDist3(pr.b, *ledgeDescentEnd) < 1.0 {
+			if pr.length > zgArlokkLedgeDescentYd {
+				t.Errorf("%s -> %s: %.1f yd of path over %.1f yd straight (want <= %.0f yd: the ledge descent to the north stair)",
+					pr.from, pr.to, pr.length, sd, zgArlokkLedgeDescentYd)
+			}
+			fmt.Printf("ledge descent: %.1f yd of path over %.1f yd straight (%.2fx, cap %.0f yd)\n", pr.length, sd,
+				pr.length/sd, zgArlokkLedgeDescentYd)
 			continue
 		}
 		if pr.length > 1.5*sd {
@@ -459,5 +486,146 @@ func TestZulGurubArlokkGongStepAfterIsAPlaceStart(t *testing.T) {
 	}
 	if step, _, _, _, err := raidwalk.PlaceStart(rows, words(open+2)); err != nil || step != open+2 {
 		t.Errorf("step %d (the row after the gong, a boss approach move) is no place start: %v (%d)", open+2, err, step)
+	}
+}
+
+// zgArlokkLedgePacks are the three packs of the temple's z 60 ledge and z 49.6 ring, by their creature_groups leader:
+// the landing's six (the four Panthers 49343-49346 and the two Blood Drinkers 51594/51595 all share leader 49343), the
+// ledge's west five (49329 and its four Panthers) and the lower ring's six (51365, 51366 and their four Panthers).
+// Walk 104 T25: two near wipes at step 337, 14 dead (fz5a-7 21:18:25Z and fz5b-1/fz6b at the same row) with 17 bodies
+// engaged (6 + 5 + 6); the tank engaged 11353 on arrival at 1.7 yd. Every one of the three rows' stands stood INSIDE its
+// own pack's wake, so each pull fired from beside the pack and the fight dragged the other two in.
+var zgArlokkLedgePacks = []struct {
+	name string
+	lead uint64
+	// group is the plan's pull_groups index that owns the pack; the plan walks them in this order.
+	group int
+}{
+	{"the z 60 landing's 6 (leader 49343: 4x11365 + 2x11353)", 49343, 23},
+	{"the z 60 ledge's west 5 (leader 49329)", 49329, 24},
+	{"the z 49.6 ring's 6 (leader 51365)", 51365, 25},
+}
+
+// TestZulGurubArlokkLedgePacksPulledFromTheirOwnStands is walk 104's T25 rule. Each of the ledge's and the ring's three
+// packs is pulled from a stand that is
+//   - OUTSIDE its own pack's wake: the aggro radius at the plan-check party level (60, the export's 20 yd detection) plus
+//     2 yd, which stays inside the tank's 28.5 yd shot;
+//   - in the tank's shot of its own nearest spawn, with line of sight;
+//   - the lint's aggro+8 yd (28) out of every pack a LATER row pulls;
+//
+// and each row's radius owns only its own formations. The two z 60 packs are fought from the top (no point of the ledge
+// stands outside their wake) and the ring's pack last from its own floor (nothing above it is in shot without making it
+// walk the ledge). On origin/dev this fails by 13.0, 16.3 and 17.5 yd: the stands stood 9.0, 5.7 and 4.5 yd from their
+// own nearest spawn, and T25's wipe followed (the tank engaged on arrival).
+func TestZulGurubArlokkLedgePacksPulledFromTheirOwnStands(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+	}
+	defer pl.Close()
+	w, _, err := worldspawn.Load(filepath.Join("testdata", "map309"), 309)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		// partyLevel is the lint's party level (cmd/turtle-agent/plan_check_cmd.go): the aggro radius below is its rule.
+		partyLevel = 60
+		// standWakeYd is the margin outside its own pack's wake a stand keeps (the run leader's spread eats it first);
+		// with the 20 yd detection it puts the stand at 22, inside the tank's 28.5 yd shot.
+		standWakeYd = 2.0
+	)
+	fams := zgFormations(cs)
+	// reach is the widest aggro radius of a formation: worldspawn's AggroRadius (the export's detection range minus the
+	// level difference, times the aggro rate 1) over its members, matched by guid.
+	reach := func(f *zgFormation) float64 {
+		best := 0.0
+		for _, c := range f.Member {
+			for _, s := range w.Spawns {
+				if s.GUID != c.GUID {
+					continue
+				}
+				if r := float64(worldspawn.AggroRadius(s, partyLevel, 1)); r > best {
+					best = r
+				}
+			}
+		}
+		return best
+	}
+	nearest := func(at dungeon.Point, f *zgFormation) (float64, creature) {
+		best, who := math.Inf(1), creature{}
+		for _, c := range f.Member {
+			if d := zgArlokkDist3(at, c.Pos); d < best {
+				best, who = d, c
+			}
+		}
+		return best, who
+	}
+	leg := p.Legs[zgArlokkLeg]
+	stands := map[int]dungeon.Point{}
+	for _, pack := range zgArlokkLedgePacks {
+		if pack.group >= len(leg.PullGroups) {
+			t.Fatalf("%s: the plan has %d pull groups, no %d", pack.name, len(leg.PullGroups), pack.group)
+		}
+		fam := fams[pack.lead]
+		if fam == nil || len(fam.Member) == 0 {
+			t.Fatalf("%s: no spawn with leader %d in the test export", pack.name, pack.lead)
+		}
+		g := leg.PullGroups[pack.group]
+		if !g.StandPull || len(g.Approach) == 0 {
+			t.Errorf("%s: pull group %d is not a stand pull with an approach", pack.name, pack.group)
+			continue
+		}
+		stand := g.Approach[len(g.Approach)-1]
+		stands[pack.group] = stand
+		wake := reach(fam)
+		d, who := nearest(stand, fam)
+		if d < wake+standWakeYd {
+			t.Errorf("%s: the stand %.2f %.2f %.2f stands %.1f yd from its own spawn %d (%.1f %.1f %.1f), want %.0f yd or more (outside the pack's %.0f yd wake + %.0f: walk 104 T25, the tank engaged on arrival)",
+				pack.name, stand.X, stand.Y, stand.Z, d, who.GUID, who.Pos.X, who.Pos.Y, who.Pos.Z, wake+standWakeYd, wake, standWakeYd)
+		}
+		if d > zgArlokkPatrolShotYd {
+			t.Errorf("%s: the stand %.2f %.2f %.2f is %.1f yd from its own nearest spawn, want within the tank's %.1f yd shot",
+				pack.name, stand.X, stand.Y, stand.Z, d, zgArlokkPatrolShotYd)
+		}
+		ray, err := pl.Raycast(p309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{who.Pos.X, who.Pos.Y, who.Pos.Z + 1})
+		if err != nil || !ray.Known || !ray.Clear {
+			t.Errorf("%s: the stand %.2f %.2f %.2f has no clear line of sight to its nearest spawn %d: %v", pack.name,
+				stand.X, stand.Y, stand.Z, who.GUID, err)
+		}
+		// The row's radius owns its own formations only: no other spawn of the leg lies inside radius + 1 of the row point
+		// on the row's own floor (the rows' radii mark formations by DB spawn, and a spawn under the row is another shelf).
+		for j, g2 := range leg.PullGroups {
+			if j == pack.group {
+				continue
+			}
+			for _, q := range g2.Positions {
+				dd := zgArlokkDist3(q, g.Positions[0])
+				if dd <= float64(g.Radius)+1 {
+					t.Errorf("%s: pull group %d (radius %.0f) reaches the spawn %.1f %.1f %.1f of pull group %d (%.1f yd from its point)",
+						pack.name, pack.group, g.Radius, q.X, q.Y, q.Z, j, dd)
+				}
+			}
+		}
+		// Every pack a LATER row pulls stays the lint's aggro + 8 yd out of the stand.
+		for j := pack.group + 1; j < len(leg.PullGroups); j++ {
+			for _, q := range leg.PullGroups[j].Positions {
+				if dd := zgArlokkDist3(stand, q); dd < wake+planlint.AggroMarginYd {
+					t.Errorf("%s: the stand %.2f %.2f %.2f stands %.1f yd from a later pack's spawn %.1f %.1f %.1f (pull group %d), want %.0f yd (its aggro + %g)",
+						pack.name, stand.X, stand.Y, stand.Z, dd, q.X, q.Y, q.Z, j, wake+planlint.AggroMarginYd, planlint.AggroMarginYd)
+				}
+			}
+		}
+	}
+	// The order: the two z 60 ledge packs are fought from the top, and the ring's pack last on its own floor. The descent
+	// to the ring passes 10.9 yd above the ring's spawns on the ledge corridor, so the party goes down only when the two
+	// ledge packs are dead.
+	for _, pack := range zgArlokkLedgePacks[:2] {
+		if s, ok := stands[pack.group]; ok && s.Z < 70 {
+			t.Errorf("%s: its stand is at z %.1f, want the top (z 71.3): no point of the z 60 ledge stands outside its own wake", pack.name, s.Z)
+		}
+	}
+	if s, ok := stands[zgArlokkLedgePacks[2].group]; ok && s.Z > 52 {
+		t.Errorf("%s: its stand is at z %.1f, want its own ring floor (z 49.6): pulled from above it walks the ledge", zgArlokkLedgePacks[2].name, s.Z)
 	}
 }

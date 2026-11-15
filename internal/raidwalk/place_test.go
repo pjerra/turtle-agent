@@ -690,6 +690,8 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // fixture is the plain build). Walk 107 T31 (2026-11-15): 417, the Venoxis camp's stand point -11899.3 -1849.1 61.3
 // is one more approach row. The T25 and T34 legs (walk 104, 2026-11-15) add their rows on top: the combined count is
 // below.
+// Walk 104 T25 (2026-11-15): 419 (417 + 2), the Arlokk ledge's west row gains a top waypoint and the ring row a
+// second stair point (the three stands moved out of their own packs' wake).
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -700,8 +702,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 420 {
-		t.Fatalf("the fixture has %d steps, want 420", len(rows.Steps))
+	if len(rows.Steps) != 422 {
+		t.Fatalf("the fixture has %d steps, want 422", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
