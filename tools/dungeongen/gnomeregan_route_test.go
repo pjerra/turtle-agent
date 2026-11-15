@@ -186,9 +186,11 @@ func gnomerDist(a, b dungeon.Point) float64 {
 // the dormitory's far rings, the Fallout caves' side pockets, the west wing, the Launch Bay's lower floor and east ring
 // and the lower-deck corridors are off the boss-to-boss road, and the re-order bought its 4,234 yd by leaving them alone.
 // It is the route-order audit's trash-check, kept as a test (droppedPacksAsleep: every path segment sampled every 2 yd,
-// the pack's aggro at the plan's lowest level plus the 5 yd party spread; no line of sight, as the export has no vmap),
-// and it fails on one more pass than the 48 it records (droppedPackKnownPasses) or one fewer. Skips without the map-90
-// navmesh unless TURTLE_AGENT_MMAPS_REQUIRED=1.
+// the pack's aggro at the plan's lowest level plus the 5 yd party spread, and the trash check's 15 yd floor band as the
+// wake rule; no line of sight, as the export has no vmap), and it fails: the walk still wakes 48 spawns of the packs it
+// drops (droppedPackKnownPasses pins 0), the lower deck under the last corridor and the Launch Bay's lower floor among
+// them, and its lines are the worklist for the branch that adds those packs back as planned pulls. Skips without the
+// map-90 navmesh unless TURTLE_AGENT_MMAPS_REQUIRED=1.
 func TestGnomereganDroppedPacksAsleep(t *testing.T) {
 	p, err := dungeon.Load(gnomerPlan)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/trashcheck"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
@@ -53,11 +54,19 @@ import (
 // every 2 yd. A sample within a dropped spawn's aggro reach in 3D is a pass: worldspawn.AggroRadius (the core's rule, at
 // the plan's lowest level, level_band[0]) plus the spawn's wander, plus the party's 5 yd spread.
 //
-// A pass is not always a defect a plan can fix (a corridor's lower deck 13 yd under the walk is still outside a
-// navmesh's top-down reach), so the plan's record pins how many passes its walk makes (droppedPackKnownPasses, the way
-// routeAggroKnownFailing pins every hand-maintained plan's later-pack passes): the test fails on one more, on one fewer
-// and on a plan with no line at all, and prints the pass lines to re-pin. A route-order branch adds its plan with the
-// number its own audit measured and took (0 when its walk keeps every dropped pack asleep), and the plan test:
+// Woken is the trash check's rule (internal/trashcheck): the 3D reach above, plus its floor filter. A spawn the walk
+// passes more than trashcheck.OtherFloorYd (15 yd) above or below on every sample within that reach in 2D stands on
+// another floor and never wakes (Check drops it from every segment), and here it is no pass. There is no line of sight
+// in either tool: the exports carry no vmap geometry and the trash check reports the same limit ("no LOS: through-wall
+// aggro is over-counted", internal/trashcheck/check.go), so a wall between the route and the pack is not modelled and
+// the check over-counts; a route that still passes its pin is clear in the strict sense.
+//
+// A remaining pass is a defect of the route, not of the record: the walk comes within aggro of a pack the order drops,
+// so the pack has to come back as a planned pull (or the walk has to move). The plan's record pins how many passes its
+// walk makes (droppedPackKnownPasses, the way routeAggroKnownFailing pins every hand-maintained plan's later-pack
+// passes): the test fails on one more, on one fewer and on a plan with no line at all, and prints the pass lines. A
+// route-order branch lands with 0 (every dropped pack asleep); a plan with passes it still has to fix records them
+// only as a worklist and fails, and no "known reachable" allowlist is kept without the lead's decision. The plan test:
 //
 //	// TestGnomereganDroppedPacksAsleep walks the short route against the packs its order drops.
 //	func TestGnomereganDroppedPacksAsleep(t *testing.T) {
@@ -146,17 +155,21 @@ func (f droppedPass) line(plan, pack string) string {
 		f.to.X, f.to.Y, f.to.Z, f.row)
 }
 
-// droppedPackKnownPasses is, per plan, how many of its dropped packs' spawns its walk wakes today: the recorded state of
-// a route-order plan, as routeAggroKnownFailing records every hand-maintained plan's later-pack passes. A plan in here
-// is a plan whose passes were measured and taken; one more or one fewer pass is a failure, and a plan with no line here
-// is a failure too, so a route-order branch cannot land without its record.
+// droppedPackKnownPasses is, per plan, how many of its dropped packs' spawns its walk is allowed to wake: the recorded
+// state of a route-order plan, as routeAggroKnownFailing records every hand-maintained plan's later-pack passes. A plan
+// in here is a plan whose passes were measured: the number is what its branch took (0 when the walk keeps every dropped
+// pack asleep), and a plan with passes it has not fixed stays at 0 and fails, so its lines are the worklist. One more or
+// one fewer pass than the number is a failure, and a plan with no line here is a failure too, so a route-order branch
+// cannot land without its record.
 var droppedPackKnownPasses = map[string]int{
-	// 48 on origin/dev's merge of #471 (measured 2026-11-15): the lower deck under Thermaplugg's last corridor (its
-	// 6212/6234/6232 packs at z -304, 13 yd below the corridor's -291; the export has no line of sight, so the walk over
-	// them counts) plus the Launch Bay's lower floor. They are the route fix's open live-proof item, "The lower deck under
-	// the last corridor: 9 units 16.6-19.6 yd (3D) from it" (route-audit-1112/order/GNOMEREGAN-FIX.md): at a 27 party
-	// the tool gives those packs 31-34 yd of aggro, and only a live run can say whether the floor keeps them asleep.
-	"gnomeregan": 48,
+	// 0: the short route's walk still wakes 48 spawns of the packs it drops, measured 2026-11-15 under the trash
+	// check's own rule (3D reach plus its 15 yd floor band: they are no other floor). They are not a taken pass: each
+	// one is a dropped pack the walk comes within aggro of, so it has to come back as a planned pull (or the walk has
+	// to move) in the follow-up branch, and until then the test fails with them as its worklist. The tail is the
+	// lower deck under Thermaplugg's last corridor (its 6212/6234/6232 packs, 13 yd below the corridor's walk), the
+	// Launch Bay's lower floor, and the dormitory's far rings
+	// (route-audit-1112/order/GNOMEREGAN-FIX.md, "The lower deck under the last corridor: 9 units 16.6-19.6 yd (3D)").
+	"gnomeregan": 0,
 }
 
 // droppedPacksAsleep walks the plan on the server's navmesh and fails when it wakes a dropped pack the plan's record does
@@ -166,18 +179,18 @@ var droppedPackKnownPasses = map[string]int{
 // are.
 func droppedPacksAsleep(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps string) {
 	t.Helper()
-	passes, walked, samples, spawns := droppedPasses(t, plan, dropped, mmaps)
+	passes, walked, samples, spawns, otherFloor := droppedPasses(t, plan, dropped, mmaps)
 	lines := make([]string, 0, len(passes))
 	for _, f := range passes {
 		lines = append(lines, f.line(plan.Name, dropped[f.pack].label()))
 	}
 	known, pinned := droppedPackKnownPasses[plan.Name]
 	if !pinned {
-		t.Fatalf("%s: no dropped-pack record: add %q: %d to droppedPackKnownPasses with the passes this walk makes (0 is the aim; any number is a measured, taken pass):\n  %s",
+		t.Fatalf("%s: no dropped-pack record: add %q: %d to droppedPackKnownPasses with the passes this walk makes (0 is the aim; pin a number only for a pass the branch took):\n  %s",
 			plan.Name, plan.Name, len(passes), strings.Join(lines, "\n  "))
 	}
-	t.Logf("%s: %d dropped packs, %d of their spawns, %.0f yd of navmesh path sampled every %d yd (%d samples): %d passes (known %d)",
-		plan.Name, len(dropped), spawns, walked, droppedSampleStep, samples, len(passes), known)
+	t.Logf("%s: %d dropped packs, %d of their spawns (%d on another floor, %d yd band, never wake), %.0f yd of navmesh path sampled every %d yd (%d samples): %d passes (known %d)",
+		plan.Name, len(dropped), spawns, otherFloor, trashcheck.OtherFloorYd, walked, droppedSampleStep, samples, len(passes), known)
 	if len(passes) == known {
 		return
 	}
@@ -191,8 +204,9 @@ func droppedPacksAsleep(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mma
 }
 
 // droppedPasses walks the plan and returns the closest sample of every dropped spawn it wakes, the walked yards, the
-// sample count and how many spawns the record resolved.
-func droppedPasses(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps string) ([]droppedPass, float64, int, int) {
+// sample count, how many spawns the record resolved and how many of those the trash check's floor rule drops as another
+// floor.
+func droppedPasses(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps string) ([]droppedPass, float64, int, int, int) {
 	t.Helper()
 	if len(dropped) == 0 {
 		t.Fatalf("%s: the dropped set is empty: a route-order test names the packs its route leaves out", plan.Name)
@@ -250,7 +264,12 @@ func droppedPasses(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps st
 	}
 
 	best := map[uint64]*droppedPass{}
-	walked, samples := 0.0, 0
+	type walkSample struct {
+		at  dungeon.Point
+		hop int
+	}
+	var walk []walkSample
+	walked := 0.0
 	for i := 0; i+1 < len(hops); i++ {
 		a, b := hops[i], hops[i+1]
 		path, err := pl.Plan(plan.Map, navmesh.Vec3{a.X, a.Y, a.Z}, navmesh.Vec3{b.X, b.Y, b.Z})
@@ -269,21 +288,41 @@ func droppedPasses(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps st
 			}
 			for k := 0; k <= n; k++ {
 				f := float32(k) / float32(n)
-				at := dungeon.Point{X: from[0] + f*(to[0]-from[0]), Y: from[1] + f*(to[1]-from[1]), Z: from[2] + f*(to[2]-from[2])}
-				samples++
-				for si := range spans {
-					s := &spans[si]
-					d := dist(at, s.spawn.Pos)
-					if d >= s.reach {
-						continue
-					}
-					if cur, ok := best[s.spawn.GUID]; !ok || d < cur.dist {
-						cp := *s
-						cp.dist = d
-						cp.to, cp.row = b, rows[i]
-						best[s.spawn.GUID] = &cp
-					}
-				}
+				walk = append(walk, walkSample{at: dungeon.Point{X: from[0] + f*(to[0]-from[0]), Y: from[1] + f*(to[1]-from[1]), Z: from[2] + f*(to[2]-from[2])}, hop: i})
+			}
+		}
+	}
+	samples := len(walk)
+
+	// The trash check's floor rule, over the whole walk: a spawn that stands on another floor than every sample within
+	// its 2D reach is dropped from the model (`%d spawns on other floors ignored` in the trash check's report), so it is
+	// no pass here either. The 3D scan below then counts the same wakes the trash check counts.
+	at := make([]dungeon.Point, len(walk))
+	for i := range walk {
+		at[i] = walk[i].at
+	}
+	onFloor := spans[:0]
+	for _, s := range spans {
+		if near, sameFloor := trashcheck.FloorReach(s.spawn.Pos, at, s.reach); near && !sameFloor {
+			continue
+		}
+		onFloor = append(onFloor, s)
+	}
+	otherFloor := len(spans) - len(onFloor)
+	spans = onFloor
+
+	for _, ws := range walk {
+		for si := range spans {
+			s := &spans[si]
+			d := dist(ws.at, s.spawn.Pos)
+			if d >= s.reach {
+				continue
+			}
+			if cur, ok := best[s.spawn.GUID]; !ok || d < cur.dist {
+				cp := *s
+				cp.dist = d
+				cp.to, cp.row = hops[ws.hop+1], rows[ws.hop]
+				best[s.spawn.GUID] = &cp
 			}
 		}
 	}
@@ -293,7 +332,7 @@ func droppedPasses(t *testing.T, plan *dungeon.Plan, dropped []PackRef, mmaps st
 		out = append(out, *f)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].dist < out[b].dist })
-	return out, walked, samples, len(spans)
+	return out, walked, samples, len(spans) + otherFloor, otherFloor
 }
 
 // droppedPackSpawns resolves each dropped pack to the spawns of the export it stands for: the hostile mobs within its
