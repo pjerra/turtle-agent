@@ -95,9 +95,10 @@ the flasks and the world buffs expire — then reads them back. A boss row is th
 `--prepull-aura-when boss` (the default), so the top-up stays out of it and never sends a list the fire is sending;
 under `--prepull-aura-when start`, where no boss row is fired, the top-up is what reads and tops up the hires at the
 boss pull. It uses the fire's path (the commander join when the unit store cannot see the raid, the per-bot role, the
-combat recheck before each send) but never pauses the run, never targets a dead bot, and never fails the walk: combat
-stops the batch quietly and the pull goes on. One `run.log` line names the pull and each topped bot with the ids put
-back and the cause (`death` or `expired`). Completion is tracked per hire: each hire is read once per pull step, and
+combat recheck before each send), pauses the run only while there is something to send (at most 15 s, resumed right
+after or at the cap), never targets a dead bot, and never fails the walk: combat during the top-up stops the batch
+quietly and the pull goes on. One `run.log` line names the pull and each topped bot with the ids put back and the
+cause (`death`, `expired`, or `never had`). Completion is tracked per hire: each hire is read once per pull step, and
 one a status could not read (a failed unit read, a body, a hire out of the commander's view) is read again at the next
 pre-pull status of the same pull. A hire that still lacks an id after 3 sends is done for that pull step too, with one
 line naming the ids (`... still lacks <ids> after 3 tries; giving up for this step`): an aura the server will not
