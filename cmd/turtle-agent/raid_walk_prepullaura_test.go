@@ -3262,3 +3262,71 @@ func TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentBossRowsInStartMode(t *testi
 		t.Fatalf("the top-up asked the run for %v", verbs)
 	}
 }
+
+// (j) An id the server will not stick (ticket T32: 23768 misses on one bot about 1 in 3 fires) is sent at most three
+// times per pull step. On r5 the hire stayed pending for ever, so every pre-pull status of the step resent it: a
+// fourth status before the same pull sent again and no line ever said the walk gave up.
+//
+//	the top-up sent to Rank 4 time(s) before the pull, want 3: ["prepull-aura: topup before step 4: Mtbot +2
+//	(expired), Otbot +2 (expired), Rank +2 (expired), Flitz +2 (expired), Zap +2 (expired), Holi +2 (expired)"
+//	"prepull-aura: topup before step 4: Rank +1 (expired)" "prepull-aura: topup before step 4: Rank +1 (expired)"
+//	"prepull-aura: topup before step 4: Rank +1 (expired)"]
+func TestPrepullAuraTopupGivesUpAfterThreeTries(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768")
+	ctx := context.Background()
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	// The second id of the list never lands on Rank: the first aura lands and is verified, so the resends are the one
+	// stubborn id.
+	a.drop[rank.GUID] = map[uint32]bool{23768: true}
+	// Four pre-pull statuses of pull step 4: the first puts both ids on every hire and the next ones retry Rank only,
+	// so without the cap the fourth would send to it again.
+	for i := 0; i < 3; i++ {
+		a.advance(2 * time.Second)
+		if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+			t.Fatalf("status %d of pull step 4: fired %v err %v", i+1, fired, err)
+		}
+	}
+	before := len(a.sent)
+	a.advance(2 * time.Second)
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+		t.Fatalf("the fourth status of pull step 4: fired %v err %v", fired, err)
+	}
+	// One top-up send is one apply of Rank's missing list, and each of those writes its own "+k" line (the AuraPort's
+	// first-aura verification may send the same id twice inside one apply, exactly as dungeon_run's buff presets do;
+	// that internal retry is not a second top-up attempt). So the attempt count is read from the walk's own lines.
+	attempts := 0
+	for _, n := range w.notesCopy() {
+		attempts += strings.Count(n, "Rank +")
+	}
+	if attempts != 3 {
+		t.Fatalf("the top-up sent to Rank %d time(s) before the pull, want 3: %q", attempts, prepullNotes(w, "Rank +"))
+	}
+	// Nothing lands for the stubborn id, at most three applies were made, and the walk said so once.
+	want := "prepull-aura: topup before step 4: Rank still lacks 23768 after 3 tries; giving up for this step"
+	runs := 0
+	for _, n := range w.notesCopy() {
+		if n == want {
+			runs++
+		}
+	}
+	if runs != 1 {
+		t.Fatalf("the give-up line appears %d time(s), want once: %q", runs, prepullNotes(w, "still lacks"))
+	}
+	// The other five hires were done at the first status: the later ones only retried Rank.
+	for _, line := range a.sent[12:] {
+		if !strings.HasPrefix(line, "Rank ") {
+			t.Fatalf("a later status sent to somebody else too: %v", a.sent[12:])
+		}
+	}
+	// The step is done for Rank now: the fourth status after the third apply sent nothing at all.
+	if tail := a.sent[before:]; len(tail) != 0 {
+		t.Fatalf("the fourth status sent %v after the walk gave up on Rank", tail)
+	}
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("the top-up asked the run for %v", verbs)
+	}
+}

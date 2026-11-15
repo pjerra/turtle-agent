@@ -413,13 +413,21 @@ func (w *walk) prepullRowAt(step int) planexport.StepRow {
 }
 
 // prepullTopupHire is one hire's place in one pull step's top-up: read is set once its auras were read at that step
-// and the ids it lacked were put back and read back (or nothing was lacking, which is a complete read too), and said
-// once the walk wrote the reason it was left out, so later statuses of the same step retry it without repeating the
-// line. A hire whose read failed, that is dead or that is out of the commander's view stays pending.
+// and the ids it lacked were put back and read back (or nothing was lacking, which is a complete read too), tries counts
+// the send attempts of that step and said is set once the walk wrote the reason it was left out, so later statuses of
+// the same step retry it without repeating the line. A hire whose read failed, that is dead or that is out of the
+// commander's view stays pending. Once tries reaches prepullTopupTryMax with an id still missing (an aura that will not
+// stick, ticket T32: 23768 misses on one bot about 1 in 3 fires) the hire is done for the step too: the walk does not
+// resend to it on every later pre-pull status.
 type prepullTopupHire struct {
-	read bool
-	said bool
+	read  bool
+	tries int
+	said  bool
 }
+
+// prepullTopupTryMax is how many times one pull step sends to the same hire. An id the server keeps refusing is the
+// bot's loss for that pull, not a reason to repeat the whole batch on every status before it.
+const prepullTopupTryMax = 3
 
 // prepullTopupMark is the hire's place in this pull step's top-up, created on first use. Keyed case-insensitively:
 // the frame's spelling may differ from the roster's.
@@ -482,7 +490,9 @@ func (w *walk) prepullAuraTopupSaid(pullStep int, name, format string, a ...any)
 // otherwise (food lasts ~15 min, the elixirs and world buffs longer). Completion is tracked PER HIRE for the pull step
 // (prepullTopupDone): a hire is done only after its auras were read and the ids it lacked were sent and read back, and
 // a dead, unseen or unreadable one stays retryable on the next pre-pull status of the same step, at most one read of
-// that hire per status. The step is done when every hire of the roster is done, and only then does a later status of
+// that hire per status. A hire that still lacks an id after prepullTopupTryMax sends is done for the step too, with one
+// line naming the ids: an aura the server will not stick (ticket T32) is not resent on every status before the pull.
+// The step is done when every hire of the roster is done, and only then does a later status of
 // the same step read nothing. Nothing is carried to the next pull step: an aura that was present at one pull can
 // expire seconds later, so only a read at the pull itself says what the hires carry.
 func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
@@ -644,6 +654,9 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 	var sent []int
 	for i := range targets {
 		tg := &targets[i]
+		// The attempt is counted before the send: a batch that combat stops mid-list leaves this hire's tries at the
+		// attempt it did not finish, so a later status of the step still has the budget to put the rest back.
+		w.prepullTopupMark(pullStep, tg.rec.Bot).tries++
 		if oc, err := dungeon.ApplyAuras(ctx, port, tg.unit, tg.missing, cfg, w.env.now); err != nil {
 			w.prepullAuraTopupStop(where, err)
 			break
@@ -681,12 +694,22 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		}
 	}
 	// Only a hire whose ids the read-back shows are all there is done for this pull step: one the store still shows
-	// short, or does not answer for, stays pending and is read again at the next pre-pull status of the same step.
+	// short, or does not answer for, stays pending and is read again at the next pre-pull status of the same step —
+	// until prepullTopupTryMax attempts were sent to it. An id that will not stick (the server refuses one aura on one
+	// bot; ticket T32) is then given up for this step with one line, instead of resending the batch on every status
+	// before the same pull.
 	for _, i := range sent {
 		tg := &targets[i]
+		mark := w.prepullTopupMark(pullStep, tg.rec.Bot)
 		if len(tg.rec.Missing) == 0 {
-			w.prepullTopupMark(pullStep, tg.rec.Bot).read = true
+			mark.read = true
 			delete(w.prepullTopupDied, strings.ToLower(tg.rec.Bot))
+			continue
+		}
+		if mark.tries >= prepullTopupTryMax {
+			w.prepullAuraTopupLine("prepull-aura: %s: %s still lacks %s after %d tries; giving up for this step",
+				where, tg.rec.Bot, idWords(tg.rec.Missing), mark.tries)
+			mark.read = true
 		}
 	}
 	if err := w.prepullAuraWrite(); err != nil {

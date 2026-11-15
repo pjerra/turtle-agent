@@ -99,8 +99,10 @@ combat recheck before each send) but never pauses the run, never targets a dead 
 stops the batch quietly and the pull goes on. One `run.log` line names the pull and each topped bot with the ids put
 back and the cause (`death` or `expired`). Completion is tracked per hire: each hire is read once per pull step, and
 one a status could not read (a failed unit read, a body, a hire out of the commander's view) is read again at the next
-pre-pull status of the same pull. Nothing is carried to the next pull step: an aura that was there at one pull can
-expire seconds later.
+pre-pull status of the same pull. A hire that still lacks an id after 3 sends is done for that pull step too, with one
+line naming the ids (`... still lacks <ids> after 3 tries; giving up for this step`): an aura the server will not
+stick is not resent on every status before the same pull. Nothing is carried to the next pull step: an aura that was
+there at one pull can expire seconds later.
 
 A `--place` walk revives the hires its own frames do not show alive before it moves the raid: the ZG Mandokir runs of
 walk 101b all wiped at the zone-in while the commander ran the corridor clear, and 19 corpses stayed dead through every
