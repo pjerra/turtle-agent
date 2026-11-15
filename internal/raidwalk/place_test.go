@@ -685,6 +685,8 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // 694, one fewer, because the lip replaces a path row the cutter used to add). Walk 71 fast (t1106k): 416, leg 8's
 // entry drops its second via and `to` is the placement row the placed walk already starts on. The Arlokk gong fix
 // (2026-11-14): 414, the step's stand moves onto the gong's own floor and the boss approach drops its two ramp vias.
+// Walk 107 T34 (2026-11-15): 415, the Mandokir leg pulls the Vilebranch Speaker last and its boss row gains the arena-floor
+// stand -12188 -1956 130.6 (one more row; the exporter's own cut loses a row, which this Build does not add).
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -695,8 +697,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 414 {
-		t.Fatalf("the fixture has %d steps, want 414", len(rows.Steps))
+	if len(rows.Steps) != 415 {
+		t.Fatalf("the fixture has %d steps, want 415", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
