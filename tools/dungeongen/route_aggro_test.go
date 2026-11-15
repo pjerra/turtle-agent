@@ -330,7 +330,7 @@ var routeAggroKnownFailing = map[string]int{
 	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 722, "scholomance": 2472, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
 	"razorfen_kraul": 342, "dire_maul_north": 46, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
 	"blackfathom_deeps": 311, "gnomeregan": 359, "lower_blackrock_spire": 818, "stormwind_vault": 421,
-	"frostmane_hollow": 149, "dire_maul_east": 97, "dire_maul_west": 189, "razorfen_downs": 379, "sunken_temple": 337, // dire_maul_west 199 -> 189: the revanchion to and the immol'thar stand move out of aggro, dropping their passes.
+	"frostmane_hollow": 149, "dire_maul_east": 97, "dire_maul_west": 130, "razorfen_downs": 379, "sunken_temple": 337, // dire_maul_west 189 -> 130: the 2026-11-15 route order (63 pulls in walk order, 25 groups gone) walks past fewer later packs; 199 -> 189 earlier: the revanchion to and the immol'thar stand move out of aggro.
 	"scarlet_armory": 99, "scarlet_cathedral": 215, "scarlet_graveyard": 220, "scarlet_library": 154, "shadowfang_keep": 383,
 	"stormwind_stockade": 180, "stratholme_live": 135, "stratholme_undead": 294, // newly hand-maintained: straight-segment counts for the draft routes.
 	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
