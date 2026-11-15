@@ -92,7 +92,7 @@ var pullSizeKnownCounts = map[string]int{
 	"blackfathom_deeps": 58, "gnomeregan": 88, "lower_blackrock_spire": 106, "stormwind_vault": 55,
 	"frostmane_hollow": 47, "dire_maul_east": 50, "dire_maul_west": 58, "razorfen_downs": 60, "sunken_temple": 65,
 	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 44, "scarlet_library": 42, "shadowfang_keep": 71,
-	"stormwind_stockade": 34, "stratholme_live": 51, "stratholme_undead": 74,
+	"stormwind_stockade": 34, "stratholme_live": 51, "stratholme_undead": 52, // stratholme_undead 74 -> 52 (route order 2026-11-15, issue #1542): 60 packs instead of 83, each pulled from the row before it along the boss-to-boss walk, so the party point is beside the pack and 22 fewer pulls drag a neighbour in.
 	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
 	"crescent_grove": 96, "dragonmaw_retreat": 85, "gilneas_city": 90, "black_morass": 35,
 	// fresh Onyxia plan for core 1181dev (two legs, seven packs, stand pulls): the stale map249 export holds only

@@ -332,7 +332,7 @@ var routeAggroKnownFailing = map[string]int{
 	"blackfathom_deeps": 311, "gnomeregan": 359, "lower_blackrock_spire": 818, "stormwind_vault": 421,
 	"frostmane_hollow": 149, "dire_maul_east": 97, "dire_maul_west": 189, "razorfen_downs": 379, "sunken_temple": 337, // dire_maul_west 199 -> 189: the revanchion to and the immol'thar stand move out of aggro, dropping their passes.
 	"scarlet_armory": 99, "scarlet_cathedral": 215, "scarlet_graveyard": 220, "scarlet_library": 154, "shadowfang_keep": 383,
-	"stormwind_stockade": 180, "stratholme_live": 135, "stratholme_undead": 294, // newly hand-maintained: straight-segment counts for the draft routes.
+	"stormwind_stockade": 180, "stratholme_live": 135, "stratholme_undead": 208, // newly hand-maintained: straight-segment counts for the draft routes. stratholme_undead 294 -> 208 (route order 2026-11-15, issue #1542): the walk no longer runs the northern lane, so 86 fewer straight segments pass a pack a later row pulls.
 	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
 	// Re-pinned for the TB plan reconcile: razorfen_kraul 256 -> 309 and dire_maul_north 36 -> 57 (ported/split legs and TB's
 	// leg order), scarlet_graveyard 184 -> 178 (the hall split moves the hall rows before the bosses), and dragonmaw_retreat
