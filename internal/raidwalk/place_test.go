@@ -686,7 +686,8 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // entry drops its second via and `to` is the placement row the placed walk already starts on. The Arlokk gong fix
 // (2026-11-14): 414, the step's stand moves onto the gong's own floor and the boss approach drops its two ramp vias.
 // The step-36 stand fix (2026-11-15, walk 107/108 T35): 415, the F6 bat camp's stand moves to -12130 -1495.7 133 and
-// the row gains that second approach row.
+// the row gains that second approach row. Round 3 (T35-r3): 412, the 49189 formation joins the F6 row (its stand pull and
+// approach row are gone) and the merged row walks to one stand, -12114.5 -1446.8 131.32.
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -697,8 +698,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 415 {
-		t.Fatalf("the fixture has %d steps, want 415", len(rows.Steps))
+	if len(rows.Steps) != 412 {
+		t.Fatalf("the fixture has %d steps, want 412", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
