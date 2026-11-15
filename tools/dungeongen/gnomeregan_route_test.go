@@ -47,7 +47,7 @@ var gnomerLegs = []struct {
 // dormitory rings' far side, the Fallout caves' side pockets, the west wing, the lower halls west of the tunnel, the
 // Launch Bay's lower floor and east ring, the Engineering Labs' lower floor and south wing, and the final corridors'
 // lower-deck platform. None of them stands within 18 yd of a kept pack, so 6 yd tells a re-added pack from a kept one.
-var gnomerDropped = []dungeon.Point{
+var gnomerDropped = [][3]float64{
 	{-532, 165, -155}, {-532, 161, -155}, {-554, 169, -155},
 	{-564, 184, -194}, {-492, 196, -194}, {-478, 165, -208},
 	{-498, 131, -209}, {-408, 159, -210}, {-398, 137, -211},
@@ -149,9 +149,10 @@ func TestGnomereganRouteOrder(t *testing.T) {
 		t.Errorf("%d packs / %d units, want 79 / 163: the short route keeps the packs on the four boss walks", packs, units)
 	}
 	for _, dropped := range gnomerDropped {
+		at := dungeon.Point{X: float32(dropped[0]), Y: float32(dropped[1]), Z: float32(dropped[2])}
 		for _, keep := range kept {
-			if d := gnomerDist(dropped, keep); d < 6 {
-				t.Errorf("the dropped pack at %.0f %.0f %.0f is back: a pull group stands %.1f yd from it", dropped.X, dropped.Y, dropped.Z, d)
+			if d := gnomerDist(at, keep); d < 6 {
+				t.Errorf("the dropped pack at %.0f %.0f %.0f is back: a pull group stands %.1f yd from it", dropped[0], dropped[1], dropped[2], d)
 			}
 		}
 	}
