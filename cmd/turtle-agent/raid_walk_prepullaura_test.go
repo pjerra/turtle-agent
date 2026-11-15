@@ -2840,6 +2840,115 @@ func TestPrepullAuraTopupResendsAnExpiryUnderAMinute(t *testing.T) {
 	}
 }
 
+// (a4) A hire's read fails at the first status of a pull step (the unit store has not got its row yet): the hire is
+// not done, and a later status of the SAME step reads it again and puts back what it lacks before the pull. On r2 the
+// first attempt marked the step read, so the later status did nothing:
+//
+//	the retry sent [] (want only the expired 22888 on Flitz)
+func TestPrepullAuraTopupRetriesAHireAfterAFailedRead(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	flitz := a.bots[3]
+	if flitz.Name != "Flitz" {
+		t.Fatalf("the fourth fake bot is %s, not Flitz", flitz.Name)
+	}
+	// The world buff runs out and the store does not answer for Flitz yet: that status cannot read its auras.
+	delete(a.auras[flitz.GUID], 22888)
+	a.unseenUntil["Flitz"] = a.clock.Add(10 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the status with Flitz unseen: %v", err)
+	}
+	if tail := a.sent[first:]; len(tail) != 0 {
+		t.Fatalf("the status with Flitz unseen sent %v (want nothing: its auras were not read)", tail)
+	}
+	if lines := prepullNotes(w, "the unit read did not answer"); len(lines) != 1 {
+		t.Fatalf("skip lines %q, want exactly one for the failed read", lines)
+	}
+	// The store catches up: the same pull step reads Flitz again and puts the id back.
+	a.advance(10 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the retry: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the retry sent %v (want only the expired 22888 on Flitz)", tail)
+	}
+	want := "prepull-aura: topup before step 4: Flitz +1 (expired)"
+	if lines := prepullNotes(w, "Flitz +1"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up send lines %q, want one %q", lines, want)
+	}
+}
+
+// (b2) A hire is dead at the first status of a pull step and alive at the next: a body is never done, so the same step
+// reads it once it is back and puts its list on before the pull.
+func TestPrepullAuraTopupReadsAHireRevivedWithinTheStep(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	// Rank dies at the pull (a death strips its auras) and is revived before the next one.
+	a.deadBots["Rank"] = true
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the status with Rank dead: %v", err)
+	}
+	if tail := a.sent[first:]; len(tail) != 0 {
+		t.Fatalf("a dead hire got %v (want nothing)", tail)
+	}
+	a.deadBots["Rank"] = false
+	a.advance(2 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the status after the revive: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Rank 17538 | Rank 22888" {
+		t.Fatalf("the revived hire got %v (want its whole list: 17538, 22888)", tail)
+	}
+}
+
+// (c2) Every hire is done for the step once the top-up has sent and read back: a later status of the same pull step
+// reads nothing at all (no frame, no unit) and sends nothing.
+func TestPrepullAuraTopupDoneStepReadsNothingMore(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	flitz := a.bots[3]
+	delete(a.auras[flitz.GUID], 22888)
+	a.advance(5 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the pull's top-up: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the top-up sent %v (want only 22888 on Flitz)", tail)
+	}
+	units, frames := a.unitReads, a.frameReads
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the same pull step again: %v", err)
+	}
+	if a.unitReads != units || a.frameReads != frames {
+		t.Fatalf("the done step read again (%d unit reads, %d frame reads; want %d, %d)", a.unitReads, a.frameReads, units, frames)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the done step sent %v again", tail)
+	}
+}
+
 // (b) Nothing is missing: the pull is read and nothing goes out, and no top-up line is written.
 func TestPrepullAuraTopupNothingMissingSendsNothing(t *testing.T) {
 	a := newPrepullAgent(t)

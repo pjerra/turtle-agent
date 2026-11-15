@@ -94,8 +94,10 @@ auras and puts back only the ids its role's list is missing — a death strips e
 the flasks and the world buffs expire — then reads them back. It uses the fire's path (the commander join when the unit
 store cannot see the raid, the per-bot role, the combat recheck before each send) but never pauses the run, never
 targets a dead bot, and never fails the walk: combat stops the batch quietly and the pull goes on. One `run.log` line
-names the pull and each topped bot with the ids put back and the cause (`death` or `expired`). The read is made once
-per pull step and never carried to the next one: an aura that was there at one pull can expire seconds later.
+names the pull and each topped bot with the ids put back and the cause (`death` or `expired`). Completion is tracked
+per hire: each hire is read once per pull step, and one a status could not read (a failed unit read, a body, a hire
+out of the commander's view) is read again at the next pre-pull status of the same pull. Nothing is carried to the
+next pull step: an aura that was there at one pull can expire seconds later.
 
 A `--place` walk revives the hires its own frames do not show alive before it moves the raid: the ZG Mandokir runs of
 walk 101b all wiped at the zone-in while the commander ran the corridor clear, and 19 corpses stayed dead through every

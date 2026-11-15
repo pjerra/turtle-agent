@@ -376,6 +376,57 @@ func (w *walk) prepullRowAt(step int) planexport.StepRow {
 	return w.rows.Steps[step-1]
 }
 
+// prepullTopupHire is one hire's place in one pull step's top-up: read is set once its auras were read at that step
+// and the ids it lacked were put back and read back (or nothing was lacking, which is a complete read too), and said
+// once the walk wrote the reason it was left out, so later statuses of the same step retry it without repeating the
+// line. A hire whose read failed, that is dead or that is out of the commander's view stays pending.
+type prepullTopupHire struct {
+	read bool
+	said bool
+}
+
+// prepullTopupMark is the hire's place in this pull step's top-up, created on first use. Keyed case-insensitively:
+// the frame's spelling may differ from the roster's.
+func (w *walk) prepullTopupMark(pullStep int, name string) *prepullTopupHire {
+	if w.prepullTopupDone == nil {
+		w.prepullTopupDone = map[int]map[string]*prepullTopupHire{}
+	}
+	byStep := w.prepullTopupDone[pullStep]
+	if byStep == nil {
+		byStep = map[string]*prepullTopupHire{}
+		w.prepullTopupDone[pullStep] = byStep
+	}
+	key := strings.ToLower(name)
+	h := byStep[key]
+	if h == nil {
+		h = &prepullTopupHire{}
+		byStep[key] = h
+	}
+	return h
+}
+
+// prepullTopupSettled reports whether every hire of the roster is done for this pull step's top-up: only then does a
+// later status of the same step read nothing at all.
+func (w *walk) prepullTopupSettled(pullStep int, roster []string) bool {
+	for _, name := range roster {
+		if h := w.prepullTopupDone[pullStep][strings.ToLower(name)]; h == nil || !h.read {
+			return false
+		}
+	}
+	return true
+}
+
+// prepullAuraTopupSaid logs the reason a hire is left out of this pull step's top-up, once per hire per step: the
+// later statuses of the same step retry that hire without repeating its line.
+func (w *walk) prepullAuraTopupSaid(pullStep int, name, format string, a ...any) {
+	mark := w.prepullTopupMark(pullStep, name)
+	if mark.said {
+		return
+	}
+	mark.said = true
+	w.prepullAuraTopupLine(format, a...)
+}
+
 // prepullAuraTopup is --prepull-aura-topup: before pull row pullStep, out of combat, it reads every living hire's
 // auras and puts back only the ids its role's list is missing, whether a death stripped them or the aura expired. It
 // reuses the fire's path (prepullRaid, the commander join when the store cannot see the raid, the per-bot role from the
@@ -392,21 +443,41 @@ func (w *walk) prepullRowAt(step int) planexport.StepRow {
 //
 // One run.log line names the pull step and every upgraded bot with the number of ids put back and the cause the walk
 // can tell: "death" when the frames saw that hire die since its last read (a death strips every aura), "expired"
-// otherwise (food lasts ~15 min, the elixirs and world buffs longer). A read is made at most once per pull step and is
-// never reused across pull steps: an aura that was present at one pull can expire seconds later, so only a read at the
-// pull itself says what the hires carry (prepullTopupRead holds the steps already read).
+// otherwise (food lasts ~15 min, the elixirs and world buffs longer). Completion is tracked PER HIRE for the pull step
+// (prepullTopupDone): a hire is done only after its auras were read and the ids it lacked were sent and read back, and
+// a dead, unseen or unreadable one stays retryable on the next pre-pull status of the same step, at most one read of
+// that hire per status. The step is done when every hire of the roster is done, and only then does a later status of
+// the same step read nothing. Nothing is carried to the next pull step: an aura that was present at one pull can
+// expire seconds later, so only a read at the pull itself says what the hires carry.
 func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
-	if w.prepullTopupRead[pullStep] {
+	roster := w.hireList()
+	if w.prepullTopupSettled(pullStep, roster) {
 		return
 	}
-	if w.prepullTopupRead == nil {
-		w.prepullTopupRead = map[int]bool{}
-	}
-	w.prepullTopupRead[pullStep] = true
 	where := fmt.Sprintf("topup before step %d", pullStep)
 	raid, err := w.prepullRaid(ctx)
 	if err != nil {
 		w.prepullAuraTopupStop(where, err)
+		return
+	}
+	hired := make(map[string]string, len(roster))
+	for _, name := range roster {
+		hired[strings.ToLower(name)] = name
+	}
+	// Only a hire this step has not read yet can need the commander in the raid, so a step whose remaining hires are
+	// dead bodies or absent from the frame costs no join and no unit read: their revival or arrival at a later status
+	// of the same step retries them.
+	pending := false
+	for _, m := range raid {
+		if m.GUID == 0 || m.Name == "" || m.Dead || m.State == "d" {
+			continue
+		}
+		if name, ok := hired[strings.ToLower(m.Name)]; ok && !w.prepullTopupMark(pullStep, name).read {
+			pending = true
+			break
+		}
+	}
+	if !pending {
 		return
 	}
 	// The unit store only holds what the commander can see (walk 105c, 105, 104): join the raid before reading it.
@@ -430,11 +501,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		return
 	}
 	port := walkAuras{w: w}
-	roster := w.hireList()
-	hired := make(map[string]string, len(roster))
-	for _, name := range roster {
-		hired[strings.ToLower(name)] = name
-	}
 	watch := []dungeon.AuraTarget{{GUID: st.GUID, Name: st.Character}}
 	type topupTarget struct {
 		rec     *prepullAuraRecord
@@ -444,7 +510,7 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		cause   string
 	}
 	var targets []topupTarget
-	seenNames := make(map[string]bool, len(roster))
+	inView := make(map[string]bool, len(roster))
 	for _, m := range raid {
 		if m.GUID == 0 || m.GUID == st.GUID || m.Name == "" {
 			continue
@@ -453,10 +519,11 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		unit := dungeon.AuraTarget{GUID: m.GUID, Name: m.Name}
 		if ok {
 			unit.Name = name
-			seenNames[name] = true
+			inView[name] = true
 		}
 		if m.Dead || m.State == "d" {
-			// Never for a dead bot: it cannot carry an aura, and its revival is its own step.
+			// Never for a dead bot: it cannot carry an aura, and its revival is its own step. The hire stays pending:
+			// a status that sees it alive before the same pull reads it then.
 			continue
 		}
 		if !ok {
@@ -464,44 +531,47 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 			watch = append(watch, unit)
 			continue
 		}
+		watch = append(watch, unit)
+		mark := w.prepullTopupMark(pullStep, name)
+		if mark.read {
+			// Read at this pull step already: it stays in the combat watch and costs no read.
+			continue
+		}
 		u, seen := port.ViewUnit(ctx, unit)
 		if seen && (u.Dead || u.Ghost) {
 			continue
 		}
-		watch = append(watch, unit)
 		var role, why string
 		switch {
 		case seen && u.Class == 0:
-			w.prepullAuraTopupLine("prepull-aura: %s: %s: its unit row carries no class, so its aura role is unknown: skipped", where, name)
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: its unit row carries no class, so its aura role is unknown: skipped", where, name)
 			continue
 		case seen:
 			role, why = w.prepullRole(name, u.Class)
 		default:
 			role, why = w.prepullRosterRole(name)
-			if role != "" {
-				w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: %s: role from roster (unit unseen): %s", where, name, role))
-			}
 		}
 		if role == "" {
-			w.prepullAuraTopupLine("prepull-aura: %s: %s: %s: skipped", where, name, why)
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: %s: skipped", where, name, why)
 			continue
 		}
 		want := w.prepullAuras.For(role)
 		if len(want) == 0 {
-			w.prepullAuraTopupLine("prepull-aura: %s: %s has no list (role %q): skipped", where, name, role)
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s has no list (role %q): skipped", where, name, role)
 			continue
 		}
 		if !seen {
 			// The roster named the role, but only the unit row carries the auras: no read, no top-up.
-			w.prepullAuraTopupLine("prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
 			continue
 		}
 		missing, ok := dungeon.AurasMissing(ctx, port, unit, want)
 		if !ok {
-			w.prepullAuraTopupLine("prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
 			continue
 		}
 		if len(missing) == 0 {
+			mark.read = true
 			delete(w.prepullTopupDied, strings.ToLower(name))
 			continue
 		}
@@ -514,8 +584,8 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 		targets = append(targets, topupTarget{rec: rec, unit: unit, want: want, missing: missing, cause: cause})
 	}
 	for _, name := range roster {
-		if !seenNames[name] {
-			w.prepullAuraTopupLine("prepull-aura: %s: %s is not in the commander's view: skipped", where, name)
+		if !inView[name] {
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s is not in the commander's view: skipped", where, name)
 		}
 	}
 	if len(targets) == 0 {
@@ -574,8 +644,14 @@ func (w *walk) prepullAuraTopup(ctx context.Context, pullStep int) {
 			return
 		}
 	}
+	// Only a hire whose ids the read-back shows are all there is done for this pull step: one the store still shows
+	// short, or does not answer for, stays pending and is read again at the next pre-pull status of the same step.
 	for _, i := range sent {
-		delete(w.prepullTopupDied, strings.ToLower(targets[i].rec.Bot))
+		tg := &targets[i]
+		if len(tg.rec.Missing) == 0 {
+			w.prepullTopupMark(pullStep, tg.rec.Bot).read = true
+			delete(w.prepullTopupDied, strings.ToLower(tg.rec.Bot))
+		}
 	}
 	if err := w.prepullAuraWrite(); err != nil {
 		w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, err)
@@ -1431,14 +1507,14 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 
 // prepullAuraClear forgets which boss rows fired, so the rest before the next boss row (the one the wipe retries)
 // sends the lists again: a death stripped them. The bots' records keep their sent ids; the next fire's read-back
-// rewrites seen and missing. The top-up's per-step reads are forgotten too: the pull a recovery retries must be read
-// again, and the read from before the wipe describes a raid that no longer exists.
+// rewrites seen and missing. The top-up's per-step completion is forgotten too: the pull a recovery retries must be
+// read again hire by hire, and the read from before the wipe describes a raid that no longer exists.
 func (w *walk) prepullAuraClear() {
 	if len(w.prepullAuras) == 0 {
 		return
 	}
 	w.prepullAuraSent = nil
-	w.prepullTopupRead = nil
+	w.prepullTopupDone = nil
 }
 
 // prepullAuraRecordFor is the bot's accumulating record, created on its first fire.

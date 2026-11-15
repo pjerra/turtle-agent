@@ -1247,10 +1247,12 @@ type walk struct {
 	// hires never pauses the run for more than two of them, however many rows are missing.
 	prepullAuraUnitWaitEnd   time.Time
 	prepullAuraCombatWaitEnd time.Time
-	// --prepull-aura-topup: prepullTopupRead holds the pull steps whose auras were read (one read per step and never
-	// one step's read for another: an aura can expire between two pulls), and prepullTopupDied marks the hires the
-	// frames saw die, which names the death as the cause of their missing ids (a death strips every aura).
-	prepullTopupRead map[int]bool
+	// --prepull-aura-topup: prepullTopupDone holds, per pull step, each hire's place in that step's top-up — read once
+	// its auras were read and the ids it lacked were sent and read back, so a hire left out by a failed, dead or
+	// unseen read is retried at the next pre-pull status of the same step and a later status reads nothing once every
+	// hire is done. prepullTopupDied marks the hires the frames saw die, which names the death as the cause of their
+	// missing ids (a death strips every aura).
+	prepullTopupDone map[int]map[string]*prepullTopupHire
 	prepullTopupDied map[string]bool
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
