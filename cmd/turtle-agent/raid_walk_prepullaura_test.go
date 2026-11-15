@@ -53,10 +53,12 @@ type prepullAgent struct {
 	arenaErr       error
 	ttCmds         []string
 
-	sent    []string // "<bot name> <id>" per gm_aura call, in order
-	verbs   []string // every `run <verb>` the commander asked for
-	answers bool     // the unit RPC answers for the party (set by newPrepullAgent)
-	pauses  int
+	sent          []string      // "<bot name> <id>" per gm_aura call, in order
+	verbs         []string      // every `run <verb>` the commander asked for
+	trace         []string      // "run:<verb>" and "aura:<bot> <id>" in call order
+	advanceOnAura time.Duration // if > 0, advances a.clock on each gm_aura call
+	answers       bool          // the unit RPC answers for the party (set by newPrepullAgent)
+	pauses        int
 	// unitReads counts the unit RPC calls: the top-up's once-per-pull-step read is told from a second read by it.
 	unitReads int
 	// paused is the run's state as the fake's `run status` answers it; holdPause=false makes a pause ACK without
@@ -323,6 +325,10 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			return err
 		}
 		a.sent = append(a.sent, a.nameOf(g)+" "+itoaU(uint32(p.SpellID)))
+		a.trace = append(a.trace, "aura:"+a.nameOf(g)+" "+itoaU(uint32(p.SpellID)))
+		if a.advanceOnAura > 0 {
+			a.advance(a.advanceOnAura)
+		}
 		a.sends++
 		if a.combatAfter > 0 && a.sends >= a.combatAfter {
 			a.combat = true
@@ -366,6 +372,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			break
 		}
 		a.verbs = append(a.verbs, p.Verb)
+		if p.Verb != "status" {
+			a.trace = append(a.trace, "run:"+p.Verb)
+		}
 		switch p.Verb {
 		case "pause":
 			a.pauses++
@@ -2771,9 +2780,9 @@ func TestPrepullAuraTopupRebuffsARevivedBot(t *testing.T) {
 	if lines := prepullNotes(w, "topup before step 4:"); len(lines) != 1 || lines[0] != want {
 		t.Fatalf("top-up lines %q, want one %q", lines, want)
 	}
-	// The run was never paused: the top-up is the one fire that runs with the raid.
-	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
-		t.Fatalf("the top-up asked the run for %v", verbs)
+	// Both top-ups had sends, so each paused before its sends and resumed right after.
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
 	}
 }
 
@@ -3013,9 +3022,9 @@ func TestPrepullAuraTopupCombatStopsQuietly(t *testing.T) {
 	if len(lines) != 1 || !strings.Contains(lines[0], "combat") || !strings.Contains(lines[0], "pull goes on") {
 		t.Fatalf("top-up stop lines %q", lines)
 	}
-	// Nothing was paused and no boss row was recorded: the pull itself is untouched.
-	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
-		t.Fatalf("the top-up asked the run for %v", verbs)
+	// Both top-ups had sends, and the second still resumed after combat stopped it mid-batch.
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
 	}
 }
 
@@ -3184,9 +3193,9 @@ func TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentPulls(t *testing.T) {
 	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 1 || lines[0] != want {
 		t.Fatalf("top-up lines %q, want one %q", lines, want)
 	}
-	// The run was never paused: the top-up is the one fire that runs with the raid.
-	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
-		t.Fatalf("the top-up asked the run for %v", verbs)
+	// Both top-ups had sends, so each paused before its sends and resumed right after.
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
 	}
 }
 
@@ -3258,8 +3267,8 @@ func TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentBossRowsInStartMode(t *testi
 	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 1 || lines[0] != want {
 		t.Fatalf("top-up lines %q, want one %q", lines, want)
 	}
-	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
-		t.Fatalf("the top-up asked the run for %v", verbs)
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
 	}
 }
 
@@ -3326,7 +3335,138 @@ func TestPrepullAuraTopupGivesUpAfterThreeTries(t *testing.T) {
 	if tail := a.sent[before:]; len(tail) != 0 {
 		t.Fatalf("the fourth status sent %v after the walk gave up on Rank", tail)
 	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want three pause/resume pairs", got)
+	}
+}
+
+// (k) Cause labels: "(never had)" when the hire was never seen with the missing id in this run, "(expired)" when
+// it was seen with that id before and lost it without dying, and "(death)" when the hire died since its last top-up.
+func TestPrepullAuraTopupLabelsDeathExpiredAndNeverHad(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	w.rows = prepullPullRows(2, 4, 6)
+	ctx := context.Background()
+	zap := a.bots[4]
+	if zap.Name != "Zap" {
+		t.Fatalf("the fifth fake bot is %s, not Zap", zap.Name)
+	}
+	// Zap never receives 22888 on the first top-up, so it is never seen with it.
+	a.drop[zap.GUID] = map[uint32]bool{22888: true}
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	lines := prepullNotes(w, "topup before step 2:")
+	if len(lines) != 1 || !strings.Contains(lines[0], "Mtbot +2 (never had)") || !strings.Contains(lines[0], "Zap +2 (never had)") {
+		t.Fatalf("first top-up lines %q, want (never had) labels", lines)
+	}
+	// Pull 4: Flitz (had 22888 at step 2) loses 22888 -> (expired); Rank dies and is revived -> (death);
+	// Zap still never had 22888 -> (never had).
+	delete(a.drop, zap.GUID)
+	flitz := a.bots[3]
+	rank := a.bots[2]
+	delete(a.auras[flitz.GUID], 22888)
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", Dead: true, State: "d"})
+	a.advance(30 * time.Second)
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", State: "n"})
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("second top-up: %v", err)
+	}
+	lines = prepullNotes(w, "topup before step 4:")
+	if len(lines) != 1 {
+		t.Fatalf("second top-up lines %q, want 1 line", lines)
+	}
+	for _, want := range []string{"Rank +2 (death)", "Flitz +1 (expired)", "Zap +1 (never had)"} {
+		if !strings.Contains(lines[0], want) {
+			t.Fatalf("second top-up line %q missing %q", lines[0], want)
+		}
+	}
+}
+
+// (l) Fix 3a: a top-up with sends issues pause, then the .aura sends, then resume, in that order.
+func TestPrepullAuraTopupPausesBeforeSendsAndResumesAfter(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up: fired %v err %v", fired, err)
+	}
+	if len(a.trace) != 8 {
+		t.Fatalf("trace %v, want 8 entries (pause + 6 sends + resume)", a.trace)
+	}
+	if a.trace[0] != "run:pause" {
+		t.Fatalf("first trace entry %q, want run:pause (full trace: %v)", a.trace[0], a.trace)
+	}
+	for i := 1; i <= 6; i++ {
+		if !strings.HasPrefix(a.trace[i], "aura:") {
+			t.Fatalf("trace[%d] = %q, want aura send (full trace: %v)", i, a.trace[i], a.trace)
+		}
+	}
+	if a.trace[7] != "run:resume" {
+		t.Fatalf("last trace entry %q, want run:resume (full trace: %v)", a.trace[7], a.trace)
+	}
+}
+
+// (m) Fix 3b: nothing to send -> no pause at all.
+func TestPrepullAuraTopupNothingToSendDoesNotPause(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// Pre-populate 22888 on every hire so nothing is missing.
+	for _, b := range a.bots {
+		a.auras[b.GUID][22888] = true
+	}
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("nothing missing sent %v", a.sent)
+	}
 	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
-		t.Fatalf("the top-up asked the run for %v", verbs)
+		t.Fatalf("nothing to send asked the run for %v", verbs)
+	}
+}
+
+// (n) Fix 3c: combat during the top-up (both before the first send and mid-batch) still sends resume.
+func TestPrepullAuraTopupCombatDuringSendsStillResumes(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// Combat starts when the pause lands (before the first send): resume must still go out.
+	a.combatOnPause = true
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("combat on pause: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("combat on pause sent %v", a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("combat on pause run verbs %q, want pause resume", got)
+	}
+}
+
+// (o) Fix 3 cap: a top-up pause is capped at 15 s; reaching it resumes the run and logs one WARN.
+func TestPrepullAuraTopupPauseCappedAt15Seconds(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// Each .aura send advances the clock by 3 s plus the 1.5 s settle (4.5 s per target): after 4 sends (18 s >= 15 s),
+	// the cap stops the batch before the 5th target.
+	a.advanceOnAura = 3 * time.Second
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("capped top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 4 {
+		t.Fatalf("capped top-up sent %d lines (%v), want 4 before 15s cap", len(a.sent), a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("capped top-up run verbs %q, want pause resume", got)
+	}
+	warns := prepullNotes(w, "the run pause reached 15s")
+	if len(warns) != 1 {
+		t.Fatalf("cap WARN lines %q, want exactly 1", warns)
 	}
 }
