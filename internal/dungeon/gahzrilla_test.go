@@ -317,11 +317,21 @@ func TestGiveItemsCount(t *testing.T) {
 	if len(rep.SetupShortcuts) != 1 || rep.SetupShortcuts[0] != want {
 		t.Fatalf("setup %v, want %q", rep.SetupShortcuts, want)
 	}
-	// Fewer than Count in the bag still sends .additem; at least Count skips.
+	// Fewer than Count in the bag tops up only (Count - already held); at least Count skips.
 	g = newGiveFake(t)
 	g.bag("Tanky")[19975] = 2
-	if _, err := g.run([]GiveItem{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}}); err != nil || len(g.gave) != 1 {
-		t.Fatalf("partial bag: err=%v gave=%v", err, g.gave)
+	rep, err = g.run([]GiveItem{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}})
+	if err != nil || len(g.gave) != 1 || !strings.HasSuffix(g.gave[0], " 19975 3") || g.bag("Tanky")[19975] != 5 {
+		t.Fatalf("partial bag: err=%v gave=%v bag=%d", err, g.gave, g.bag("Tanky")[19975])
+	}
+	wantPartial := "additem 19975 3 on Tanky (test setup: Zulian Mudskunk)"
+	if len(rep.SetupShortcuts) != 1 || rep.SetupShortcuts[0] != wantPartial {
+		t.Fatalf("partial setup %v, want %q", rep.SetupShortcuts, wantPartial)
+	}
+	g = newGiveFake(t)
+	g.bag("Tanky")[19975] = 4
+	if _, err := g.run([]GiveItem{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}}); err != nil || len(g.gave) != 1 || !strings.HasSuffix(g.gave[0], " 19975") || g.bag("Tanky")[19975] != 5 {
+		t.Fatalf("one short: err=%v gave=%v bag=%d", err, g.gave, g.bag("Tanky")[19975])
 	}
 	g = newGiveFake(t)
 	g.bag("Tanky")[19975] = 5

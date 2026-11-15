@@ -29,14 +29,16 @@ func findLegIndex(p *dungeon.Plan, name string) int {
 }
 
 // TestZulGurubEdgeOfMadnessLeg checks that zul_gurub.json has the optional edge_of_madness leg
-// right after high_priest_thekal, with optional item 19931, use_object 180327 via_item within
-// dungeon.UseRange of the brazier, wait_for the four madness bosses, and the boss row.
+// at the end of legs (after hakkar, so existing leg indices stay unchanged), with optional item 19931,
+// use_object 180327 via_item within dungeon.UseRange of the brazier, wait_for the four madness bosses,
+// and the boss row.
 func TestZulGurubEdgeOfMadnessLeg(t *testing.T) {
 	p := loadZGPlan(t)
-	thekal := findLegIndex(p, "high_priest_thekal")
+	arlokk := findLegIndex(p, "high_priestess_arlokk")
+	hakkar := findLegIndex(p, "hakkar")
 	eom := findLegIndex(p, "edge_of_madness")
-	if thekal < 0 || eom != thekal+1 {
-		t.Fatalf("leg order: high_priest_thekal=%d edge_of_madness=%d (want thekal+1)", thekal, eom)
+	if arlokk != 4 || hakkar < 0 || eom <= hakkar {
+		t.Fatalf("leg order: arlokk=%d hakkar=%d edge_of_madness=%d (want arlokk=4 and eom after hakkar)", arlokk, hakkar, eom)
 	}
 	leg := p.Legs[eom]
 	if leg.Optional == nil || leg.Optional.Item != 19931 {
@@ -93,22 +95,24 @@ func TestZulGurubEdgeOfMadnessLeg(t *testing.T) {
 	}
 }
 
-// TestZulGurubGahzrankaLeg checks that zul_gurub.json has the optional gahzranka leg right after
-// hakkar_outer, with optional item 19974, use_item 19974, stand near (-11682, -1713), wait_for 15114,
-// and boss row 15114 at the beach (-11688.95, -1777.21, 12.59).
+// TestZulGurubGahzrankaLeg checks that zul_gurub.json has the optional gahzranka leg at the end
+// of legs (after hakkar, so existing leg indices stay unchanged), with optional item 19974,
+// use_item 19974, a dry beach stand near Gahz'ranka's beach, wait_for 15114, and boss row 15114 at
+// the beach (-11688.95, -1777.21, 12.59).
 func TestZulGurubGahzrankaLeg(t *testing.T) {
 	p := loadZGPlan(t)
 	outer := findLegIndex(p, "hakkar_outer")
+	hakkar := findLegIndex(p, "hakkar")
 	gahz := findLegIndex(p, "gahzranka")
-	if outer < 0 || gahz != outer+1 {
-		t.Fatalf("leg order: hakkar_outer=%d gahzranka=%d (want outer+1)", outer, gahz)
+	if outer != 7 || hakkar < 0 || gahz <= hakkar {
+		t.Fatalf("leg order: hakkar_outer=%d hakkar=%d gahzranka=%d (want outer=7 and gahz after hakkar)", outer, hakkar, gahz)
 	}
 	leg := p.Legs[gahz]
 	if leg.Optional == nil || leg.Optional.Item != 19974 {
 		t.Fatalf("optional = %+v, want item 19974", leg.Optional)
 	}
-	if math.Hypot(float64(leg.To.X)-(-11682), float64(leg.To.Y)-(-1713)) > 2 {
-		t.Fatalf("stand/to = %+v, want near (-11682, -1713)", leg.To)
+	if math.Hypot(float64(leg.To.X)-(-11674), float64(leg.To.Y)-(-1757.9)) > 2 {
+		t.Fatalf("stand/to = %+v, want near (-11674, -1757.9)", leg.To)
 	}
 	if len(leg.Steps) != 2 || leg.Steps[0].UseItem == nil || leg.Steps[0].UseItem.Entry != 19974 {
 		t.Fatalf("steps[0] = %+v, want use_item 19974", leg.Steps)

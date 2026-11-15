@@ -146,29 +146,31 @@ func (e *prepEnv) giveItems(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("give_items: %w", err)
 		}
+		have := inv.Count(g.Item)
 		need := g.Count
 		if need <= 0 {
 			need = 1
 		}
-		if inv.Count(g.Item) >= need {
+		if have >= need {
 			e.note(fmt.Sprintf("prepare give_items: %s carries %s already; no .additem sent", who, name))
 			done = append(done, fmt.Sprintf("%s has %s", who, name))
 			continue
 		}
+		add := need - have
 		guid, err := e.guidOf(ctx, who)
 		if err != nil {
 			return "", fmt.Errorf("give_items: %w", err)
 		}
-		if err := ig.GiveItem(ctx, who, guid, g.Item, need); err != nil {
-			if need > 1 {
-				return "", fmt.Errorf(".additem %d %d on %s: %w", g.Item, need, who, err)
+		if err := ig.GiveItem(ctx, who, guid, g.Item, add); err != nil {
+			if add > 1 {
+				return "", fmt.Errorf(".additem %d %d on %s: %w", g.Item, add, who, err)
 			}
 			return "", fmt.Errorf(".additem %d on %s: %w", g.Item, who, err)
 		}
-		if need > 1 {
-			e.gmLine(fmt.Sprintf("additem %d %d on %s (test setup: %s)", g.Item, need, who, name))
+		if add > 1 {
+			e.gmLine(fmt.Sprintf("additem %d %d on %s (test setup: %s)", g.Item, add, who, name))
 			if err := e.waitBag(ctx, bl, who, g.Item, need); err != nil {
-				return "", fmt.Errorf("give_items: .additem %d %d was sent for %s but %w", g.Item, need, who, err)
+				return "", fmt.Errorf("give_items: .additem %d %d was sent for %s but %w", g.Item, add, who, err)
 			}
 		} else {
 			e.gmLine(fmt.Sprintf("additem %d on %s (test setup: %s)", g.Item, who, name))
