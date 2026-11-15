@@ -24,9 +24,9 @@ const lbrsDevWalkYd = 16001.1
 // floor-aware export), 9% of headroom for a cut point that moves.
 const lbrsMaxWalkYd = 5200.0
 
-// lbrsPacks is every pack of the plan: the re-order moves them between legs, it drops none (all 113 lie on the seven
-// boss-to-boss walks; the audit put 90 on, 13 near and 10 within 45-65 yd of them).
-const lbrsPacks = 113
+// lbrsPacks is the plan's pull-group count: 113 from the round-1 re-order, minus 1 dropped upper-ledge pack (leg 0 pg 20
+// at z=43, off the walk), plus 2 from splitting leg 1 pg 11 into its 3 natural 2-mob pairs (round 2, dr41).
+const lbrsPacks = 114
 
 // lbrsPlan is the plan under test.
 const lbrsPlan = "../../dungeons/lower_blackrock_spire.json"
@@ -79,6 +79,49 @@ func TestLowerBlackrockSpireRouteOrder(t *testing.T) {
 	for i, leg := range p.Legs {
 		if leg.Boss == nil {
 			t.Errorf("leg %d (%s) has no boss: the boss order is part of the route", i, leg.Name)
+		}
+	}
+
+	// Round-2 pins (dr41 steps 42, 60, 121): each fails on the round-1 plan.
+	for i, pg := range p.Legs[0].PullGroups {
+		for _, pos := range pg.Positions {
+			if pos.Z > 40 && pos.X < -40 {
+				t.Errorf("leg 0 pg %d sits on the z=43 upper ledge (%.1f %.1f %.1f), off the Omokk floor walk (dr41 step 42)", i, pos.X, pos.Y, pos.Z)
+			}
+		}
+	}
+	for i, pg := range p.Legs[1].PullGroups {
+		if len(pg.Entries) > 5 {
+			t.Errorf("leg 1 pg %d has %d entries (want <= 5; split the 6-mob Vosh'gajin platform pack, dr41 step 60)", i, len(pg.Entries))
+		}
+	}
+	if n := len(p.Legs[1].PullGroups); n < 3 {
+		t.Fatalf("leg 1 has %d pull_groups, want >= 3", n)
+	} else {
+		boss := p.Legs[1].Boss.Position
+		for _, idx := range []int{n - 2, n - 1} {
+			pg := p.Legs[1].PullGroups[idx]
+			if len(pg.Approach) == 0 {
+				t.Errorf("leg 1 pg %d has no approach stand out of Vosh'gajin's aggro reach", idx)
+				continue
+			}
+			st := pg.Approach[len(pg.Approach)-1]
+			dx, dy, dz := st.X-boss.X, st.Y-boss.Y, st.Z-boss.Z
+			if dx*dx+dy*dy+dz*dz < 27*27 {
+				t.Errorf("leg 1 pg %d stand (%.1f %.1f %.1f) is < 27 yd from boss 9236", idx, st.X, st.Y, st.Z)
+			}
+		}
+	}
+	if len(p.Legs[3].PullGroups) == 0 {
+		t.Fatal("leg 3 has no pull_groups")
+	}
+	lastSmolderweb := p.Legs[3].PullGroups[len(p.Legs[3].PullGroups)-1]
+	if len(lastSmolderweb.Entries) != 6 || lastSmolderweb.Entries[0] != 10375 {
+		t.Errorf("leg 3 last pull_group is %v, want the 6-spider pack [10375 ...] moved from leg 4 (dr41 step 121)", lastSmolderweb.Entries)
+	}
+	for i, pg := range p.Legs[4].PullGroups {
+		if len(pg.Entries) == 6 && pg.Entries[0] == 10375 {
+			t.Errorf("leg 4 pg %d still holds the 6-spider pack beside Mother Smolderweb (dr41 step 121)", i)
 		}
 	}
 
