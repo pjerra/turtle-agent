@@ -88,6 +88,15 @@ read is taken at the pull itself — the boss row current in the plan's `pull` o
 the step before it; a row is read at the pull and refreshed once at the fight start, and a phase is recorded only after
 a successful read, so a failed read is retried at the next qualifying status.
 
+`--prepull-aura-topup` (off by default, needs `--prepull-aura`) closes the gap a death or an expiry leaves between boss
+rows: before EVERY pull row, trash or boss, out of combat and never inside the pull, the walk reads each living hire's
+auras and puts back only the ids its role's list is missing — a death strips every aura, and food (~15 min), the elixirs,
+the flasks and the world buffs expire — then reads them back. It uses the fire's path (the commander join when the unit
+store cannot see the raid, the per-bot role, the combat recheck before each send) but never pauses the run, never
+targets a dead bot, and never fails the walk: combat stops the batch quietly and the pull goes on. One `run.log` line
+names the pull and each topped bot with the ids put back and the cause (`death` or `expired`), and a pull less than 60 s
+after a clear read with no death since reuses that read.
+
 A `--place` walk revives the hires its own frames do not show alive before it moves the raid: the ZG Mandokir runs of
 walk 101b all wiped at the zone-in while the commander ran the corridor clear, and 19 corpses stayed dead through every
 placement try because `.summon` never moves a corpse. Each of those hires gets one `.revive <name>` (100 ms apart, a
