@@ -2256,6 +2256,15 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		if p.Name == "" {
 			continue
 		}
+		if w.opts.prepullAuraTopup {
+			// A death strips every aura: the per-bot mark names the death as the cause of the missing ids.
+			if dead := p.Dead || p.State == "d"; dead && !w.botAt[p.Name].dead {
+				if w.prepullTopupDied == nil {
+					w.prepullTopupDied = map[string]bool{}
+				}
+				w.prepullTopupDied[strings.ToLower(p.Name)] = true
+			}
+		}
 		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: at}
 	}
 	for _, h := range f.Hostiles {
