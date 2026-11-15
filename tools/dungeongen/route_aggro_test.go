@@ -343,7 +343,8 @@ var routeAggroKnownFailing = map[string]int{
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
-// that a later row pulls (or that no row pulls). See RouteIntoLaterPacks.
+// that a later row pulls (or that no row pulls). See RouteIntoLaterPacks. It says nothing about the packs a route-order
+// plan drops (no row pulls them by design): that is Test<Plan>DroppedPacksAsleep, dropped_packs_test.go.
 func TestNoRouteSegmentPassesALaterPack(t *testing.T) {
 	sf := loadSpecT(t)
 	checked := 0
