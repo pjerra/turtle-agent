@@ -473,6 +473,18 @@ func (w *walk) prepullAuraTopupSaid(pullStep int, name, format string, a ...any)
 	w.prepullAuraTopupLine(format, a...)
 }
 
+// prepullAuraTopupUnheldOnce logs that pullStep's top-up is going out without a run pause, once per step.
+func (w *walk) prepullAuraTopupUnheldOnce(pullStep int, format string, a ...any) {
+	if w.prepullTopupUnheld[pullStep] {
+		return
+	}
+	if w.prepullTopupUnheld == nil {
+		w.prepullTopupUnheld = map[int]bool{}
+	}
+	w.prepullTopupUnheld[pullStep] = true
+	w.prepullAuraTopupLine(format, a...)
+}
+
 // prepullTopupPauseCap is the longest a top-up's run pause may hold the raid before resuming.
 const prepullTopupPauseCap = 15 * time.Second
 
@@ -691,10 +703,10 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	if len(targets) == 0 {
 		return
 	}
-	pauseAttempted := runSt.State == tbm.RunRunning
+	pauseHeld := false
 	resumed := false
 	resume := func() {
-		if !pauseAttempted || resumed {
+		if !pauseHeld || resumed {
 			return
 		}
 		resumed = true
@@ -705,18 +717,20 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up was refused: %s", where, rep.Reply.Err.Message)
 		}
 	}
-	if pauseAttempted {
+	if runSt.State == tbm.RunRunning {
+		deadline := w.env.now().Add(prepullTopupPauseCap)
 		if rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err != nil {
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause failed (%v): the top-up goes out unheld", where, err)
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause failed (%v): the top-up goes out unheld", where, err)
 		} else if rep.Reply.Err != nil {
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause was refused (%s): the top-up goes out unheld", where, rep.Reply.Err.Message)
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was refused (%s): the top-up goes out unheld", where, rep.Reply.Err.Message)
 		} else if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause was not acknowledged (%s): the top-up goes out unheld", where, rep.Reply.Line)
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was not acknowledged (%s): the top-up goes out unheld", where, rep.Reply.Line)
 		} else {
+			pauseHeld = true
+			w.prepullTopupPauseDeadline = deadline
 			w.logLine(w.env.now(), fmt.Sprintf("> .bot run pause (prepull-aura, %s)", where))
+			defer resume()
 		}
-		w.prepullTopupPauseDeadline = w.env.now().Add(prepullTopupPauseCap)
-		defer resume()
 	}
 	// The watch and the send kernel's own combat recheck: the commander and every living member, list or no list. Each
 	// check is the one immediate read.
@@ -734,7 +748,7 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	var parts []string
 	var sent []int
 	for i := range targets {
-		if pauseAttempted && !w.env.now().Before(w.prepullTopupPauseDeadline) {
+		if pauseHeld && !w.env.now().Before(w.prepullTopupPauseDeadline) {
 			resume()
 			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause reached %s; resuming and stopping the top-up", where, prepullTopupPauseCap)
 			break
@@ -1671,6 +1685,7 @@ func (w *walk) prepullAuraClear() {
 	}
 	w.prepullAuraSent = nil
 	w.prepullTopupDone = nil
+	w.prepullTopupUnheld = nil
 }
 
 // prepullAuraRecordFor is the bot's accumulating record, created on its first fire.

@@ -87,9 +87,13 @@ type prepullAgent struct {
 	combatAfter   int
 	sends         int
 
-	// pauseErr and resumeErr are the commander's own refusals (the RPC itself failing).
-	pauseErr  error
-	resumeErr error
+	// pauseErr, pauseRefused and resumeErr are the commander's own failures/refusals.
+	pauseErr       error
+	pauseRefused   string
+	resumeErr      error
+	advanceOnPause time.Duration // if > 0, advances a.clock on each run pause call
+	pauseReqAt     time.Time
+	resumeAt       time.Time
 	// applyToSelf makes every ".aura" land on the commander instead of the target: the selection did not hold.
 	applyToSelf bool
 	// drop is the ids a bot never shows after its ".aura" (an aura the server refuses, or a selection that did not hold).
@@ -378,8 +382,19 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		switch p.Verb {
 		case "pause":
 			a.pauses++
+			if a.pauseReqAt.IsZero() {
+				a.pauseReqAt = a.clock
+			}
+			if a.advanceOnPause > 0 {
+				a.advance(a.advanceOnPause)
+			}
 			if a.pauseErr != nil {
 				return a.pauseErr
+			}
+			if a.pauseRefused != "" {
+				v = commanderReply{Sent: ".bot run pause", Reply: tbm.Reply{Kind: tbm.KindErr,
+					Err: &tbm.Err{Intent: "run pause", Code: "refused", Message: a.pauseRefused}}}
+				break
 			}
 			if a.holdPause {
 				a.paused = true
@@ -389,6 +404,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			}
 			v = commanderReply{Sent: ".bot run pause", Reply: tbm.Reply{Kind: tbm.KindAck, OK: true, Line: "TBM:ACTION_ACK|run pause"}}
 		case "resume":
+			a.resumeAt = a.clock
 			if a.resumeErr != nil {
 				return a.resumeErr
 			}
@@ -3468,5 +3484,75 @@ func TestPrepullAuraTopupPauseCappedAt15Seconds(t *testing.T) {
 	warns := prepullNotes(w, "the run pause reached 15s")
 	if len(warns) != 1 {
 		t.Fatalf("cap WARN lines %q, want exactly 1", warns)
+	}
+}
+
+// Pause refused: top-up sends still go out unheld, no resume is sent, and the unheld warning is logged once per step.
+func TestPrepullAuraTopupPauseRefusedSendsUnheldWithoutResume(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.pauseRefused = "already paused by player"
+	// Drop 22888 so the first call leaves all 6 hires pending for a second poll on the same step.
+	for _, b := range a.bots {
+		a.drop[b.GUID] = map[uint32]bool{22888: true}
+	}
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up 1: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatalf("pause refused sent no auras, want unheld sends")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause" {
+		t.Fatalf("pause refused run verbs %q, want only pause (no resume)", got)
+	}
+	// A second poll on the same step must not repeat the unheld warning.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up 2: fired %v err %v", fired, err)
+	}
+	warns := prepullNotes(w, "the top-up goes out unheld")
+	if len(warns) != 1 {
+		t.Fatalf("unheld WARN lines %q, want exactly 1 per step", warns)
+	}
+}
+
+// Run already paused before the top-up began: no pause and no resume are sent.
+func TestPrepullAuraTopupAlreadyPausedDoesNotPauseOrResume(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.paused = true
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	st := prepullRest(1)
+	st.State = tbm.RunPaused
+	if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+		t.Fatalf("already paused top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 6 {
+		t.Fatalf("already paused sent %d auras (%v), want 6", len(a.sent), a.sent)
+	}
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("already paused run verbs %v, want none", verbs)
+	}
+}
+
+// Slow pause acknowledgement: the 15 s cap starts before the pause request is sent, so resume still fires within 15 s
+// of the pause request even when the pause RPC itself takes most of the budget.
+func TestPrepullAuraTopupSlowPauseAckResumesWithin15sOfRequest(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.advanceOnPause = 10 * time.Second
+	a.advanceOnAura = 1 * time.Second
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("slow pause top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 2 {
+		t.Fatalf("slow pause top-up sent %d lines (%v), want 2 within remaining 5s budget", len(a.sent), a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("slow pause top-up run verbs %q, want pause resume", got)
+	}
+	if elapsed := a.resumeAt.Sub(a.pauseReqAt); elapsed > prepullTopupPauseCap {
+		t.Fatalf("resume sent %s after pause request, want <= %s", elapsed, prepullTopupPauseCap)
 	}
 }

@@ -1252,11 +1252,13 @@ type walk struct {
 	// unseen read is retried at the next pre-pull status of the same step and a later status reads nothing once every
 	// hire is done. prepullTopupDied marks the hires the frames saw die, which names the death as the cause of their
 	// missing ids (a death strips every aura). prepullTopupSeen tracks per hire (lowercased name) the spell ids ever
-	// seen on that hire in this run, distinguishing "(expired)" from "(never had)". prepullTopupPauseDeadline caps a
-	// top-up's run pause at 15 s.
+	// seen on that hire in this run, distinguishing "(expired)" from "(never had)". prepullTopupUnheld records pull
+	// steps that already logged an unheld top-up warning so it is emitted once per step. prepullTopupPauseDeadline
+	// caps a top-up's run pause at 15 s.
 	prepullTopupDone          map[int]map[string]*prepullTopupHire
 	prepullTopupDied          map[string]bool
 	prepullTopupSeen          map[string]map[uint32]bool
+	prepullTopupUnheld        map[int]bool
 	prepullTopupPauseDeadline time.Time
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
