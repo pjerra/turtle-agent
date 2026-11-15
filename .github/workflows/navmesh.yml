@@ -80,14 +80,18 @@ jobs:
 
       # Every test file that skips without navmesh files (grep "TURTLE_AGENT_MMAPS" or the skip message): the navmesh
       # planner and server-path tests, the dungeon plan/zulfarrak/uldaman/deadmines/ragefire/wailing-caverns/leave
-      # tests, and the commanded path/stage/plan checks in cmd/turtle-agent. internal/dashboard has no navmesh test of
-      # its own; it is listed because its dashboards read the same plans and routes.
+      # tests, and the tools/dungeongen route tests (the B6a plan routes and the ZG route walks and export checks).
+      # TURTLE_AGENT_MMAPS_REQUIRED turns their "no navmesh files" skips into failures here: the files are provisioned,
+      # so a skip means the map set does not cover the test, not a machine without the data. Locally the same tests
+      # still skip without maps. internal/dashboard has no navmesh test of its own; it is listed because its dashboards
+      # read the same plans and routes.
       - name: navmesh tests
         if: steps.token.outputs.skip != 'true'
         env:
           TURTLE_AGENT_MMAPS: ${{ runner.temp }}/mmaps
+          TURTLE_AGENT_MMAPS_REQUIRED: "1"
           CGO_ENABLED: "1"
-        run: go test -count=1 ./internal/navmesh/ ./internal/dungeon/ ./internal/dashboard/
+        run: go test -count=1 ./internal/navmesh/ ./internal/dungeon/ ./tools/dungeongen/ ./internal/dashboard/
 
       - name: plan-check every live or mapped plan
         if: steps.token.outputs.skip != 'true'

@@ -215,7 +215,7 @@ func b6aMmaps(t *testing.T, maps []uint32) *navmesh.Planner {
 		t.Cleanup(pl.Close)
 		return pl
 	}
-	t.Skipf("no navmesh files for maps %v: set TURTLE_AGENT_MMAPS to a folder holding their .mmap and .mmtile files", maps)
+	skipMissingMmaps(t, fmt.Sprintf("no navmesh files for maps %v: set TURTLE_AGENT_MMAPS to a folder holding their .mmap and .mmtile files", maps))
 	return nil
 }
 
@@ -246,7 +246,7 @@ func TestB6aDeployedCutLintCounts(t *testing.T) {
 		fs, err := planlint.Lint(res.Rows, pl, planlint.Options{Map: p.Map, Level: 60, World: world,
 			Raid: p.IsRaid(), KillFirst: p.KillFirst, PullCeiling: p.PullCeiling})
 		if errors.Is(err, navmesh.ErrNoEngine) {
-			t.Skip("built without cgo: no navmesh engine")
+			skipMissingMmaps(t, "built without cgo: no navmesh engine")
 		}
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)

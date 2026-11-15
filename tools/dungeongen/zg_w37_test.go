@@ -215,7 +215,7 @@ func zgW37BuildRows(t *testing.T, p *dungeon.Plan, cs []creature, leg int) *zgW3
 	t.Helper()
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+		skipMissingMmaps(t, "no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
 	}
 	defer pl.Close()
 	res, err := planexport.Build(p, planexport.Options{ApproachHops: true, Cut: zgW37ExportCut(pl), GMCrossDirect: true})
