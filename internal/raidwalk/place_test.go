@@ -685,18 +685,14 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // 694, one fewer, because the lip replaces a path row the cutter used to add). Walk 71 fast (t1106k): 416, leg 8's
 // entry drops its second via and `to` is the placement row the placed walk already starts on. The Arlokk gong fix
 // (2026-11-14): 414, the step's stand moves onto the gong's own floor and the boss approach drops its two ramp vias.
-// Walk 104 T28 (2026-11-15): 416, leg 7 drops the two 15043 packs on the lake islet (2 pull rows) and the
-// lower-ring pack takes 4 dry west-rim approach rows (the rim cut rows are the exporter's, not the plan's: this
-// fixture is the plain build). Walk 107 T31 (2026-11-15): 417, the Venoxis camp's stand point -11899.3 -1849.1 61.3
-// is one more approach row. The T25 and T34 legs (walk 104, 2026-11-15) add their rows on top: the combined count is
-// below.
-// Walk 104 T25 (2026-11-15): 419 (417 + 2), the Arlokk ledge's west row gains a top waypoint and the ring row a
-// second stair point (the three stands moved out of their own packs' wake).
-// Walk 107 T34 (2026-11-15): 415 on its own, the Mandokir leg pulls the Vilebranch Speaker last and its boss row
-// gains the arena-floor stand -12188 -1956 130.6 (one more row; the exporter's own cut loses a row, which this Build
-// does not add), so 420 combined.
-// Walk 107 T35 (2026-11-15): 414 on its own (its step-36 stand and merged bat pull net zero rows against dev: 414 in
-// round 4), so the combined plan keeps 420.
+// Walk 104's six ZG route fixes (2026-11-15, T25/T28/T29/T31/T34/T35): 420. T28 +2 (leg 7 drops the two 15043 packs on
+// the lake islet, 2 pull rows, and the lower-ring pack takes 4 dry west-rim approach rows; the rim cut rows are the
+// exporter's, not the plan's: this fixture is the plain build). T31 +1 (the Venoxis camp's stand point -11899.3
+// -1849.1 61.3 is one more approach row). T25 +2 (the Arlokk ledge's west row gains a top waypoint and the ring row a
+// second stair point). T29 unchanged (the Jin'do hall's rows change kind and stand, not count). T34 +1 (the Mandokir
+// boss row gains the arena-floor stand -12188 -1956 130.6; the exporter's own cut loses a row, which this plain Build
+// does not add). T35 unchanged (the merged step-36 bat pull and formation 49189's own fallback row net zero against
+// dev's 414).
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
