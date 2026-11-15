@@ -1,4 +1,5 @@
-// Walk-107/108 fix, round 3 (TortoiseBots-audit briefs-omp/zg-route-T35-r3.md; the round-2 review codex-adv-zg-route-t35-r2).
+// Walk-107/108 fix, round 3 plus round 4 (TortoiseBots-audit briefs-omp/zg-route-T35-r3.md and zg-route-T35-final.md;
+// the round-2 review codex-adv-zg-route-t35-r2 and the round-3 review codex r3).
 // Leg 0's step 36 (plan pull group 10) is the F6 bat formation 49155: all six of its units are OPTION_FORMATION_MOVE
 // followers of 49155 (creatures.tsv group_flags 3), so the pack walks 49155's 8-point 74 s loop in one column; the DB
 // spawn slots (49150/49154 at the camp, 49156/49159/49161 129-134 yd west) are only where the followers start.
@@ -30,11 +31,23 @@
 //
 // Fails on origin/dev (no merged row, no patrol block). Fails on round 2's plan (quoted by the round-3 review): the
 // stand -12114 -1491 is 31.5 yd from 49189's loop, whose row (pull group 11) is after it, want >= 36.
+//
+// Round 4 (the lead's decision after review r3): the merged row tracks and times only 49155's patrol, so formation
+// 49189's own pull row is back right after it, from round 1/2's own data (stand -12108 -1479 130.9, radius 1 at 49151's
+// spawn -12153.9 -1489.43 130.725), with the patrol block matching 49189's 6-point loop. It is a fallback: the merged
+// row already owns 49189's formation, so when the merged pull took the pack the fallback's own pack is gone and the run
+// leader skips the row. turtle-agent's driver does the same: Driver.engage (internal/dungeon/driver.go:1769) notes
+// "no living %v in view; taken as already dead" (driver.go:1799) and returns nil (driver.go:1800) when
+// Driver.pickTarget (driver.go:1951) finds no living unit of the row's entries near its anchors (Driver.candidates,
+// driver.go:1921, drops every u.Dead). Its stand stands 20.2 yd from 49155's east loop waypoint, inside that pack's
+// 38 yd routeReach: by this row 49155 is dead (the merged row pulled it first), so its wake no longer matters, and that
+// is the documented limit of the pair.
 package main
 
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -99,21 +112,7 @@ func TestZgJeklikF6And49189MergedPull(t *testing.T) {
 		}
 	}
 	// The row that pulls F6's pack: the one whose pack holds its leader.
-	gi := -1
-	for i := range packs {
-		for _, c := range packs[i] {
-			if c.GUID == zgT35F6 {
-				gi = i
-				break
-			}
-		}
-		if gi >= 0 {
-			break
-		}
-	}
-	if gi < 0 {
-		t.Fatalf("leg %d carries no pull group for the F6 bat formation %d: its camp (spawn %d) has no row", legNo, zgT35F6, zgT35F6)
-	}
+	gi := zgT35MergedRow(t, leg, legNo, packs)
 	g := leg.PullGroups[gi]
 	if !g.StandPull {
 		t.Errorf("pull group %d (F6 %d) is not a stand pull", gi, zgT35F6)
@@ -336,6 +335,219 @@ func TestZgJeklikF6And49189MergedPull(t *testing.T) {
 			check("walk-in", q)
 		}
 	}
+}
+
+// zgT35MergedRow is the leg's row that pulls F6's pack: the one whose pack holds the patroller's leader.
+func zgT35MergedRow(t *testing.T, leg *dungeon.Leg, legNo int, packs [][]creature) int {
+	t.Helper()
+	for i := range packs {
+		for _, c := range packs[i] {
+			if c.GUID == zgT35F6 {
+				return i
+			}
+		}
+	}
+	t.Fatalf("leg %d carries no pull group for the F6 bat formation %d: its camp (spawn %d) has no row", legNo, zgT35F6, zgT35F6)
+	return -1
+}
+
+// TestZgJeklik49189FallbackRow pins round 4: formation 49189's own stand pull right after the merged row, as the
+// fallback for a merged pull that leaves its pack standing. The merged row carries one patrol block and it is 49155's
+// loop, so nothing in that row tracks or times 49189's patrol. The row back is round 1/2's: 49151's spawn
+// -12153.9 -1489.43 130.725 as its point, radius 1, the stand -12108 -1479 130.9, and 49189's own 6-point loop as its
+// patrol block (176.8 yd, 70.7 s at 2.5 yd/s). The test asserts it exists right after the merged row, that the run
+// leader's spawn scoping gives it 49189's five units and no 49155 unit, that its stand is outside 49155's spawn wake
+// (the choice the final brief makes) and 27.4 yd from 49189's loop, and that the row is skipped, not failed, when the
+// pack is already dead (Driver.engage, internal/dungeon/driver.go:1799-1800).
+//
+// The documented limit: the stand is 20.2 yd from 49155's east loop waypoint -12125.1 -1468.27, inside that pack's
+// 38 yd routeReach. That is safe only because 49155 is dead by this row: the merged row before it pulls 49155 first.
+func TestZgJeklik49189FallbackRow(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	leg, legNo := zgW37LegByName(t, p, "high_priestess_jeklik")
+	movement, err := zgReadMovementPaths("testdata/map309/movement.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop, ok := movement[zgT35Merged]
+	if !ok || len(loop) < 3 {
+		t.Fatalf("movement.tsv: %d has no loop", zgT35Merged)
+	}
+	merged := zgT35Formation(cs, zgT35Merged)
+	if len(merged) != 5 {
+		t.Fatalf("creatures.tsv: formation %d has %d units, want 5", zgT35Merged, len(merged))
+	}
+	f6 := zgT35Formation(cs, zgT35F6)
+	packs := zgPacks(t, *leg, cs)
+	gi := zgT35MergedRow(t, leg, legNo, packs)
+	if gi+1 >= len(leg.PullGroups) {
+		t.Fatalf("pull group %d (the merged %d/%d pull) is the leg's last: 49189's fallback row is missing", gi, zgT35F6, zgT35Merged)
+	}
+	fb, pack := leg.PullGroups[gi+1], packs[gi+1]
+	// The pack: 49189's five, and not one unit of 49155's six (a row that also pulled 49155 would re-pull a pack the
+	// merged row already fought).
+	want := map[uint64]bool{}
+	for _, c := range merged {
+		want[c.GUID] = true
+	}
+	if len(pack) != len(merged) {
+		t.Errorf("pull group %d (the fallback %d) pulls %d bodies, want %d: %v", gi+1, zgT35Merged, len(pack), len(merged), pack)
+	}
+	for _, c := range pack {
+		if !want[c.GUID] {
+			t.Errorf("pull group %d (the fallback %d) holds %s %d, which is no unit of formation %d", gi+1, zgT35Merged, c.Name, c.GUID, zgT35Merged)
+		}
+		if c.GroupLeader != zgT35Merged {
+			t.Errorf("pull group %d: %s %d (group_leader %d) is not a follower of %d", gi+1, c.Name, c.GUID, c.GroupLeader, zgT35Merged)
+		}
+	}
+	for _, c := range f6 {
+		for _, m := range pack {
+			if m.GUID == c.GUID {
+				t.Errorf("pull group %d (the fallback %d) also pulls %s %d of formation %d: the merged row before it already did", gi+1, zgT35Merged, m.Name, m.GUID, zgT35F6)
+			}
+		}
+	}
+	// The run leader's own scoping (plan.PullGroup.StandPull -> TortoiseBots ScopeStandPullFacts): the row's pack is the
+	// formations with a unit whose DB spawn lies within Radius of the row point, every other formation's units dropped.
+	// That is what keeps the fallback off 49155's pack even though both formations share the entries 11368/14750.
+	var cen dungeon.Point
+	for _, q := range fb.Positions {
+		cen.X, cen.Y, cen.Z = cen.X+q.X, cen.Y+q.Y, cen.Z+q.Z
+	}
+	n := float32(len(fb.Positions))
+	cen.X, cen.Y, cen.Z = cen.X/n, cen.Y/n, cen.Z/n
+	scoped := map[uint64]bool{}
+	for _, c := range cs {
+		if !hostileMob(c, nil, nil) || !slices.Contains(fb.Entries, c.Entry) {
+			continue
+		}
+		if math.Hypot(float64(c.Pos.X-cen.X), float64(c.Pos.Y-cen.Y)) > float64(fb.Radius)+1 {
+			continue
+		}
+		lead := c.GroupLeader
+		if lead == 0 {
+			lead = c.GUID
+		}
+		scoped[lead] = true
+	}
+	if len(scoped) != 1 || !scoped[zgT35Merged] {
+		t.Errorf("pull group %d (the fallback %d) scopes formations %v by the spawns inside radius %g of %.1f %.1f: want %d alone", gi+1, zgT35Merged, scoped, fb.Radius, cen.X, cen.Y, zgT35Merged)
+	}
+	// The row point is 49151's DB spawn, the radius is round 1/2's 1, and the last approach point is their stand.
+	if len(fb.Positions) != 1 {
+		t.Fatalf("pull group %d carries %d positions, want 1 (49151's spawn)", gi+1, len(fb.Positions))
+	}
+	fbRow := fb.Positions[0]
+	var bat creature
+	for _, c := range merged {
+		if c.GUID == 49151 {
+			bat = c
+		}
+	}
+	if bat.GUID == 0 {
+		t.Fatalf("creatures.tsv: no 49151 in formation %d", zgT35Merged)
+	}
+	if d := dist(fbRow, bat.Pos); d > 0.5 {
+		t.Errorf("pull group %d's point %.1f %.1f %.1f is %.2f yd from 49151's spawn: the row is round 1/2's, on 49151's spawn", gi+1, fbRow.X, fbRow.Y, fbRow.Z, d)
+	}
+	if fb.Radius != 1 {
+		t.Errorf("pull group %d radius is %g, want 1: it scopes 49189 by 49151's spawn and must not take 49150 at 2.9 yd", gi+1, fb.Radius)
+	}
+	if !fb.StandPull {
+		t.Errorf("pull group %d is not a stand pull: the formation walks a loop, so the party fights it from a stand", gi+1)
+	}
+	if len(fb.Approach) == 0 {
+		t.Fatalf("pull group %d has no stand", gi+1)
+	}
+	stand := fb.Approach[len(fb.Approach)-1]
+	if d := dist(stand, dungeon.Point{X: -12108, Y: -1479, Z: 130.9}); d > 0.5 {
+		t.Errorf("pull group %d's stand is %.2f yd from round 2's -12108 -1479 130.9: the fallback keeps the r2 data", gi+1, d)
+	}
+	// 49155's spawn wake: the final brief's choice between the r1 and r2 data (they are the same row). By this row
+	// 49155 is dead, so only the spawns matter here; the loop's 20.2 yd is the documented limit above.
+	for _, c := range f6 {
+		if d, reach := dist(stand, c.Pos), routeReach(p, c); d < reach+1 {
+			t.Errorf("pull group %d's stand %.1f %.1f %.1f is %.1f yd from %s %d of formation %d, inside its %.1f yd wake reach", gi+1, stand.X, stand.Y, stand.Z, d, c.Name, c.GUID, zgT35F6, reach)
+		}
+	}
+	// Its own pack's loop: outside the rider's detection at the party level (the party is not jumped at the stand) and
+	// inside the tank's 28.5 yd shot (the gate fires; the east lane passes 27.4 yd from the stand, 2.6 yd of the loop
+	// in shot each 70.7 s circuit, the thin window the r2 data has).
+	near := math.Inf(1)
+	for _, q := range loop {
+		if d := dist(stand, q); d < near {
+			near = d
+		}
+	}
+	if near < zgT35OwnYd {
+		t.Errorf("pull group %d's stand %.1f %.1f %.1f is %.1f yd from %d's loop, inside the %g yd own detection: the patrol walks the party", gi+1, stand.X, stand.Y, stand.Z, near, zgT35Merged, zgT35OwnYd)
+	}
+	if near > zgW37TankShotYd {
+		t.Errorf("pull group %d's stand %.1f %.1f %.1f is %.1f yd from %d's loop, past the %g yd shot: the gate never fires", gi+1, stand.X, stand.Y, stand.Z, near, zgT35Merged, zgW37TankShotYd)
+	}
+	// The patrol block matching its loop: without it the row times nothing of the patrol it waits on.
+	if fb.Patrol == nil {
+		t.Errorf("pull group %d (the fallback %d) carries no patrol block: the merged row times only %d's loop", gi+1, zgT35Merged, zgT35F6)
+	} else {
+		if !strings.Contains(fb.Patrol.Source, fmt.Sprintf("creature_movement %d", zgT35Merged)) {
+			t.Errorf("pull group %d's patrol source %q does not name creature_movement %d", gi+1, fb.Patrol.Source, zgT35Merged)
+		}
+		if len(fb.Patrol.Path) != len(loop) {
+			t.Errorf("pull group %d's patrol path has %d points, want %d (%d's loop)", gi+1, len(fb.Patrol.Path), len(loop), zgT35Merged)
+		} else {
+			for k := range loop {
+				if d := dist(fb.Patrol.Path[k], loop[k]); d > 0.5 {
+					t.Errorf("pull group %d's patrol path[%d] is %.1f yd from %d's waypoint", gi+1, k, d, zgT35Merged)
+					break
+				}
+			}
+		}
+		length := 0.0
+		for k := range loop {
+			length += dist(loop[k], loop[(k+1)%len(loop)])
+		}
+		if want := length / 2.5; math.Abs(float64(fb.Patrol.PeriodS)-want) > 1 {
+			t.Errorf("pull group %d's patrol period is %.1f s, want %.1f (%d's %0.1f yd loop at 2.5 yd/s)", gi+1, fb.Patrol.PeriodS, want, zgT35Merged, length)
+		}
+	}
+	// The mechanism that makes it a fallback: the merged row owns 49189's spawns (the route's first row wins), so the
+	// fallback's gather finds nothing once the merged pull took them, and the run leader skips the row instead of
+	// failing (internal/dungeon/driver.go:1799-1800). Here the route row is the assertable half.
+	pts, err := routePoints(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var owners []routePoint
+	for _, q := range pts {
+		if q.ownerIdx >= 0 {
+			owners = append(owners, q)
+		}
+	}
+	byLeader := map[uint64][]creature{}
+	for _, c := range cs {
+		if c.GroupLeader != 0 {
+			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)
+		}
+	}
+	for _, c := range merged {
+		o, pulled := routeOwnerOf(owners, byLeader, c)
+		if !pulled || o.leg != 0 || o.item != zgT35Bodies {
+			t.Errorf("%s %d is pulled by %s, not by the merged row (leg 0, item %d): the fallback's pack is the merged row's, so it is gone by then",
+				c.Name, c.GUID, pulledBy(pulled, o), zgT35Bodies)
+		}
+	}
+}
+
+// zgT35Formation is a formation's units by its leader (creatures.tsv group_leader; the leader itself included).
+func zgT35Formation(cs []creature, leader uint64) []creature {
+	var out []creature
+	for _, c := range cs {
+		if c.GroupLeader == leader || c.GUID == leader {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // zgT35GroupFlags reads creature_groups' flags per spawn (creatures.tsv group_flags): OPTION_FORMATION_MOVE (0x1) is
