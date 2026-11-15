@@ -1,10 +1,10 @@
 package main
 
-// The raid-walk --prepull-aura test tool: at the step before each boss row (whatever its phase), or on the boss row
-// itself when the run passed that step too fast to pause, the walk pauses the run, puts the flag's lists on the
-// living party with the gm_aura RPC (a confirmed select then ".aura <id>"), reads them back into prepull-auras.json
-// and resumes. Once per boss row, never at or after the pull, a pause is always resumed, and an aura on the
-// commander is a miss like any other.
+// The raid-walk --prepull-aura test tool: at the step before each boss row (whatever its phase), or where the paused
+// run stands when it passed that step too fast to pause (the boss row itself or beyond it, the boss not engaged), the
+// walk pauses the run, puts the flag's lists on the living party with the gm_aura RPC (a confirmed select then
+// ".aura <id>"), reads them back into prepull-auras.json and resumes. Once per boss row, never at or after the pull, a
+// pause is always resumed, and an aura on the commander is a miss like any other.
 import (
 	"bytes"
 	"context"
@@ -725,6 +725,91 @@ func TestPrepullAuraAdvancedPauseAtTheBossRowFires(t *testing.T) {
 	}
 	if len(a.sent) == 0 {
 		t.Fatal("the advanced pause sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+}
+
+// Walk 113, raid st13b: the server's run completed steps 421-424 in one tick, so the pause for boss row 425 was
+// confirmed on step 426 — past the boss row, not on it. The boss was not engaged, so the auras go out where the
+// paused run stands, verify and the walk resumes; the old rule failed the whole raid (exit 18) there, with five bosses
+// down and no wipe. The assertion is that fire and no exit: old code returns the "past the step before it" stop.
+func TestPrepullAuraPausePastTheBossRowFiresWhenTheBossIsNotEngaged(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6 // the pause confirms the run already passed boss row 5 and stands on 6
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("pause past the boss row: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the pause past the boss row sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	// The fresh arena read is what rules out an engaged boss on the overshoot; the fire's own combat watch is separate.
+	if len(a.ttCmds) != 1 || a.ttCmds[0] != "q units 60 100 200 10 all" {
+		t.Fatalf("arena reads %v", a.ttCmds)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
+		t.Fatalf("boss rows %v", f.BossRows)
+	}
+}
+
+// The same overshoot with the boss engaged: the pull has started, so the walk still fails closed with no aura, and the
+// run is resumed as before. Old code also failed, but on the step alone and without the arena read; the assertion here
+// is the reason: an engaged boss, not merely a step past the row.
+func TestPrepullAuraPausePastTheBossRowWithTheBossEngagedFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6
+	a.arenaCombat = []string{"Hakkar"}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "past the step before it") || !strings.Contains(reason, "engaged") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.ttCmds) != 1 {
+		t.Fatalf("arena reads %v (want the one the overshoot reads)", a.ttCmds)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the engaged overshoot sent %v", a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the engaged row was recorded as done")
+	}
+}
+
+// The ordinary pause stands on the step before the boss row: no arena read is needed (the fire's own combat watch is
+// the only gate) and the fire, the verification and the resume are the pre-existing path. The control for the two
+// overshoot tests above.
+func TestPrepullAuraPauseOnTheStepBeforeTheBossRowIsUnchanged(t *testing.T) {
+	a := newPrepullAgent(t) // statusStep 4: the pause confirms the run stands on the step before boss row 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("pause on the step before: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the pause on the step before sent nothing")
+	}
+	if len(a.ttCmds) != 0 {
+		t.Fatalf("arena reads %v (want none on the normal path)", a.ttCmds)
 	}
 	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
 		t.Fatalf("verbs %q", got)

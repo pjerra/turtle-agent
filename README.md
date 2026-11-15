@@ -51,8 +51,8 @@ spec is listed in the walk's `spec_failed`.
 
 Raid-walk's `--prepull-aura role=<role>:<ids>` (`tank`, `melee`, `ranged`, `caster`, `healer` or `all`) puts a flask,
 elixir, food and world-buff list on the raid as auras at the step before each boss row — whatever that step's phase,
-or on the boss row itself if the run passed that step too fast to pause, both only while the run is still before the
-pull — and
+or where the paused run stands when it passed that step too fast to pause (the boss row itself or beyond it, as long as
+the boss is not engaged), both only while the run is still before the pull — and
 `prepull-auras.json` records what each bot carries. A value that is not a `role=` list is a `tb-prepull-auras` file, so
 `--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once (`dungeons/prepull/onyxia-preraid.json` is the same six for Onyxia's Lair, with Greater Fire Protection Potion's aura 17543 on the `all` list). The targets are the walk's own hires,
 matched by name in the commander's raid read from its view (the walk's player is not in the hired bots' raid); a frame

@@ -35,8 +35,9 @@
 //
 // The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
 // is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
-// boss row itself when the run passed that step too fast to pause, still before the pull (no member in combat and the
-// boss's arena read fresh out of combat). A boss row that an object or an NPC summons — a use_object (an open or
+// row where the run passed that step too fast to pause — the boss row itself, or any step beyond it, as walk 113's
+// one-tick 421-424 stretch left the pause for boss row 425 on step 426 — still before the pull (no member in combat
+// and the boss's arena read fresh out of combat). A boss row that an object or an NPC summons — a use_object (an open or
 // open_proof row) or a gossip row — fires on the step before that trigger instead, when only the trigger, waits and
 // moves of the approach stand between it and the boss row (raidwalk.PrepullFirePoint), because the trigger starts the
 // boss's script at once: walk 104's ZG gong 180526 summoned Arlokk into combat on her own row 346, and her boss row
@@ -276,8 +277,9 @@ func (w *walk) prepullGate(ctx context.Context, st tbm.RunStatus, later bool) (p
 }
 
 // prepullAuraSendPending is pollOnce's firing: at the step before a boss row (whatever its phase), before the trigger
-// row that summons the boss when there is one (prepullTarget), or at the boss row itself when the run passed that step
-// too fast to pause, once per boss row, the auras go out under a run pause that
+// row that summons the boss when there is one (prepullTarget), or where a paused run stands when it passed that step
+// too fast to pause (the boss row itself or beyond it, the boss not engaged), once per boss row, the auras go out
+// under a run pause that
 // must hold. A boss row that became current without a verified fire fails the walk (a configured boss row the walk
 // never prepared is not the test the run was started for). A boss row whose arena read fails is the gate's error and
 // stops the walk too. When the fire went out before a trigger, one line names the boss row and the trigger
@@ -998,11 +1000,13 @@ func (w *walk) prepullAuraCoverageRead(ctx context.Context, step int, phase stri
 // prepullAuraHold puts the run on hold for the batch and confirms it. A refused, unacknowledged or unconfirmed pause
 // is a blocking failure: no aura goes out on a run the walk cannot show is paused before the pull. The pause must
 // stand on the step before the row the fire stands before (fireRow: the boss row itself, or the trigger row that
-// summons it, bossRow); the one exception is a run that passed that row too fast to pause: then it may stand on
-// fireRow itself, and only while the boss is not engaged — the boss's arena is read fresh from the server after the
-// pause is confirmed (prepullBossEngaged), never from the cached frames, and the fire's own combat read still gates
-// the commander and every member. A pause past fireRow is mid-pull (or mid-summon) and fails. The confirmation is a
-// fresh `run status`, the run's own answer rather than the push feed's newest line.
+// summons it, bossRow); a run that passed that row too fast to pause may stand on fireRow itself or beyond it (walk
+// 113: steps 421-424 completed in one tick and the boss row 425's pause landed on step 426), and then, like a pause on
+// fireRow, it fires where it stands, only while the boss is not engaged — the boss's arena is read fresh from the
+// server after the pause is confirmed (prepullBossEngaged), never from the cached frames, and the fire's own combat
+// read still gates the commander and every member. A pause BEFORE the step before fireRow is not the hold the fire
+// stands before and fails. The confirmation is a fresh `run status`, the run's own answer rather than the push feed's
+// newest line.
 func (w *walk) prepullAuraHold(ctx context.Context, bossRow, fireRow int, pause bool) error {
 	step := bossRow
 	if pause {
@@ -1035,14 +1039,16 @@ func (w *walk) prepullAuraHold(ctx context.Context, bossRow, fireRow int, pause 
 	if w.plan != nil && run.Plan != "" && run.Plan != w.plan.Name {
 		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run is %s, not %s, no auras were sent", step, run.Plan, w.plan.Name)
 	}
-	if run.Step != fireRow-1 && run.Step != fireRow {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d), no auras were sent",
+	if run.Step < fireRow-1 {
+		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, before the step before it (step %d), no auras were sent",
 			step, run.Step, fireRow-1)
 	}
-	if run.Step == fireRow {
-		// The run passed the step before its fire row too fast for the pause. A pause on the fire row is still before
-		// the pull (or the summon) only while the boss is not engaged: the arena is read fresh here, after the pause was
-		// confirmed, because the cached hostile frames can lag the server by a frame and show a boss the commander
+	if run.Step >= fireRow {
+		// The run passed the step before its fire row too fast for the pause: it may stand on the fire row itself or
+		// beyond it. Walk 113 (raid st13b): the server completed steps 421-424 in one tick, so boss row 425's pause was
+		// confirmed on step 426, and the old rule failed a raid with five bosses down and no wipe. A pause is still a
+		// place the auras can go out only while the boss is not engaged: the arena is read fresh here, after the pause
+		// was confirmed, because the cached hostile frames can lag the server by a frame and show a boss the commander
 		// already pulled. The fire re-reads the commander and every living member for combat before its first aura, so
 		// a pull that started anyway still stops the batch there.
 		engaged, err := w.prepullBossEngaged(ctx, step)
@@ -1050,14 +1056,22 @@ func (w *walk) prepullAuraHold(ctx context.Context, bossRow, fireRow int, pause 
 			return err
 		}
 		if engaged {
-			if fireRow == step {
+			switch {
+			case run.Step > fireRow:
+				return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d), with the boss engaged, no auras were sent",
+					step, run.Step, fireRow-1)
+			case fireRow == step:
 				return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the boss row with the boss engaged, no auras were sent", step)
+			default:
+				return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the trigger step %d with the boss engaged, no auras were sent", step, fireRow)
 			}
-			return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the trigger step %d with the boss engaged, no auras were sent", step, fireRow)
 		}
-		if fireRow == step {
+		switch {
+		case run.Step > fireRow:
+			w.note("prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d); it fires there with the boss not engaged", step, run.Step, fireRow-1)
+		case fireRow == step:
 			w.note("prepull-aura: boss row %d: the run reached the boss row before the pause; it paused there with the boss not engaged", step)
-		} else {
+		default:
 			w.note("prepull-aura: boss row %d: the run reached the trigger step %d before the pause; it paused there with the boss not engaged", step, fireRow)
 		}
 	}
