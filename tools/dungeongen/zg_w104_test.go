@@ -17,6 +17,17 @@
 // tests below pin both the body counts of the rows that are one-at-a-time pulls (one-based 6-8, under their ceilings)
 // and the two no-stand proofs; the east rows keep the smallest counts any stand reaches (15 and 11) and stay
 // gm-cleared.
+//
+// Round 3 (briefs-omp/zg-route-T29-r3.md) is one-based group 6's stand again: it kept 23 yd of neighbour clearance
+// while the raid model is the unit's own reach (detection adjusted for the party's level, 22 yd here, plus the raid's
+// 10 yd spread), so the stand sat 31.9 yd from group 4's 49397-49400 camp and 32.2 from the later 1173082 four. It
+// moves 9.5 yd west, to (-11619.5 -1306 79.17): 21.2-27.6 yd from its own pack, 41.2 from the 1173082 four (its 32
+// yd reach plus 8), at least 41 from every other later pack, the pit 61.7 and Jin'do past his reach; the row's live
+// estimate is its own ten. The pull-size estimate still reads 14 because it counts every spawn alive: its four extra
+// bodies are group 4's camp, which row "pull group 4" kills before this row. The test below now holds the west stands
+// to the real reach of every pack pulled later and proves no reachable stand can clear both four-mob camps (the
+// farthest from group 4's camp among the 300 valid stands is 28.4 yd, inside its 32 yd reach), so the 14 has no live
+// effect and the plan note says so ("WALK 104 REVIEW R3").
 package main
 
 import (
@@ -41,11 +52,19 @@ const zgW104OtherYd = 23.0
 // party does not wake the pack before it stands and the row's CC orders can go out.
 const zgW104OwnWalkYd = 21.0
 
+// zgW104CampYd is the margin group 6's stand (one-based; zero-based pull group 5) keeps past the later four-mob
+// camp's stand reach: its 22 yd detection plus the raid's 10 yd spread, and 8 yd more (review round 3). The stand is
+// where the fight happens, so the camp it must not bring is the one pulled later (the 1173082 four), not the
+// 49397-49400 camp group 4 pulls and kills first.
+const zgW104CampYd = 8.0
+
 // TestZgW104JindoHallWestPacksOneAtATime pins the walk-104 fix: the hall's three west packs are stand pulls whose
-// stands keep 19.5-28 yd from their own pack (in the tank's shot, out of its detection), >= 23 yd from every other
-// pack of the leg and from the hall's unowned spawns (the pit's Sacrificed Trolls, the north-west cluster), and
-// >= Jin'do's route reach; the walks in keep >= 21 yd from the pack they approach and >= 23 from the rest. With the
-// mmaps it also checks line of sight from every stand to every unit of its pack and a complete navmesh path in.
+// stands keep 19.5-28 yd from their own pack (in the tank's shot, out of its detection), >= 23 yd from every pack the
+// party has already killed and the level-adjusted detection plus the raid's 10 yd spread from every pack still alive
+// (review round 3; one-based group 6 adds 8 yd against the later 1173082 four), the same reach from the hall's
+// unowned spawns (the pit's Sacrificed Trolls, the north-west cluster) and Jin'do's route reach; the walks in keep
+// >= 21 yd from the pack they approach and the same reach from every pack pulled later. With the mmaps it also
+// checks line of sight from every stand to every unit of its pack and a complete navmesh path in.
 func TestZgW104JindoHallWestPacksOneAtATime(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg, legNo := zgW37LegByName(t, p, "jindo_the_hexxer")
@@ -119,22 +138,42 @@ func TestZgW104JindoHallWestPacksOneAtATime(t *testing.T) {
 		if far > zgOwnMaxYd {
 			t.Errorf("%s: its stand is %.1f yd from the pack's farthest unit, past the %g yd shot: the row plain-pulls to the camp", where, far, zgOwnMaxYd)
 		}
-		// Every other pack of the leg, at the detection plus the raid's spread.
+		// Every pack the party has already killed is its own ground: the 23 yd line. Every pack still alive when the
+		// row is pulled keeps its own reach (detection adjusted for the party's level, plus the raid's 10 yd spread):
+		// the round-1 stands were accepted on 23 yd alone, which let group 6's stand sit 31.9 yd from group 4's
+		// camp and 32.2 from the 1173082 four (review round 3).
 		for gi := range packs {
 			if gi == w.group {
 				continue
 			}
-			if d, who := zgMin3(stand, packs[gi]); d < zgW104OtherYd {
-				t.Errorf("%s: its stand %.1f %.1f %.1f is %.1f yd from pull group %d's %s %d, want >= %g: the fight there brings that pack in", where, stand.X, stand.Y, stand.Z, d, gi, who.Name, who.Entry, zgW104OtherYd)
+			if gi < w.group {
+				if d, who := zgMin3(stand, packs[gi]); d < zgW104OtherYd {
+					t.Errorf("%s: its stand %.1f %.1f %.1f is %.1f yd from pull group %d's %s %d, want >= %g: the fight there brings that pack in", where, stand.X, stand.Y, stand.Z, d, gi, who.Name, who.Entry, zgW104OtherYd)
+				}
+				continue
+			}
+			for _, c := range packs[gi] {
+				if d := dist(stand, c.Pos); d < zgW104Reach(c) {
+					t.Errorf("%s: its stand %.1f %.1f %.1f is %.1f yd from %s %d of pull group %d (pulled later), want >= %.1f (its %.1f yd reach at party level %d): the fight there brings that pack in", where, stand.X, stand.Y, stand.Z, d, c.Name, c.GUID, gi, zgW104Reach(c), zgW104Reach(c)-aggroest.StandSpreadRaidYd, zgW104PartyLevel)
+				}
+			}
+		}
+		// One-based group 6 and the later four-mob camp: its reach plus 8 yd (review round 3). The camp is pulled
+		// at group 7, so it is alive and must stay out of the fight's own stand reach with a margin.
+		if w.group == 5 {
+			for _, c := range packs[7] {
+				if want := zgW104Reach(c) + zgW104CampYd; dist(stand, c.Pos) < want {
+					t.Errorf("%s: its stand %.1f %.1f %.1f is %.1f yd from the later four-mob camp's %s %d, want >= %.1f (its %.1f yd reach plus %g): the pull brings the camp in", where, stand.X, stand.Y, stand.Z, dist(stand, c.Pos), c.Name, c.GUID, want, zgW104Reach(c), zgW104CampYd)
+				}
 			}
 		}
 		// The hall's hostiles no row pulls: the pit's ten Sacrificed Trolls (10 s respawn) and the north-west
-		// cluster 49387-49396, plus Jin'do himself at his own route reach.
+		// cluster 49387-49396, at their own reach, plus Jin'do himself at his own route reach.
 		for _, c := range cs {
 			if !zgHostile(c) || owned[c.GUID] {
 				continue
 			}
-			yd := zgW104OtherYd
+			yd := zgW104Reach(c)
 			if c.Entry == 11380 {
 				yd = bossReach
 			}
@@ -181,9 +220,13 @@ func TestZgW104JindoHallWestPacksOneAtATime(t *testing.T) {
 			t.Errorf("%s passes %.1f yd from its own %s %d at %.1f %.1f, want >= %g (the pack wakes before the pull)", label, d, who.Name, who.Entry, q.X, q.Y, zgW104OwnWalkYd)
 		}
 		// The packs pulled later are still alive on this walk (the ones before it are the party's own ground: group
-		// 4's camp is where it stood).
-		if d, q, who := zgSampleMin(walk, zgLater(packs, w.group)); d < zgW104OtherYd {
-			t.Errorf("%s passes %.1f yd from %s %d of a later group at %.1f %.1f, want >= %g", label, d, who.Name, who.Entry, q.X, q.Y, zgW104OtherYd)
+		// 4's camp is where it stood), so each keeps its own reach along the walk (review round 3), not the 23 yd
+		// line the round-1 stands were held to.
+		for _, c := range zgLater(packs, w.group) {
+			if d, q, _ := zgSampleMin(walk, []creature{c}); d < zgW104Reach(c) {
+				t.Errorf("%s passes %.1f yd from %s %d of a later group at %.1f %.1f, want >= %.1f (its %.1f yd reach at party level %d)", label, d, c.Name, c.GUID, q.X, q.Y, zgW104Reach(c), zgW104Reach(c)-aggroest.StandSpreadRaidYd, zgW104PartyLevel)
+				break
+			}
 		}
 	}
 
@@ -455,6 +498,11 @@ func TestZgW104JindoHallPullSizesUnderTheirCeilings(t *testing.T) {
 		if bodies > ceiling {
 			t.Errorf("leg 6 pull group %d (one-based %d, row %d): the pull brings %d bodies over its ceiling %d: %v", g, g+1, i, bodies, ceiling, why)
 		}
+		// Review round 3's rule: one-at-a-time means the row's own pack, nothing else. A count over the pack is a
+		// neighbour the stand's reach brings in, whatever the ceiling says.
+		if bodies != len(packs[g]) {
+			t.Errorf("leg 6 pull group %d (one-based %d, row %d): the pull brings %d bodies, its pack is %d: the stand is inside a neighbour's reach: %v", g, g+1, i, bodies, len(packs[g]), why)
+		}
 		if jin {
 			t.Errorf("leg 6 pull group %d (one-based %d, row %d) brings Jin'do 11380 before his boss row: %v", g, g+1, i, why)
 		}
@@ -464,6 +512,9 @@ func TestZgW104JindoHallPullSizesUnderTheirCeilings(t *testing.T) {
 	notes := strings.Join(p.Legs[legNo].Notes, "\n")
 	if !strings.Contains(notes, "WALK 104 REVIEW R2") || !strings.Contains(notes, "are NOT one-at-a-time pulls") {
 		t.Errorf("leg 6's plan note does not document one-based groups 9 and 10 as unsupported (WALK 104 REVIEW R2): the plan must not claim them")
+	}
+	if !strings.Contains(notes, "WALK 104 REVIEW R3") || !strings.Contains(notes, "stays the fallback") {
+		t.Errorf("leg 6's plan note does not document group 6's round-3 stand, the dead camp's four bodies and the +8 margin's limit (WALK 104 REVIEW R3)")
 	}
 	for _, c := range []struct{ group, bodies int }{{8, 15}, {9, 11}} {
 		i, ok := rowOf[c.group]
@@ -552,6 +603,194 @@ func TestZgW104JindoHallEastPacksHaveNoIsolatingStand(t *testing.T) {
 		pitYd, escortYd := zgW104MinYd2(st, pit), zgW104MinYd2(st, escorts)
 		if pitYd > pitReach && escortYd > escortReach {
 			t.Errorf("leg 6 pull group 9 (one-based 10): the stand %.1f %.1f is %.1f yd from the pit's trolls and %.1f from an escort, past both reaches: the camp can be staged there (re-measure the plan note)", st.X, st.Y, pitYd, escortYd)
+		}
+	}
+}
+
+// TestZgW104JindoHallGroup6CampMarginIsTheWindowLimit is the second half of review round 3 (briefs-omp/
+// zg-route-T29-r3.md): group 6's stand clears the later four-mob camp (the 1173082 four, pulled at group 7) by the
+// camp's reach plus 8 yd, while the pull-size estimate still reads 14 bodies for the row. Those four extra are group
+// 4's camp (49397-49400): row "pull group 4" pulls them and kills them before group 6, so the row's live estimate is
+// its own ten (TestZgW104JindoHallPullSizesUnderTheirCeilings), and no stand removes the four from the all-alive
+// estimate: of every navmesh floor point the walk reaches, in the pack's 21-28.5 yd window, with line of sight to all
+// ten, a complete path in and 40+ yd from the 1173082 four, the farthest from group 4's camp is 28.4 yd, inside its
+// 32 yd reach. The only points 32+ yd from both camps are a lip at the old stand (-11610 -1306 79.2), which has
+// neither the +8 margin nor a clear walk. This pins the limit the plan note states, so the row cannot be "fixed" by
+// another stand and the pull-size 14 is the dead camp.
+func TestZgW104JindoHallGroup6CampMarginIsTheWindowLimit(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("needs the map-309 mmaps (the stand window, sight and path)")
+	}
+	defer pl.Close()
+	leg, legNo := zgW37LegByName(t, p, "jindo_the_hexxer")
+	packs := zgPacks(t, *leg, cs)
+	own, dead, camp := packs[5], packs[4], packs[7]
+	// The dead camp is pulled and killed before group 6: its own row comes first in the export.
+	rows := zgW37BuildRows(t, p, cs, 6)
+	deadRow, ok := rows.owner[dead[0].GUID]
+	if !ok || rows.rows[deadRow].Kind != planexport.KindPull || rows.rows[deadRow].Comment != "pull group 4" {
+		t.Fatalf("the 49397-49400 camp is not row pull group 4 (owner %d): the four bodies the estimate adds have no earlier row to kill them", deadRow)
+	}
+	groupRow, ok := rows.owner[own[0].GUID]
+	if !ok || groupRow <= deadRow {
+		t.Fatalf("group 6's row (%d) does not come after group 4's (%d): the walk does not reach the camp first", groupRow, deadRow)
+	}
+	for _, c := range dead[1:] {
+		if rows.owner[c.GUID] != deadRow {
+			t.Errorf("%d is owned by row %d, not the camp's row %d: the camp must be one pack", c.GUID, rows.owner[c.GUID], deadRow)
+		}
+	}
+	// The walk in starts where the party stood at the previous pull row, as the run leader walks it.
+	parties := zgParties(t, p, legNo)
+	at := -1
+	for i := range parties {
+		if parties[i].Turn && parties[i].Group == 5 {
+			at = i
+		}
+	}
+	if at < 0 {
+		t.Fatal("no exported pull row for pull group 5")
+	}
+	from, ok := dungeon.Point{}, false
+	for i := at - 1; i >= 0; i-- {
+		if parties[i].Turn {
+			from, ok = parties[i].P, true
+			break
+		}
+	}
+	if !ok {
+		t.Fatal("no row before group 6 to walk in from")
+	}
+	var boss creature
+	for _, c := range cs {
+		if c.Entry == 11380 {
+			boss = c
+		}
+	}
+	if boss.GUID == 0 {
+		t.Fatal("no Jin'do spawn in the map-309 export")
+	}
+	bossReach := routeReach(p, boss)
+	// Every unit alive when the row is pulled: the packs after it and the hall's unowned hostiles.
+	owned := map[uint64]bool{}
+	for gi := range packs {
+		for _, c := range packs[gi] {
+			owned[c.GUID] = true
+		}
+	}
+	var alive []creature
+	for gi := 6; gi < len(packs); gi++ {
+		alive = append(alive, packs[gi]...)
+	}
+	for _, c := range cs {
+		if zgHostile(c) && !owned[c.GUID] {
+			alive = append(alive, c)
+		}
+	}
+	minx, maxx, miny, maxy := math.Inf(1), math.Inf(-1), math.Inf(1), math.Inf(-1)
+	for _, c := range own {
+		minx, maxx = math.Min(minx, float64(c.Pos.X)), math.Max(maxx, float64(c.Pos.X))
+		miny, maxy = math.Min(miny, float64(c.Pos.Y)), math.Max(maxy, float64(c.Pos.Y))
+	}
+	pad := float64(zgW37TankShotYd)
+	valid := 0
+	maxDead := 0.0
+	maxAt := dungeon.Point{}
+	var both []dungeon.Point
+	for xi := 0; ; xi++ {
+		x := float32(minx - pad + float64(xi)*0.1)
+		if float64(x) > maxx+pad {
+			break
+		}
+		for yi := 0; ; yi++ {
+			y := float32(miny - pad + float64(yi)*0.1)
+			if float64(y) > maxy+pad {
+				break
+			}
+			// The 3D window is inside the 2D one, so the 2D ring is a cheap superset filter.
+			lo2, hi2 := math.Inf(1), math.Inf(-1)
+			for _, c := range own {
+				d := zgW104Yd2(dungeon.Point{X: x, Y: y}, c.Pos)
+				lo2, hi2 = math.Min(lo2, d), math.Max(hi2, d)
+			}
+			if lo2 < zgOwnMinYd || hi2 > zgOwnMaxYd {
+				continue
+			}
+			floors, err := pl.Floors(309, x, y, 75, 82)
+			if err != nil {
+				t.Fatalf("floors at %.1f %.1f: %v", x, y, err)
+			}
+			for _, f := range floors {
+				st := dungeon.Point{X: x, Y: y, Z: f.Z}
+				lo, hi := math.Inf(1), math.Inf(-1)
+				for _, c := range own {
+					d := dist(st, c.Pos)
+					lo, hi = math.Min(lo, d), math.Max(hi, d)
+				}
+				if lo < zgOwnMinYd || hi > zgOwnMaxYd {
+					continue
+				}
+				walk := zgSamplesAlong(from, st, zgSampleStep)
+				if d, _, _ := zgSampleMin(walk, own); d < zgW104OwnWalkYd {
+					continue
+				}
+				clear := true
+				for _, c := range alive {
+					yd := zgW104Reach(c)
+					if c.Entry == 11380 {
+						yd = bossReach
+					}
+					if dist(st, c.Pos) < yd {
+						clear = false
+						break
+					}
+				}
+				if !clear {
+					continue
+				}
+				los := true
+				for _, c := range own {
+					ray, err := pl.Raycast(309, navmesh.Vec3{st.X, st.Y, st.Z}, navmesh.Vec3{c.Pos.X, c.Pos.Y, c.Pos.Z})
+					if err != nil || !ray.Known || !ray.Clear {
+						los = false
+						break
+					}
+				}
+				if !los {
+					continue
+				}
+				path, err := pl.Plan(309, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{st.X, st.Y, st.Z})
+				if err != nil || path.Status != navmesh.Complete {
+					continue
+				}
+				campYd, _ := zgMin3(st, camp)
+				deadYd, _ := zgMin3(st, dead)
+				if campYd >= zgW104Reach(camp[0]) && deadYd >= zgW104Reach(dead[0]) {
+					both = append(both, st)
+				}
+				if campYd < zgW104Reach(camp[0])+zgW104CampYd {
+					continue
+				}
+				valid++
+				if deadYd > maxDead {
+					maxDead, maxAt = deadYd, st
+				}
+			}
+		}
+	}
+	if valid == 0 {
+		t.Fatalf("no stand in the window keeps %g yd past the 1173082 four's reach: the plan's stand is not one, re-measure it", zgW104CampYd)
+	}
+	t.Logf("%d valid stands, farthest from group 4's camp %.2f yd", valid, maxDead)
+	if maxDead >= zgW104Reach(dead[0]) {
+		t.Errorf("a stand %.1f %.1f %.1f is %.1f yd from group 4's camp and still %g yd past the 1173082 four's reach: the two four-mob camps no longer force the estimate's four extra bodies -- re-measure the plan note and the pull-size pin", maxAt.X, maxAt.Y, maxAt.Z, maxDead, zgW104CampYd)
+	}
+	oldStand := dungeon.Point{X: -11610, Y: -1306}
+	for _, st := range both {
+		if zgW104Yd2(st, oldStand) > 1.5 {
+			t.Errorf("the stand %.1f %.1f %.1f is %g yd from both four-mob camps' reaches and %.1f yd from the old stand: a stand outside both now exists, re-measure the plan note and the pull-size pin", st.X, st.Y, st.Z, zgW104Reach(dead[0]), zgW104Yd2(st, oldStand))
 		}
 	}
 }
