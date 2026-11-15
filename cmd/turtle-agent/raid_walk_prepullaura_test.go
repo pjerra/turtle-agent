@@ -3019,6 +3019,81 @@ func TestPrepullAuraTopupCombatStopsQuietly(t *testing.T) {
 	}
 }
 
+// (e) A boss row is a pull row for the top-up: under --prepull-aura-when start no boss row is ever fired, so the step
+// before a KindBoss row reads the hires and puts back what they lack. On r3 the gate took only KindPull rows, so a boss
+// pull got no top-up at all:
+//
+//	the top-up sent 0 line(s) before the boss row, want the world buff on all six hires: []
+func TestPrepullAuraTopupTopsUpBeforeABossRowInStartMode(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	w.rows = prepullRows(2, 5)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	if fired, err := w.prepullAuraSendPending(context.Background(), st, false); err != nil || fired {
+		t.Fatalf("the step before the boss row: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 6 {
+		t.Fatalf("the top-up sent %d line(s) before the boss row, want the world buff on all six hires: %v", len(a.sent), a.sent)
+	}
+	if lines := prepullNotes(w, "topup before step 5:"); len(lines) != 1 {
+		t.Fatalf("top-up lines %q, want one naming step 5", lines)
+	}
+}
+
+// (f) A hire dead at the first status before a boss row and alive at the next one gets its list before that pull: the
+// boss row's step retries a hire like a trash pull's.
+func TestPrepullAuraTopupRetriesARevivedHireBeforeABossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	w.rows = prepullRows(2, 5)
+	ctx := context.Background()
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	a.deadBots["Rank"] = true
+	if _, err := w.prepullAuraSendPending(ctx, st, false); err != nil {
+		t.Fatalf("the status with Rank dead: %v", err)
+	}
+	if len(a.sent) != 5 {
+		t.Fatalf("the status with Rank dead sent %v (want the five living hires only)", a.sent)
+	}
+	first := len(a.sent)
+	a.deadBots["Rank"] = false
+	a.advance(2 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, st, false); err != nil {
+		t.Fatalf("the status after the revive: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Rank 22888" {
+		t.Fatalf("the revived hire got %v (want the world buff before the boss pull)", tail)
+	}
+}
+
+// (g) With --prepull-aura-when boss (the default) the boss row's own fire sends the full lists: the top-up stays out of
+// that row, so the step before it sends each hire's list once, from the fire, and writes no top-up line.
+func TestPrepullAuraTopupDoesNotDoubleSendAtTheBossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	w.rows = prepullRows(2, 5)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("the boss-row fire: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 12 {
+		t.Fatalf("%d line(s) at the boss row, want the fire's 12 once each: %v", len(a.sent), a.sent)
+	}
+	if lines := prepullNotes(w, "topup"); len(lines) != 0 {
+		t.Fatalf("the top-up ran at a boss row the fire owns: %q", lines)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the boss row was not recorded as prepared by the fire")
+	}
+}
+
 // (d) The flag is off by default: the same pull steps send nothing, with no top-up line, and the boss-row fire keeps
 // its own gate (no boss row in this plan, so nothing fires at all).
 func TestPrepullAuraTopupOffByDefault(t *testing.T) {

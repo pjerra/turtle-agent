@@ -291,9 +291,10 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 	if len(w.prepullAuras) == 0 {
 		return false, nil
 	}
-	// --prepull-aura-topup stands before every pull row, bosses' own fire apart: it never pauses, never fails the
-	// walk, and does not fire this line loop (nothing of the run's state changes, so the page's other lines are still
-	// worth handling).
+	// --prepull-aura-topup stands before every pull row, boss rows included (a boss pull's hires are read there, which
+	// under --prepull-aura-when start is the only read they get): it never pauses, never fails the walk, and does not
+	// fire this line loop (nothing of the run's state changes, so the page's other lines are still worth handling). A
+	// boss row the boss-row fire owns is the fire's business, not the top-up's (prepullTopupBossFires).
 	if step := w.prepullTopupStep(st, later); step != 0 {
 		w.prepullAuraTopup(ctx, step)
 	}
@@ -346,9 +347,12 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 
 // prepullTopupStep is --prepull-aura-topup's gate: the pull row a status stands before. It is the row after the
 // status's own step (the rest, gather, walk or approach before a pull) or, when the run passed that row too fast to
-// stand there, the status's own row while that row is a pull row and still before its pull. prePullOK keeps the top-up
-// out of the pull and the fight (phase pull/fight, a pulling or fighting note, a later pull line of the page, a party
-// bot in combat in a fresh frame); 0 means no pull row to top up before.
+// stand there, the status's own row while that row is a pull row and still before its pull. A boss row is a pull row
+// here too (the boss pull): its statuses before the pull get the top-up, which is the only thing that reads the hires
+// there under --prepull-aura-when start. In boss mode the boss row's own fire owns it (prepullTopupBossFires), so the
+// top-up stays out of that row. prePullOK keeps the top-up out of the pull and the fight (phase pull/fight, a pulling
+// or fighting note, a later pull line of the page, a party bot in combat in a fresh frame); 0 means no pull row to top
+// up before.
 func (w *walk) prepullTopupStep(st tbm.RunStatus, later bool) int {
 	if !w.opts.prepullAuraTopup || len(w.prepullAuras) == 0 {
 		return 0
@@ -359,13 +363,38 @@ func (w *walk) prepullTopupStep(st tbm.RunStatus, later bool) int {
 	if !w.prePullOK(st, later, w.env.now()) {
 		return 0
 	}
-	if w.prepullRowAt(st.Step+1).Kind == planexport.KindPull {
-		return st.Step + 1
+	step := 0
+	if w.prepullPullRow(w.prepullRowAt(st.Step + 1)) {
+		step = st.Step + 1
+	} else if w.prepullPullRow(w.prepullRowAt(st.Step)) {
+		step = st.Step
 	}
-	if w.prepullRowAt(st.Step).Kind == planexport.KindPull {
-		return st.Step
+	if step == 0 || w.prepullTopupBossFires(st, step) {
+		return 0
 	}
-	return 0
+	return step
+}
+
+// prepullPullRow says the row is a pull the top-up stands before: a pull row, or a boss row, whose own pull is its
+// row's pull too.
+func (w *walk) prepullPullRow(row planexport.StepRow) bool {
+	return row.Kind == planexport.KindPull || row.Kind == planexport.KindBoss
+}
+
+// prepullTopupBossFires says the boss-row fire owns this pull row's auras. In boss mode (the default) the fire prepares
+// every boss row with the full lists and is fail-closed — on the step before the row, at its summoning trigger, or on
+// the row itself — so a top-up there would send the same ids a second time: it is skipped whether the fire is still to
+// come for that row or already went out (and likewise on a pull row the fire stands on in this same status). Under
+// --prepull-aura-when start no boss row is ever fired (the lists went out once before the run's first move), so the
+// top-up is what reads and tops up the hires at the boss pull.
+func (w *walk) prepullTopupBossFires(st tbm.RunStatus, step int) bool {
+	if w.opts.prepullAuraWhen == prepullAuraWhenStart {
+		return false
+	}
+	if _, ok := w.bossRowAt(step); ok {
+		return true
+	}
+	return step == st.Step+1 && w.prepullBossRowFiredBy(st.Step+1) != 0
 }
 
 // prepullRowAt is the plan row at step (1-based), the zero row for a step the plan does not have.
