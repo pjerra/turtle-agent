@@ -2610,10 +2610,7 @@
       "skip": [11374, 1420],
       "steps": [
         {
-          "use_item": {
-            "entry": 19974,
-            "name": "Mudskunk Lure"
-          }
+          "use_item": {"entry": 19974, "name": "Mudskunk Lure"}
         },
         {
           "wait_for": {
@@ -2632,7 +2629,7 @@
         "position": {"x": -11688.95, "y": -1777.21, "z": 12.59}
       },
       "notes": [
-        "OPTIONAL leg (spec B, 2026-11-15): Mudskunk Lure (19974) casts spell 24325 Pagle's Point Cast (consumes 5x Zulian Mudskunk 19975, dummy target 309 -11682.8 -1713.37 8.77, SEND_EVENT 9104 -> event_summon_gahzranka), respawns spawn 2530122 (-11673.3 -1726.3 -5.9) in the water and walks him to his home on the beach (-11688.95 -1777.21 12.59). hakkar_outer already clears the lake trash (15043/11357/11359)."
+        "OPTIONAL leg (spec B, 2026-11-15): Mudskunk Lure (19974) casts spell 24325 Pagle's Point Cast (consumes 5x Zulian Mudskunk 19975, dummy target 309 -11682.8 -1713.37 8.77, SEND_EVENT 9104 -\u003e event_summon_gahzranka), respawns spawn 2530122 (-11673.3 -1726.3 -5.9) in the water and walks him to his home on the beach (-11688.95 -1777.21 12.59). hakkar_outer already clears the lake trash (15043/11357/11359)."
       ]
     },
     {
