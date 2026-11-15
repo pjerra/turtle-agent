@@ -695,6 +695,8 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // Walk 107 T34 (2026-11-15): 415 on its own, the Mandokir leg pulls the Vilebranch Speaker last and its boss row
 // gains the arena-floor stand -12188 -1956 130.6 (one more row; the exporter's own cut loses a row, which this Build
 // does not add), so 420 combined.
+// Walk 107 T35 (2026-11-15): 414 on its own (its step-36 stand and merged bat pull net zero rows against dev: 414 in
+// round 4), so the combined plan keeps 420.
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
