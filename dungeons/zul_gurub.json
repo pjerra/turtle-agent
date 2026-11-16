@@ -58,7 +58,8 @@
     "WALK 37 FIX 2 (2026-11-04, leg 0; TortoiseBots-audit tests/raid-zg-walk37 d/d-r1: both runs paused at step 42, \"the walk to it passes 14750 at 0.9 yd\"). The leg's old group 13 (-12228 -1478, radius 10) owned nothing alive: every 11368/14750 spawn inside its radius belongs to the static pack formation 49137, pulled by the group before it. The run leader then chased the residue of formation 49185 (the west camp's bats) to a point of its loop and the walk crossed another bat's lane. The empty row is dropped; formation 49185 (six spawns: 49185, 49157, 49158, 49167, 49186 and the lone 49140 that stands at the static camp) is one plain pull, placed last on the plateau after F6's row: its row point is the formation's centroid (-12270 -1456) and its radius 40 holds the whole formation plus 49140 (48.1 yd, inside the 50 yd pack band), so the fight happens at the west camp with every other plateau formation dead by then and 49140's own pull follows from the same step. A stand pull is impossible for it: one of its members, 49140, stands 48 yd from the others, and the stand gate needs the whole pack in the tank's shot. tools/dungeongen/zg_w35_test.go pins the row's 49185 loop and its six spawns; zg_mandokir_jindo_test.go checks the corridor's live rows.",
     "WALK 37 FIX 3 (2026-11-04, legs 1, 3 and 4; the MANDOKIR-440 method, research/zg-w36/MANDOKIR-440.md \"Also found\"). Five patrol rows were plain pulls at a roaming Berserker 11352's DB spawn with their stand 68-174 yd behind it, so plan-export --approach-hops cut the hop into approach-path rows through the pack field (the exporter lists the row as \"patrol: not in the rows\"). Each is a stand pull now, its pack scoped from a centre the run leader sees (\u003c= 60 yd from the stand) with a radius up to 100 that holds the patroller's spawn: leg 1 group 10 (49698; centre -11977 -1751 r 61, stand -11986.9 -1731.7 54.5, 24.5 yd from its loop), group 18 (91493; centre -12058.1 -1786.9 r 94, stand -12032 -1781 58.83, 23.5 yd from its loop) and group 19 (51962; centre -12128 -1764 r 96, stand -12115 -1819 80.4, 27.6 yd from its loop; the circle also holds 91493's spawn, which group 18 pulls first), leg 3 group 3 (91435; centre is the stand -11636 -1759 36.19, r 35, 23.5 yd from its loop; the stand moved 141 yd north-east from -11739 -1855, which stood 174 yd from the spawn, past the 60 + 100 yd rule) and leg 4 group 21 (91444; centre -11583 -1528 r 54, stand -11587 -1542 53.07, 23.3 yd from its loop). The party holds at the stand and the run leader shoots the patroller as its loop comes into the 28.5 yd shot (loop periods 155-348 s, inside the gate's 600 s wait). The five approach paths are gone from the export (leg 1's 51962 row needs three staging moves for the terrace ramp, which the cut used to place off the mesh): route-aggro drops from 831 to 810 segments. tools/dungeongen/zg_w37_test.go checks each row's centre, radius, stand and loop, that no approach-path row is exported before it, and that the walk to it keeps 20 yd from every pack pulled later.",
     "WALK 39 TRASH CC (2026-11-04; research/zg-trash/TRASH-TACTICS.md section 4, decided data change): cc_priority is the 19-entry list [14532, 14882, 14825, 11353, 11338, 11357, 11356, 11350, 14821, 11351, 11831, 11340, 11339, 11359, 15111, 15043, 11370, 11365, 11361] and kill_first drops the Blood Drinker to [15112, 14987, 14750, 15146, 11830, 14883]; cc_always stays unset (it only duplicates the head of cc_priority). Blood Drinker 11353 moves from kill_first to cc_priority rank 3: walks 35-38 blame 316 bot deaths on it, and the Mandokir step-440 knot wiped 16 times with nine drinkers all active because kill_first forbids CC; it only heals itself by draining, so a sheeped drinker stops draining and dies last. The Jin'do hall pair 14882/14825 (top killers at 368/362 deaths; 14825 dispels our CC) leads, casters and the worst pack-wipers come next, and Axe Thrower 11350 (Polymorph stops its Axe Flurry channel) sits at rank 7 after the drinkers and the Champion with Panthers and Tigers last. Berserker 11352 and Bat Rider 14750 stay out (Polymorph-immune, and auto-CC never picks Freezing Trap), as do Sacrificed Troll 14826 (respawns every 10 s) and Bloodseeker Bat 11368 (non-elite AoE fodder). TestZulGurubTrashCcLists pins the lists.",
-    "WALK 42 PLAN LISTS (2026-11-06; TortoiseBots-audit research/zg-bosses/JINDO-W42.md section 0): cc_priority is cut to its first 16 entries - Razzashi Broodwidow 11370, Zulian Panther 11365 and Zulian Tiger 11361 drop - because TortoiseBots caps every plan list at kPlanMaxEntries = 16 (ai/playerbot/DungeonPlanPolicy.h:197) and ParsePlanEntries then dropped ALL FOUR lists: every ZG raid since t1105c ran with no kill_first and no CC, so the Jin'do ward-first fix never ran. kill_first and cc_never are unchanged. plan-export now refuses a plan list over 16 entries."
+    "WALK 42 PLAN LISTS (2026-11-06; TortoiseBots-audit research/zg-bosses/JINDO-W42.md section 0): cc_priority is cut to its first 16 entries - Razzashi Broodwidow 11370, Zulian Panther 11365 and Zulian Tiger 11361 drop - because TortoiseBots caps every plan list at kPlanMaxEntries = 16 (ai/playerbot/DungeonPlanPolicy.h:197) and ParsePlanEntries then dropped ALL FOUR lists: every ZG raid since t1105c ran with no kill_first and no CC, so the Jin'do ward-first fix never ran. kill_first and cc_never are unchanged. plan-export now refuses a plan list over 16 entries.",
+    "WALK 107 T31 (2026-11-15, leg 1 group 16; TortoiseBots-audit tests/raid-zg-walk107 st7a-1 and tests/raid-zg-walk104 fz6a-2): the merged Mad Servant camp's stand -11919.2 -1843.6 58.8 stood 40.9-49.4 yd from its eight members (walk 107's own 117/689 read: \"patrol pull: not waiting for units that walk no patrol and stand out of the 28.5 yd shot\") and the server read no line of sight from it, so with the run leader's stand discipline the tank held \"no LOS from the authored stand\" for 300 s out of combat and the run paused (step117-st7a.log). The stand is the firing stand walk 104 pulled the same row from: the tank's position -11899.3 -1849.1 61.3 in fz6a-2/frames.jsonl seq 2012 (2026-11-14 18:32:14Z), the tick its run.log (CET) orders \"pulling 15111 0xf130003b0700bf9e (order 1; shot from where it stands)\" after \"to firing stand 1 for 15111 0xf130003b0700bfa1 (24.5 yd from it; was 44.8 yd, los yes)\" - the server's own line of sight, since the agent has no vmaps. It stands 23.3 yd from the row's nearest member (inside the 28.5 yd shot), 45.7 yd from the nearest 15111/11340 spawn of another camp, has a clear navmesh ray to every member in its shot (path-check --ray), and keeps the walk-107 approach point -11919.2 as its own row before it (a 20.6 yd hop); 689 -\u003e 691 steps, 699 -\u003e 701 rows, its pull is step 118."
   ],
   "legs": [
     {
@@ -238,11 +239,28 @@
           "positions": [
             {"x": -12148, "y": -1485, "z": 130.8}
           ],
-          "radius": 4.6,
+          "radius": 6.5,
+          "patrol": {
+            "entries": [14750],
+            "path": [
+              {"x": -12186.5, "y": -1478.3, "z": 130.6},
+              {"x": -12206.8, "y": -1462.72, "z": 131.28},
+              {"x": -12196, "y": -1452.82, "z": 130.63},
+              {"x": -12175.7, "y": -1458.3, "z": 130.6},
+              {"x": -12155.5, "y": -1455.09, "z": 130.6},
+              {"x": -12137, "y": -1455.09, "z": 130.6},
+              {"x": -12125.1, "y": -1468.27, "z": 130.6},
+              {"x": -12150.8, "y": -1484.94, "z": 130.66}
+            ],
+            "period_s": 74,
+            "period_estimate": true,
+            "source": "creature_movement 49155 (8 points, 184.9 yd at 2.5 yd/s)"
+          },
           "approach": [
-            {"x": -12093, "y": -1464, "z": 131.5}
+            {"x": -12114.5, "y": -1446.8, "z": 131.32}
           ],
-          "stand_pull": true
+          "stand_pull": true,
+          "max_bodies": 11
         },
         {
           "entries": [11368, 14750],
@@ -250,6 +268,20 @@
             {"x": -12153.9, "y": -1489.43, "z": 130.725}
           ],
           "radius": 1,
+          "patrol": {
+            "entries": [14750],
+            "path": [
+              {"x": -12131.4, "y": -1464.8, "z": 130.6},
+              {"x": -12170.9, "y": -1464.67, "z": 130.602},
+              {"x": -12196.2, "y": -1460.11, "z": 131.454},
+              {"x": -12211.8, "y": -1477.26, "z": 130.9},
+              {"x": -12196.2, "y": -1460.11, "z": 131.454},
+              {"x": -12170.9, "y": -1464.67, "z": 130.602}
+            ],
+            "period_s": 70.7,
+            "period_estimate": true,
+            "source": "creature_movement 49189 (6 points, 176.8 yd at 2.5 yd/s)"
+          },
           "approach": [
             {"x": -12108, "y": -1479, "z": 130.9}
           ],
@@ -410,7 +442,10 @@
       "notes": [
         "WALK 38 FIX 3 (2026-11-05, leg 0; TortoiseBots-audit tests/raid-zg-walk38 d/h2/a/h3 and the 22:13 MAPPING): step 43's stand pull stalled the raids at 40-47. The row held the 49131 witch-doctor camp and the 49135 headhunter camp (54 yd apart) in one radius-33 row with no patrol block, and its stand (-12219 -1494) stood 29.6 yd from the headhunter spawn and 54 from the witch doctor's, so no single shot reached the row's pack and the gate waited on units whose patrol the run leader could not read. Split: the south camp (49134/49135/49136, entries 11351/11351/11831) is its own stand pull from (-12219 -1491 132.45), its 49135 loop (28 points, 240.0 yd, 143.7 s) in shot (24.8 yd); the north camp (49131/49132/49133) joins the bat camp 8 yd away in one row (10 bodies, radius 13, the 49130 formation) from (-12250 -1418 130.65), its 49131 loop (21 points, 188.1 yd, 112.6 s) in shot (8.1 yd), max_bodies 10; every unit of each row is within the 28.5 yd shot with line of sight (TestZgW38JeklikPatrolStands).",
         "WALK 38 REVIEW (2026-11-05, leg 0; review M2/M3). The bat formation 49185 (6 units, its 7-point 67.6 s loop) is pulled before the north camp: its loop encircles the camp and came within 7.8 yd of the camp's stand, so the patrol crossed the party. The row is a stand pull from -12268 -1488 131.23 now (26.1 yd from its nearest waypoint, 34.0 from its row point, 25.1 from its nearest unit), the south camp (49135) stands at -12211 -1491 132.6 (outside the 49131 112.6 s loop at 23.6+ yd and the 49130 bat loop), and the north camp's stand stays at -12250 -1418 130.65. The plan carries one patrol block per row, so the loops of 49130 (7 points) and 49131 (21 points) are read from movement.tsv by the check: zg_w38_test.go tests both camp stands against every loop of every later group (23 yd = 20 detection + 3 spread).",
-        "WALK 41 FIX (2026-11-05, leg 0; TortoiseBots-audit research/zg-bosses/JEKLIK-W41.md §1 and §3 fix 1): the last boss approach was -12241.56 -1399.14, 51.0 yd 2D and 52.7 yd 3D from Jeklik's hover point -12289.7 -1382.2 144.6, so the run leader's reach pull found no firing position and paused on the boss row (tj-6/7/8 and mj-4..8: 7 pauses in walk 41). It is the walk-39 j4-2 floor point -12269.3 -1389.4 131.5 now: 21.6 yd 2D and 25.3 yd 3D from the hover point, inside Faerie Fire (Feral)'s 29.5 yd and outside the 25 yd firing stand, so PullWalkStarted's distance check passes even with no move; the floor is 131.0 (the point stands 0.5 yd over it) and the group-15 stand walks to it on a complete navmesh path. Every plateau loop stays out: 26.1 yd from 49130's nearest waypoint and 29.8 from 49131's, and the 91555 bat loop that flies 17.5 yd overhead is out of the run leader's 12 yd band (TestZgJeklikBossApproachInPullRange)."
+        "WALK 41 FIX (2026-11-05, leg 0; TortoiseBots-audit research/zg-bosses/JEKLIK-W41.md §1 and §3 fix 1): the last boss approach was -12241.56 -1399.14, 51.0 yd 2D and 52.7 yd 3D from Jeklik's hover point -12289.7 -1382.2 144.6, so the run leader's reach pull found no firing position and paused on the boss row (tj-6/7/8 and mj-4..8: 7 pauses in walk 41). It is the walk-39 j4-2 floor point -12269.3 -1389.4 131.5 now: 21.6 yd 2D and 25.3 yd 3D from the hover point, inside Faerie Fire (Feral)'s 29.5 yd and outside the 25 yd firing stand, so PullWalkStarted's distance check passes even with no move; the floor is 131.0 (the point stands 0.5 yd over it) and the group-15 stand walks to it on a complete navmesh path. Every plateau loop stays out: 26.1 yd from 49130's nearest waypoint and 29.8 from 49131's, and the 91555 bat loop that flies 17.5 yd overhead is out of the run leader's 12 yd band (TestZgJeklikBossApproachInPullRange).",
+        "WALK 107/108 FIX (2026-11-15, leg 0 step 36 before this fix, step 37 after its extra approach row, = pull group 10, the F6 bat formation 49155; TortoiseBots-audit tests/raid-zg-walk107/st7c-1 and raid-zg-walk108/st8a-1): the stand -12093 -1464 stood 59 yd from the row point and 32.4 yd from the nearest waypoint of F6's 8-point 74 s loop (-12125.1 -1468.27), past the run leader's 28.5 yd shot, so step 36 hung: walk 107 paused 600 s (the pack's formation 0xf13000399e00c003 is alive but did not come within sight of the stand in 600 s) and walk 108 walked the tank to the loop point -12125.1 -1468.3 and failed (Helina did not pull it within 45 s) with the pack 60-66 yd from the stand. The stand is -12114 -1491 131.63 now (the navmesh floor there is 131.63; the walk to it is a complete 37.9 yd navmesh path over the plateau and the stand is 4.5 yd in from the plateau's south edge): 25.3 yd from the loop's east waypoint -12125.1 -1468.27, with 19.9 yd of the loop inside the tank's 28.5 yd shot (8 s at 2.5 yd/s, so the gate fires on each 74 s circuit), 39.9, 40.7, 59.5, 64.6 and 61.3 yd from the next pull group's formation 49189 (spawns 49151, 49153, 49187, 49188, 49189; wake reach 30, 30, 30, 30 and 33 yd at the plan's party level 58 plus the raid spread) and 31.5 yd from 49189's loop, and a clear line of sight from the stand to all eight waypoints (path-check --ray on the map-309 mmaps). The round-1 stand -12130 -1495.7 133 stood 24.8 and 27.3 yd from 49189's bats 49151/49153 and 30.9 yd from its loop, inside their wake reach: it woke the next pull group, and the route-aggro pin counted four new passes into it (review r1). Every F6 unit is an OPTION_FORMATION_MOVE follower of 49155 (creatures.tsv group_flags 3), so the pack walks the loop in one column (the west spawns 49156/49159/49161 live 126-134 yd from their own DB slots in the walk frames) and the pull meets all six at the loop's east corner: the camp -12150.8 -1484.94 is only the loop's last point, 5.5 and 3.9 yd from 49189's bats, so no stand inside the 28.5 yd shot of it can keep 30 yd from those bats (28.5 yd plus 5.5 reaches 29.3) and the closest one stands 20 yd from 49189's loop, which is why this row shoots the corner instead. The row carries F6's loop (8 points, 74 s, creature_movement 49155) so the gate waits for the patrol instead of a 600 s pause; radius 4.6 still scopes only F6 (its leader's DB spawn is 4.4 yd from the point), and the row adds no route-aggro pass at all (the walk clears even its own pack's spawn slots: 49155 38.4 and 49154 39.0 yd, reach 38). Formation 49189's camp stays pull group 11's and is pulled from -12108 -1479 after this row.",
+        "WALK 107/108 FIX, ROUND 3 (2026-11-15, leg 0 step 36 = pull group 10: the F6 bat formation 49155 and formation 49189 are one pull; TortoiseBots-audit briefs-omp/zg-route-T35-r3.md and review codex-adv-zg-route-t35-r2). Review r2 held the branch: the -12114 -1491 stand is 31.5 yd from 49189's first patrol waypoint -12131.4 -1464.8 130.6, inside 49189's routeReach (detection 20 - (58 - 61) = 23 yd, plus the raid's 10 yd spread = 33), and 49189 was the next pull group, so its live patrol could wake the party at the stand. Pulling 49189 first from its own stand (review r2's option b) is impossible here: a stand with the 18 yd shot window of 49189's loop that this row's gate needs is at most 35.4 yd from 49155's nearest waypoint (a 0.5 yd grid over the plateau; at most 28.4 yd with the stand also 23 yd clear of 49189's own lane), under 49155's 38 yd routeReach (20 detection + 3 level + 10 spread + its 5 yd wander): the two lanes cross, 49155's waypoints stand 5.4-20.2 yd from 49189's loop. The row is the merged pull (review r2's option c): radius 6.5 scopes both formations by their camp spawns (49154 at 4.5, 49155 at 4.4, 49153 at 6.3 yd; 49151 at 7.4 is the same formation), 11 bodies (6 + 5) under max_bodies 11, and no other formation (91549, the lone bat 29.8 yd above the plateau, is 33.9 yd out; the next row's 49137 camp is 69 yd out). The stand is -12114.5 -1446.8 131.32 (the navmesh floor; a complete 16 yd path from step 32's -12099 -1448): 23.95 yd from 49155's east waypoint -12125.1 -1468.27 with 27.7 yd of its loop in the 28.5 yd shot (11 s at 2.5 yd/s), 24.70 yd from 49189's east waypoint -12131.4 -1464.8 with 10.4 yd of its loop in shot (4 s), both outside the 23 yd rider detection at the plan's party level 58 and inside the shot, clear line of sight to all 8 and all 6 waypoints, 50.8 yd from the row point (the run leader sees 60), and a walk that stays north of 49155's loop (24.0 yd from its nearest waypoint at the stand, more along the walk), so no patrol sees the party on the way in. The plan carries one patrol block per row, so zg_t35_test.go reads 49189's 6-point 176.8 yd loop from movement.tsv and pins both loops' shot windows, the merged 11 bodies with max_bodies 11, the ownership (no later row pulls either formation), and that every later patrol waypoint keeps its patroller's routeReach + 3 yd from the stand and the walk (the rule that fails on round 2: 31.5 \u003c 36). Leg 0: 50 -\u003e 47 steps (the r2 intermediate move and the 49189 stand pull are gone), 148 -\u003e 147 pulls; route_aggro stays 637 (no pass into a later pack is added: the 49189 pack is this row's now; one unowned-spawn finding moves, the walk out of the stand to the next row passing 29.3 yd (3D) from the bat 91549, which flies 29.3 yd above that walk, replacing round 2's 33.1 yd walk into its stand).",
+        "WALK 107/108 FIX, ROUND 4 (2026-11-15, leg 0: formation 49189's own pull row is back right after the merged row as a fallback; TortoiseBots-audit briefs-omp/zg-route-T35-final.md, the lead's decision after codex r3). The merged row carries one patrol block and it is 49155's 8-point 74 s loop, so it tracks and times only 49155's patrol; 49189's 6-point 176.8 yd loop (70.7 s at 2.5 yd/s) is read only from movement.tsv. The row back is round 1/2's own 49189 stand pull: entries 11368/14750 at 49151's spawn -12153.9 -1489.43 130.725, radius 1, stand -12108 -1479 130.9 (47.1 yd from the row point, 45.9-66.0 yd from 49189's five spawns, 44.7-48.6 yd from 49155's four camp spawns against their 38 yd routeReach, so the stand is outside 49155's spawn wake), with the patrol block matching 49189's loop. It is a fallback, not a second pull: the merged row's radius 6.5 already scopes 49189's formation by 49153's spawn, so when that pull took the pack the row's own pack is gone and the run leader skips the row (the agent's driver does the same: Driver.engage notes 'no living ... in view; taken as already dead' and returns nil, internal/dungeon/driver.go:1799-1800). Documented limit: the fallback's stand stands 20.2 yd from 49155's east loop waypoint -12125.1 -1468.27, inside that pack's 38 yd routeReach; by this row 49155 is dead (the merged row pulls it first), so its wake no longer matters. Leg 0: 47 -\u003e 49 steps, 147 -\u003e 148 pulls. The two rows' packs are 11 bodies (merged, max_bodies 11) and 5 (the fallback's own formation)."
       ]
     },
     {
@@ -687,7 +722,8 @@
           "radius": 17,
           "approach": [
             {"x": -11942.933, "y": -1832.2667, "z": 55.84},
-            {"x": -11919.2, "y": -1843.6, "z": 58.8}
+            {"x": -11919.2, "y": -1843.6, "z": 58.8},
+            {"x": -11899.3, "y": -1849.1, "z": 61.3}
           ],
           "stand_pull": true
         },
@@ -1536,7 +1572,7 @@
           ],
           "radius": 16,
           "approach": [
-            {"x": -11495, "y": -1650, "z": 60.866}
+            {"x": -11503.5, "y": -1594, "z": 71.34}
           ],
           "stand_pull": true,
           "max_bodies": 6
@@ -1552,7 +1588,8 @@
           ],
           "radius": 6,
           "approach": [
-            {"x": -11535.724, "y": -1616.4725, "z": 60.425407}
+            {"x": -11520, "y": -1590, "z": 71.34},
+            {"x": -11546.5, "y": -1632.5, "z": 71.33}
           ],
           "stand_pull": true,
           "max_bodies": 5
@@ -1570,8 +1607,10 @@
           "radius": 10,
           "approach": [
             {"x": -11530.9, "y": -1600, "z": 60.425407},
-            {"x": -11517.733, "y": -1633.8556, "z": 49.625404}
+            {"x": -11511.628, "y": -1598.0519, "z": 49.628025},
+            {"x": -11515.5, "y": -1611, "z": 49.59}
           ],
+          "stand_pull": true,
           "max_bodies": 6
         }
       ],
@@ -1594,6 +1633,7 @@
         "summon_open_step": 1
       },
       "notes": [
+        "WALK 104 FIX (2026-11-15, leg 4; walk 104 T25, fz5a-7 21:17-21:20Z, fz6b, fz5b, fz6c): step 337 pulled the z 60 ledge's three packs at once, 17 bodies (6 landing + 5 west + 6 ring), 14 dead; the tank engaged 11353 on arrival 1.7 yd from it. The three rows' stands all stood INSIDE their own pack's wake (9.0, 5.7 and 4.5 yd from their nearest spawn; the run leader's holds are 22-28.5 yd), and the descent's landing (-11505.8 -1623.7 60.78) is 12.0 yd from the landing pack's Panthers and 19.0 from its Blood Drinkers, so the party woke it before its pull row could fire. The packs are now pulled one at a time, each from a stand outside its own 20-22 yd wake and inside the tank's 28.5 yd shot with line of sight: the landing 6 (49343's creature_groups: 4 Panthers + 2 Blood Drinkers, inseparable) from the top's north-east edge (-11503.5 -1594 71.34, 26.5 yd from its nearest spawn, 36+ from the west 5 and 57 from the ring's 6); the ledge's west 5 (49329) from the top's south-west edge (-11546.5 -1632.5 71.33, 25.2 yd, 31+ from the ring's 6; the walk keeps the top's own waypoint -11520 -1590 so the stand is a same-floor hop, not a climb); the ring's 6 (51365) last from its own floor (-11515.5 -1611 49.59, 26.8 yd), walked down the north stair (-11530.9 -1600 60.43 -\u003e -11511.6 -1598.1 49.63). The temple has one route down each level: the ledge's stair to the landing, the landing's south corridor west (10.9 yd above the ring's spawns) and the north stair, so the party descends only after both ledge packs are dead and the ring's pack wakes on the way down as the only pack left (the crossing is 118.8 yd of path for 37.7 straight, the leg's second capped hop, zgArlokkLedgeDescentYd; the old 5-row cut of the descent is 3 rows now). Everything else in the leg is unchanged; the packs' positions are their DB spawns even where the row point is the pack's centroid. Tests: TestZulGurubArlokkLedgePacksPulledFromTheirOwnStands (fails on the old stands by 13.0, 16.3 and 17.5 yd), TestZulGurubArlokkLegRoute, TestZulGurubArlokkApproachesClearOfLaterPacks.",
         "ARLOKK ROUTE FIX 1 (2026-11-05, leg 4; the mesh's loop): the re-route above still walked the z 60 landing's last approach -11502.2 -1625.7 60.4 13.1 yd 3D under the top's east six, so the party woke them before their pull row. The temple's only climb is the west ramp from the ring's west end (-11576 -1615.7 52.8) up past the z 60 ledge to the top, and its only ways down are the ledge's stair (-11508.5 -1624.8 62.3) and the north stair (-11530.9 -1600 60.4), so the pulls follow the loop: the ring's groups, then the top's west 4 (51353) from its stand -11513 -1601, the top's east 6 (51369) from -11500 -1600, the top's south 4 (49331) and north 4 (51588), the z 60 ledge's landing 6 (49343) from the ledge's stair and its west 5 (49329) from -11535.7 -1616.5, the ring's 6 (51365) down the north stair, then the arena. Every stand and approach point is 20 yd (3D) clear of every pack a later row pulls (TestZulGurubArlokkApproachesClearOfLaterPacks); the two crossings left are named in zgArlokkCorridor (the west ramp passes the ledge's west pack, and the top is one floor so its stands are 20-23 yd from the neighbouring formation). The gong's arena walk is authored now: the stand (-11566.5 -1626.5 41.33) stands on the gong's own floor and the boss approach keeps -11521.6 -1621.6 41.3 (ARLOKK GONG FIX, 2026-11-14), so the last pull-to-stand hop is the leg's one hop over 1.5x (167.7 yd of path over 50.6 yd straight, the arena descent), every other hop is at most 1.43x (the north stair's last step), and the leg walks 2119 yd.",
         "ARLOKK RE-ROUTE (2026-11-05, leg 4; research/zg-w38/arlokk-rows.txt and research/zg-bosses/ARLOKK.md §0-1): the walk climbed the temple four times over (34 of 134 rows a hop over 40 yd or a z jump over 6 yd; step 290 climbed z 49.9 to 71.3 in 21 yd, steps 292-299 crossed the 71 terrace with 46/34/35/49/36 yd hops that cross each other, and steps 299-326 bounced between z 50, 60 and 71; the raids stalled at 292-294). The pulls are in one ascent now, each floor's groups in walking order: bottom floor 0-22 (the west stair 3-5 is a spur up to z 65 and back), the 21 patrol from its loop's ledge, the z 50 landing 18 then the ring 17, 9, 10, 24 and 23, the z 60 landing 13, the z 71 top's west 4 (51353) and east 6 (51369) as two stand pulls, then 14 at the north edge and 11 at the south edge, then the 15 landing and the 16 ledge by the arena stair. Every approach point is a navmesh point of the walk, each group's staging point is on its pack's floor, and the leg's walk is 2099 yd against 3582. The 10-body 71 pack is two stand pulls under the ceiling, each stand 23-28 yd from its formation and out of the other's: west 4x11339 from -11540 -1621, east 2x11339+4x11365 from -11498 -1645, max_bodies 4 and 6, radii 10 and 9 so the split is not undone by an auto radius. The z 60 landing's row now carries its whole formation (4 Panthers 49343-49346 + the two Blood Drinkers 51594/51595, radius 16, max_bodies 6): the old z 71 row's radius 14 owned the Panthers through the floor and the split would have left them to nobody. The 21 patrol's radius is 60 (its spawn 91444 lies 54 yd 3D from the row) and its stand -11580.5 -1521 is on the loop's z 51 ledge, 8.6 yd from a loop point with line of sight, so the stand pull sees it come. The gong's stand is the boss fight point in the arena; the run leader walks to the gong itself. Test: TestZulGurubArlokkLegRoute, TestZulGurubArlokkPatrolStandInShot (tools/dungeongen).",
         "WALK 29 FIX 4 (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md §2): step 295's move to the bats' approach walked the party through two leg-7 tiger formations no leg-4 row owned: on arrival (b 00:37:52) formation 49699 (Tigers 49699/49700, Axe Thrower 91464, Witch Doctor 91465; its spawn 18.6 yd from the approach) and 49716 (Tigers 49716/49717, Axe Thrower 91511, Priest 91512) plus the Bloodseeker bats 51873 and their summons were 12 bodies at once; peak 14-15, 53/3/9/22 dead in b/b-r1/g/g-r1. The two formations and the patroller 91435 (11352, movement 2, 8.8 yd from them) are one leg-4 row now, ahead of the bats: 9 bodies, max_bodies 9, stand_pull. Its stand -11576 -1778 46.3 (walked by the party in b/g) is 21.7 yd from the nearest tiger and 43.5 yd from the bat formation; it lies on the ramp down from group 6 (-11562.6 -1792.5 z 56.4). The leg-7 group 38 and its 4-point approach chain are gone. Today's bats approach -11573.13 -1754.66 keeps a dead neighbourhood but is still 18.6 yd from 49699's spawn: it is used only after the tigers are dead, as the row now ensures.",
@@ -1895,17 +1935,6 @@
           ]
         },
         {
-          "entries": [11391],
-          "positions": [
-            {"x": -12196.3, "y": -1948.37, "z": 130.67}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -12216, "y": -1930, "z": 132.62}
-          ],
-          "stand_pull": true
-        },
-        {
           "entries": [11353, 11830, 11356, 11356, 11356],
           "positions": [
             {"x": -12186.9, "y": -1977, "z": 133.16},
@@ -1931,16 +1960,31 @@
           ],
           "radius": 15.5,
           "approach": [
-            {"x": -12180, "y": -1966, "z": 130.84}
+            {"x": -12177, "y": -1978, "z": 133.5}
           ]
+        },
+        {
+          "entries": [11391],
+          "positions": [
+            {"x": -12196.3, "y": -1948.37, "z": 130.67}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -12188, "y": -1972, "z": 132.1}
+          ],
+          "stand_pull": true
         }
       ],
       "skip": [14758, 15091],
       "boss": {
         "entry": 11382,
-        "position": {"x": -12167.8, "y": -1927.25, "z": 153.73}
+        "position": {"x": -12167.8, "y": -1927.25, "z": 153.73},
+        "approach": [
+          {"x": -12188, "y": -1956, "z": 130.6}
+        ]
       },
       "notes": [
+        "WALK 107 FIX (2026-11-15, walk 107 st7b frames + run.log, walk 104 fz5c-1): step 419 pulled the lone Vilebranch Speaker 11391 from the stand -12216 -1930 132.62, which had no line of sight to it (\"no LOS from the authored stand; holding\", then a pullback); 9 s later the party was fighting Bloodlord Mandokir 11382 and Ohgan 14988 within 6-17 yd of the speaker's spawn and 23 s after that the 49270 pack (11353/11356/11830, 30-36 yd from the speaker) came in, 26 dead, the wipe. Cause: boss_mandokir.cpp CheckVilebranchState (:200) keeps Mandokir PACIFIED|SPAWNING|NOT_SELECTABLE|IMMUNE_TO_PLAYER on his platform while 11391 lives; the moment 11391 dies he clears those flags, sets his home to -12195 -1948 130 (the stairs' foot, 1.7 yd from the speaker's row point) and walks there, and MoveInLineOfSight (:360) then attacks any player within 40 yd. So the speaker's death is the encounter's start, and every row after it is fought with the boss in the party's lap: the plan killed it FIRST (419) and then pulled the camps 18 (421) and 19 (423) with him awake. Walk 104 fz5c-1 lost a bot on the same row and stalled at 419 (\"waiting for Fandango (dead): reviving and gathering\"). Three edits: the speaker is the leg's LAST trash row (it moves from index 17 to 19, after the 49270 pack and the raptor 14821 pack), so nothing is pulled after the boss wakes; its stand moves -12216 -1930 132.62 -\u003e -12188 -1972 132.1 (25.1 yd from the speaker, a clear navmesh ray and a walk in, the first stand the party reaches without crossing the speaker's 21 yd wake); the 14821 pack's stand moves -12180 -1966 130.84 -\u003e -12177 -1978 133.5 so the walk from the 49270 camp stays 27.5 yd from the live speaker (it was 20.8); and the boss row gains the stand -12188 -1956 130.6 (42.0 yd from his platform, the arena floor he now fights on). The exporter's tail cut loses one row of the walk to the boss (the party now stands at the stairs' foot): leg 5 is 78 rows and the plan 688 steps (698 rows) against 79 and 689 (699), and the boss row and the later legs move up one step number.",
         "WALK 36 FIX (2026-11-04, research/zg-w36/MANDOKIR-440.md): steps 440-454 wiped because pull group 0 (the patrolling Berserker 49705) was a plain pull row at the patroller's DB spawn, 118 yd from its stand: the exporter's --approach-hops cut the hop into an approach-path row at -12287.3 -1835.9, 9.0 yd from group 2's priest 49780, and the walk to the spawn passed 1.7-3.9 yd from groups 2 and 4; and group 5's stand at -12320 -1858 stood 28.9 yd from group 12, so the 11-body chain fight pulled it in. Three edits: group 0 is a stand pull from its stand (centre -12255 -1830 131.3, radius 92, owning 49705's spawn at 85.3 yd and no other 11352); group 1's approach point -12259.314 -1852.748 is deleted (the stand -12248 -1848 alone is reachable straight from the group-0 stand); group 5's stand moves to -12300 -1868 131.3 (26.4 yd from the chain, 51.2 yd from group 12). Pull order and cc_priority / kill_first unchanged.",
         "WALK 29 FIX 5 (2026-11-03, leg 5; research/zg-w29/WALK29-FIX-PLAN.md §3, lead decision): step 423 walked into the 49705 patroller (11352, movement 2, 21 waypoints; waypoint 13 -12244.9 -1820.6 z 130.2 is 13.4 yd from row 419's point and 20.1 from row 423's): in c it walked into the party at 00:34:57 (2.4 yd) and the drifting fight woke group 1 (49776) and group 2 (49778) at 22-27 yd, 11 engaged, 56 dead. Step 431's knot then came apart: the 11830 Priest on the approach (-12302 -1864, 26.2 yd) was pulled, the melee chased the caster to 12-14 yd of the other Priest, and the 20 yd assist chain 51985 -\u003e 49272 -\u003e 49259 -\u003e 49282 woke 15 bodies at once (c-r2 01:46:34, nearest bot 31-42 yd) plus 49789's four 11353 at 01:46:43; 41/19 dead. The patroller is pulled first now, as its own patrol row (its spawn 49705 -12329.9 -1870.8, radius 12, the full 21-point loop, period 170.7 s estimated; stand -12222 -1822 124.7, well off the row point because the loop is the row: 23.6 yd from the loop's nearest waypoint, 59.8 from the nearest static pack 49776); the ramp rows 417-423 come after it. The knot is dissolved: 51986 is its own row from -12312 -1845 130.9 (26.0 yd from it, 40.7 from 51985, 35.1 from 49789's spawn; a caster: do not chase), and 51985 joins 49272 (4), 49259 (2) and 49282 (4) as the 11-body assist chain row, stand_pull with max_bodies 11, pulled from -12320 -1858 132.0 on the north side (26.2 yd from its nearest spawn, 39.0 from the row centre, 29.0 from 49789; the south-west point -12360 -1915 is 30.7 from the centre and 68.7 from 49789, but the walk there from 51986's stand passes 10.3 yd from 51985 and the navmesh route cannot avoid the pack, so the party would wake the chain before the pre-CC; 51986 is dead by then, and the stand's 29 yd from 49789 is its own row's next). Order: 91493, 49705, 49776, 49778, 51460, 51986, the chain, 49789, then the rest of walk 28's ring sweep. Groups 7/9/10 (14821/11830/11353 entries) were re-checked with the 20 yd, 3-hop chain: 5, 6 and 4 bodies, inside their rows' ceilings. The later groups 11, 12, 13 and 14 chain to 7, 9, 9 and 10 (their own rows hold 7, 5, 4 and 6), which the §8 chain lint must size before walk 31 if their order leaves those neighbours alive."
       ]
@@ -2069,8 +2113,9 @@
           ],
           "radius": 4.4,
           "approach": [
-            {"x": -11614.4, "y": -1282.1, "z": 79.4}
+            {"x": -11619.5, "y": -1306, "z": 79.17}
           ],
+          "stand_pull": true,
           "max_bodies": 10
         },
         {
@@ -2090,7 +2135,7 @@
           "radius": 6.2,
           "approach": [
             {"x": -11614, "y": -1330, "z": 78.46},
-            {"x": -11581, "y": -1334.8, "z": 81.1}
+            {"x": -11590, "y": -1329.2, "z": 77.75}
           ],
           "stand_pull": true,
           "max_bodies": 10
@@ -2105,8 +2150,9 @@
           ],
           "radius": 12,
           "approach": [
-            {"x": -11577.5, "y": -1293.6, "z": 77.8}
+            {"x": -11599, "y": -1307, "z": 77.7}
           ],
+          "stand_pull": true,
           "max_bodies": 4
         },
         {
@@ -2269,7 +2315,10 @@
         "WALK 36 FIX 2 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the -11603 -1229 pull (run step 552) is dropped. Its stand was 41-45 yd out, past the run leader's 28.5 yd shot, so d 09:40:05 and e3 11:48:19 pulled it as \"a plain pull\"; the party then stood 10.9 yd from a Sacrificed Troll (d 09:40:30) and the pit's 10 s respawns kept the fight open until d 09:54:16 and e3 11:48:21 paused with \"a fight lasted more than 180 s (kept on by nothing hostile engaged)\"; 20 dead in d2/e3. No stand fixes it: in shot (26-28 yd, with line of sight) only the hall's east side works and the walk there passes 18.4 yd from a troll (navmesh), and the pack's north and west sides have no floor. The pack is 80+ yd from the corridor and off the boss route; the group after the hall starts with a hop point at -11582 -1322 that held its approach. tools/dungeongen/zg_w36_test.go pins that no leg-6 pull lists it.",
         "WALK 36 FIX 5 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the boss row's last approach was (-11545.6 -1289, 30.6 yd from Jin'do) with no line of sight to him: f3-r1 11:57:14 \"no LOS from the authored stand; holding\", 11:57:30 \"searching a firing stand\", 11:57:35 \"to firing stand 1 for 11380 ... 24.5 yd from it; was 32.1 yd, los yes\". The fight drifted (the lead chased a spell target to -11582.9 -1251.2 90, the pit's upper rim) and at 12:00:32 the boss begin paused \"no walkable path toward the boss ... no safe stand 35.0-25.0 yd from it the lead bot has a path to (the lead bot 72.1 yd from it)\". The stand is now (-11536.8 -1261.5): 25.2 yd from him, dry, with line of sight (raycast), inside the run leader's own 25-35 yd window, so it never searches. tools/dungeongen/zg_w36_test.go pins the distance and the sight.",
         "WALK 38 FIX 1 (2026-11-05, leg 6; TortoiseBots-audit tests/raid-zg-walk38 bj/bj2): step 514 pulled groups 5/6/7 at once (27 bodies, 21 dead) and step 520's north-pack row plain-pulled from a stand 54 yd out, walking the party inside Jin'do's 35 yd reach (boss engaged at 520; bj2 at 525 on the lone-mistress walk). The hall is staged now: group 5 is a plain pull at its own camp (its old stand had no line of sight); the 49363 camp is a stand pull from (-11581 -1334.8) (28.0 yd from its farthest unit, 88 from Jin'do), pulled before the 1173082 camp, which is a plain pull at its own centroid once 49363 is dead (the camps are 20 yd apart and no stand splits them); the honour guard is a stand pull from (-11550.8 -1283.6) (28.3 yd shot, 36.0 from Jin'do) with max_bodies 14 (its proximity wakes the north camp's east four and the lone mistresses); the north camp is a stand pull from (-11552 -1270) (26.2 yd shot, 36.6 from Jin'do, 32.4 from the troll pit) with max_bodies 10; the lone mistresses keep rows from (-11548.2 -1292.3) and (-11547 -1257.6) (36.5/36.0 from him) with the west approach points that keep the walk at 35+ (both walks dipped to 34.8 before). With the run leader's real assist model the hall's own rows are over their ceilings by 1-2 and wake Jin'do: the fold that followed this staging is undone (WALK 38 REVIEW R2), and walk 39 gm-clears those groups.",
-        "WALK 38 REVIEW R2 (2026-11-05, leg 6; review round 2, decided: undo the boss-row fold; RingYd 10 = CreatureFamilyAssistanceRadius, one hop). The hall's east side is its own pull groups again and the Jin'do boss row carries no adds (no first, no radius): group 8 the honour guard 49421's eight (max_bodies 14, stand -11550.8 -1283.6, 36.0 yd from him), group 9 the north camp (the east four 1173078-81 and the mistresses 49383-86, max_bodies 10, stand -11552 -1270, 36.6 yd), group 10 the lone 49403 (max_bodies 1, stand -11548.2 -1292.3, 36.5 yd) and group 11 the lone 49402 (max_bodies 1, stand -11547 -1257.6, 36.0 yd). Each is a stand pull with its walk-38-fix-1 stand, no stand is inside his 35 yd route reach, and each group is gm-clearable on its own (the lone rows' radius 1 keeps the guard's 49576/49577 out of them). No geometry stages them under their ceilings: a stand in the tank's 28.5 yd shot of the guard (it spans 9.5 yd) or of the 22 yd north camp is inside the lone mistresses' 22+10 yd reach, and a stand in a lone mistress's shot is inside the 10 yd family ring of the other and of the guard (49421 stands 5.9 yd from 49402), so each pull's assist wakes Jin'do. The known limit is pinned per group by TestZgW38JindosHallPullsStayUnderTheirCeilings, which keeps the assist model: group 8 brings 15 bodies over its ceiling 14 (+1: the north camp's east four join), group 9 11 over 10 (+1), group 10 3 over 1 (+2: 49402 and Jin'do) and group 11 2 over 1 (+1: Jin'do). The corridor's 49714 row keeps its original max_bodies 9: its pull rings in the 51881/51946 pair, 10 bodies over 9 (+1). Walk 39 gm-clears leg 6 pull groups 9-12 (the guard, the north camp and the two lone mistresses) and 16 (the 49714 row) instead of pulling them. A-6: 49402/49403 are members of their own rows only, and no pre-boss stand is inside Jin'do's reach."
+        "WALK 38 REVIEW R2 (2026-11-05, leg 6; review round 2, decided: undo the boss-row fold; RingYd 10 = CreatureFamilyAssistanceRadius, one hop). The hall's east side is its own pull groups again and the Jin'do boss row carries no adds (no first, no radius): group 8 the honour guard 49421's eight (max_bodies 14, stand -11550.8 -1283.6, 36.0 yd from him), group 9 the north camp (the east four 1173078-81 and the mistresses 49383-86, max_bodies 10, stand -11552 -1270, 36.6 yd), group 10 the lone 49403 (max_bodies 1, stand -11548.2 -1292.3, 36.5 yd) and group 11 the lone 49402 (max_bodies 1, stand -11547 -1257.6, 36.0 yd). Each is a stand pull with its walk-38-fix-1 stand, no stand is inside his 35 yd route reach, and each group is gm-clearable on its own (the lone rows' radius 1 keeps the guard's 49576/49577 out of them). No geometry stages them under their ceilings: a stand in the tank's 28.5 yd shot of the guard (it spans 9.5 yd) or of the 22 yd north camp is inside the lone mistresses' 22+10 yd reach, and a stand in a lone mistress's shot is inside the 10 yd family ring of the other and of the guard (49421 stands 5.9 yd from 49402), so each pull's assist wakes Jin'do. The known limit is pinned per group by TestZgW38JindosHallPullsStayUnderTheirCeilings, which keeps the assist model: group 8 brings 15 bodies over its ceiling 14 (+1: the north camp's east four join), group 9 11 over 10 (+1), group 10 3 over 1 (+2: 49402 and Jin'do) and group 11 2 over 1 (+1: Jin'do). The corridor's 49714 row keeps its original max_bodies 9: its pull rings in the 51881/51946 pair, 10 bodies over 9 (+1). Walk 39 gm-clears leg 6 pull groups 9-12 (the guard, the north camp and the two lone mistresses) and 16 (the 49714 row) instead of pulling them. A-6: 49402/49403 are members of their own rows only, and no pre-boss stand is inside Jin'do's reach.",
+        "WALK 104 FIX (2026-11-14, leg 6; TortoiseBots-audit tests/raid-zg-walk104 fz6d/fz5c, briefs-omp/zg-route-T29.md): step 471 (walk-104 numbering) walked the party to group 5's approach -11614.4 -1282.1, which is the 49373-49382 cluster's own centre: fz6d-1 22:46:01 read \"ahead: pull 472 brings 14 (ceiling 10)\", 22:46:11 \"the tank engages 14882 on arrival (0.0 yd)\" -- the ten woke mid-move, 18.7-33.9 yd out, with no CC orders and no stand; the fight drifted north-east and the 1173082 four joined at 22:46:56 (23.4-30.1 yd) and the 49363 ten at 22:47:05 (23.4-27.1 yd): 24 bodies (12x14825, 7x14882, 5x14883) with 3 Corrupted Infernals from Voodoo Slave spell 23426, 20 dead in 88 s. Group 6's stand -11581 -1334.8 sat 18.6 yd from its nearest unit (49370) and 2.6 yd above it, so the 474 move woke that camp too (fz6d-3 23:05:11 \"reading the last point outside the pack's wake reach\", 23:05:20 475 \"engaged 10 over 6\", 5 dead; the same rows in fz5c-1). Groups 5, 6 and 7 are stand pulls now, from walked floor points (a frame position at each; z the navmesh floor): 5 at (-11610 -1306 79.2) -- own pack 21.3-26.8 yd, 31.9 from group 4's camp, 32.2 from the 1173082 four; 6 at (-11590 -1329.2 77.75) -- 21.1-27.9, 35.8 from group 4, 36.4 from 1173082; 7 at (-11599 -1307 77.7) -- 22.8-27.7, 26.8 from the 49363 camp. Every walk-in keeps at least 21.1 yd from its own pack and at least 23 from every pack pulled later (its own 30.4 and 68.7 on the two later walks; the old 471 walk ended on the camp), each stand has line of sight to every unit of its pack (raycast) and the navmesh path to it is complete (path-check type 0x1 ok; the old -11614.4 -1282.1 and -11577.5 -1293.6 were server NOPATH). The floor plan sets group 7's ceiling at 26.8: the 1173082 four are 15.5 yd from the 49363 ten and 20.5 from the honour guard, so no stand reaches the estimate's 22 yd aggro plus the raid's 10 yd spread against every neighbour. Out of this fix: the 478/479 stop (fz5c-1 19 dead) is group 8's staging point, whose walk ends 16.1 yd from the guard and whose camp lives 8-18 yd from Jin'do -- the WALK 38 REVIEW R2 known limit (walk 39/104 gm-clear groups 8-11; the guard's 14.8 yd spread cannot fit the 21-28.5 yd window any stand needs).",
+        "WALK 104 REVIEW R2 (2026-11-15, leg 6; TortoiseBots-audit briefs-omp/zg-route-T29-r2.md): one-based groups 9 and 10 are NOT one-at-a-time pulls and no stand makes them so; walk 104's --gm-clear jindo_the_hexxer:9,10 stays. Group 9 (the honour guard 49421's eight, 9.4 x 12.7 yd) has a 19.5-28.5 yd own window that is a 0.5 x 2.1 yd patch at (-11553.5..-11553.0, -1276.6..-1274.5): all 47 points of it (0.1 yd lattice, all on the navmesh floor) have line of sight and a complete path in, and every one brings 19 bodies WITH Jin'do -- the escorts 49402/49403 stand 30.4-31.0 yd from the patch (inside the stand's reach: detection 20 at party level 58 vs level 60 is 22 yd, plus the raid's 10 yd spread) and 49402 is 8.0 yd from him; the pack's own 49577/49576 stand 2.7/2.9 yd from 49403/49402, so any wake rings the escorts in. The walk-104 frame point in that patch (-11553.3 -1275.9) reads the same 19. The row keeps its stand (-11550.8 -1283.6, 16.1 yd from 49650, inside the pack's own 22 yd wake): 15 bodies (8 own + the north camp's east four + the two escorts + Jin'do), the smallest count measured for the row; every window point brings 19 and the row's own point as a plain pull 19. Group 10 (the north camp: the north four 49383-86 and the east four 1173078-81, 12.1 yd apart at the nearest, 22.8 yd across) has 2247 of its 3964 window points off the navmesh (the east side); all 1717 walkable points (x -11570.3..-11565.6, y -1266.0..-1256.5) stand 11-19 yd from the pit's ten Sacrificed Trolls (49078-49087, 10 s respawn): 1023 have no line of sight to the whole pack and the 694 that have bring 18 bodies (the ten trolls join the stand). The four walk-104 frame points inside the window (-11569.2/-11569.3 -1257.9, -11566.6 -1263.2, -11567.9 -1261.7) all sit 11.7-16.3 yd from them. Its stand (-11552 -1270, 9.2 yd from 1173080, inside the pack's own wake) keeps the fewest bodies, 11 (8 own + the two escorts + Jin'do). Splitting group 10 into its two fours is the only other route (each pulls 4 cleanly) and would add a row and move every later step number, so it is not taken here. tools/dungeongen/zg_w104_test.go pins the two east rows' body counts and the two no-stand proofs.",
+        "WALK 104 REVIEW R3 (2026-11-15, leg 6; TortoiseBots-audit briefs-omp/zg-route-T29-r3.md): one-based group 6's stand moves 9.5 yd west, from -11610 -1306 79.2 to -11619.5 -1306 79.17 (the navmesh floor). The old stand sat 31.9 yd from group 4's 49397-49400 camp, inside the raid model's stand reach (detection 20 at the plan's party level 58 vs level 60 is 22 yd, plus the raid's 10 yd spread, 32 yd), and 32.2 yd from the 1173082 four, 0.2 yd past it, so the row's pull-size estimate read 14 -- its own ten plus the 49397-49400 four -- with no margin to the live four-mob camp. The new stand keeps 21.2-27.6 yd from its own pack (inside the run leader's 28.5 yd shot), 41.2 yd from the 1173082 four (that camp's 32 yd reach plus 8), at least 41 from every pack pulled later, 61.7 from the pit's Sacrificed Trolls and past Jin'do's 35 yd route reach; line of sight to all ten (raycast), a complete navmesh path in, and the walk in from group 4's camp keeps 21.2 yd from its own pack and 41.2 from the 1173082 four. The 49397-49400 four are pulled first: row pull group 4 (the camp's own plain pull) walks the party onto them and kills them before this row, so the row's live estimate (assist model, earlier rows dead, RingYd 10 = CreatureFamilyAssistanceRadius) is its own ten, and the pull-size estimate's four extra bodies are that dead camp. No stand removes them: of the 300 floor points (0.1 yd lattice) that the walk reaches (21-28.5 yd from the pack, 21+ along the walk, line of sight to all ten, a complete path, outside every live unit's reach) and that stand 40+ yd from the 1173082 four, the farthest from the 49397-49400 camp is 28.4 yd, inside its 32 yd reach; the only points 32+ from both camps are a three-point lip at the old stand (-11609.9 -1305.8 79.22, 32.0/32.1). That is the window's limit, so walk 104's gm-clear of groups 6-10 stays the fallback. tools/dungeongen/zg_w104_test.go pins the stand, the 40 yd camp margin, the live ten and this window limit."
       ]
     },
     {
@@ -2313,34 +2362,19 @@
         {
           "entries": [15043, 15043, 15043, 15043, 15043],
           "positions": [
-            {"x": -11874.6, "y": -1653.27, "z": 14.01},
-            {"x": -11872, "y": -1642.35, "z": 13.81},
-            {"x": -11873.2, "y": -1633.76, "z": 13.13},
-            {"x": -11872.4, "y": -1625.05, "z": 14.16},
-            {"x": -11872.8, "y": -1617.81, "z": 14.44}
-          ],
-          "radius": 19.4
-        },
-        {
-          "entries": [15043, 15043, 15043, 15043],
-          "positions": [
-            {"x": -11870.3, "y": -1708.36, "z": 10.61},
-            {"x": -11873.7, "y": -1695.64, "z": 12.99},
-            {"x": -11875.7, "y": -1689.96, "z": 14.29},
-            {"x": -11881.4, "y": -1685.63, "z": 14.57}
-          ],
-          "radius": 15.1
-        },
-        {
-          "entries": [15043, 15043, 15043, 15043, 15043],
-          "positions": [
             {"x": -11901.3, "y": -1733.02, "z": 13.51},
             {"x": -11896.4, "y": -1739.52, "z": 13.17},
             {"x": -11906.2, "y": -1729.76, "z": 13.87},
             {"x": -11900.7, "y": -1739.61, "z": 13.86},
             {"x": -11908.1, "y": -1738.33, "z": 14.91}
           ],
-          "radius": 7.8
+          "radius": 7.8,
+          "approach": [
+            {"x": -11910, "y": -1523.8, "z": 26.2},
+            {"x": -11944.9, "y": -1532.6, "z": 40.2},
+            {"x": -11946.7, "y": -1600, "z": 37.3},
+            {"x": -11886.388, "y": -1751.4547, "z": 12.036596}
+          ]
         },
         {
           "entries": [15043, 15043, 15043, 15043],
@@ -2528,6 +2562,7 @@
       ],
       "skip": [11374, 14758, 15091],
       "notes": [
+        "WALK 104 T28 (2026-11-15, leg 7; TortoiseBots-audit tests/raid-zg-walk104 fz5c-1, fz5d-1, fz6e-2): every run stopped at step 553, the lead bot in water 41.9-45.6 yd from its leg point (lead in water: yes; cmd move path type 0x81; its own move failing: stay walk resting after 3 failed walks), the exporter's one water hop between the north shore's stand (-11901.4 -1497.9) and the islet rows -11873 -1634.4 (pull group 2) and -11869.8 -1668.6 / -11875.3 -1694.9 (group 3's cut and pull). The two 15043 packs on the lake islet are dropped: no dry floor reaches them (plan-probe water 40-160 yd from the north shore, the west rim, the lower ring and the east shore; every hop in game is a swim the playerbot lead cannot take), which is the walk-29 fix's own treatment of the water-only 11374 fish. The lower-ring pack (-11901.3 -1733.0) takes a dry approach around the lake's west rim instead: (-11910 -1523.8 26.2, fz5d-1 frames), (-11944.9 -1532.6 40.2, fz6a-1 frames), (-11946.7 -1600 37.3, fz6d-1 frames) and (-11886.388 -1751.4547 12.036596, the plan's own ring row); every hop is a path-check server 0x1 ground path and plan-probe 0 water, and the last point stands 22 yd from the ring pack. Leg 7 689 to 710 steps in the export (4 approach rows and the rim cut replace 3 rows on the islet); plan-check 0 failing points, cut fails 134 to 132.",
         "WALK 29 FIX 6 (2026-11-03, leg 7; research/zg-w29/WALK29-FIX-PLAN.md §5, lead decision): rows 620-637 walked the raid into the lake to pull single Hooktooth Frenzies (11374), which are fish: 14 of the leg's 38 groups were 11374-only (groups 3, 4, 5, 7, 8, 16, 17, 24, 25, 26, 30, 31, 33 and 37 at z -14.4 to +2.6) and all 30 spawns are in water. Runs e/e-r1..r3 had 0 deaths but stopped for good: the lead sat at -11855..-11858 -1506..-1508 z -13 at step 624 and -11885.5 -1488.1 z 7.8 at step 628, stuck 35.3-36.7 yd from the goal with its own move failing (lead in water: yes; cmd move path type 0x81). 11374 is in the leg's skip now and the 14 fish-only groups and their approach rows are gone; every remaining point of the leg is on land (z 2.2 and above in the lake basin). The leg's own route (vias z 78.7/65.3/51.0, to z 19.7) is unchanged.",
         "ROUTE-REGEN 0dec623+local (2026-11-03, audit §4.2): 8 points, minimum aggro margin 9.3 yd, minimum wall 4.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut",
         "WALK 38 FIX 2 (2026-11-05, leg 7; TortoiseBots-audit tests/raid-zg-walk38 f2/f3): every Hakkar attempt paused at step 601 \"no walkable path toward -11752 -1741.9 14.3\". The row was not a plan point: the approach-hop cutter's last-approach interpolation took the straight line from the floor-aware cut's only kept point (the wet south-lake corners are dropped) to the group-6 pull and stood 4.1 yd under the floor there, off the navmesh. The cutter no longer interpolates when its kept list is a single point (internal/planexport, TestApproachHopsDoesNotInterpolateACutGap); the group-6 pull is 114 yd from the last row and the run leader walks its own complete 199.8 yd path around the lake (TestZgW38HakkarOuterRowsWalkable)."

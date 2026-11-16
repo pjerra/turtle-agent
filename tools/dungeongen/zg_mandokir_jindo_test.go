@@ -869,9 +869,13 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 		{49793},
 		{49274},
 		{49797},
-		{49288},
+		// Walk 107 T34 (2026-11-15): the Vilebranch Speaker 49288 is the leg's last
+		// pull. Killing it is Mandokir's wake (boss_mandokir.cpp
+		// CheckVilebranchState), so the 49270 camp and the 51453 raptors are pulled
+		// first, while he still carries PACIFIED|IMMUNE_TO_PLAYER on his platform.
 		{49270},
 		{51453},
+		{49288},
 	}
 	for i := range wantOrder {
 		if !zgSameLeaders(got[i], wantOrder[i]) {
