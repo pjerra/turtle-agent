@@ -94,6 +94,11 @@ const (
 	// out the timeout (DungeonRunPolicy.h UnitsHoldResetSeen, DungeonPlanPolicy.h kPlanFlagResetToGossip). Without the flag a
 	// units hold never reads a reset, so a crew that evades and turns friendly again is not mistaken for one.
 	FlagResetToGossip = 16384
+	// FlagBossAnyOf marks a boss row whose Entries are alternatives, not kill-first adds: the boss is whichever ONE of
+	// them shows at the row's point (a plan's boss.any_of, Zul'Gurub's Edge of Madness). TortoiseBots
+	// DungeonPlanPolicy.h kPlanFlagBossAnyOf, the next free bit after kPlanFlagDeadGossipOk 32768; a module without it
+	// must not load the row: an older module reads entries as kill-first adds and would wait for all of them.
+	FlagBossAnyOf = 65536
 	// FlagProofCreature marks an open_proof row whose proof entry is a creature (alive), not a spawned game object
 	// (DungeonPlanPolicy.h kPlanFlagProofCreature, the next free bit: 1024 is the module's pull-only no-defer flag).
 	FlagProofCreature = 2048
@@ -196,6 +201,18 @@ type Rows struct {
 	Plan  PlanRow
 	Legs  []LegRow
 	Steps []StepRow
+}
+
+// RowBossIs says the boss of the row can be entry: a boss row's own Entry, or, on a row carrying FlagBossAnyOf, any of
+// its Entries — the alternatives the plan's boss.any_of wrote there. A row of another kind is nobody's boss.
+func RowBossIs(s StepRow, entry uint32) bool {
+	if s.Kind != KindBoss {
+		return false
+	}
+	if s.Entry == entry {
+		return true
+	}
+	return s.Flags&FlagBossAnyOf != 0 && slices.Contains(s.Entries, entry)
 }
 
 // Count is the number of rows of the plan in all three tables.
@@ -784,8 +801,25 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 	if bs.StandPull {
 		flags |= FlagStandPull
 	}
+	entries := uniq(bs.First)
+	if len(bs.AnyOf) > 0 {
+		// The one boss of several the event makes active: Entries are the alternatives (not kill-first adds), so the row
+		// carries FlagBossAnyOf and a module that does not know it must not load the row. Entry stays the canonical id.
+		flags |= FlagBossAnyOf
+		ids := make([]string, 0, len(bs.AnyOf))
+		for _, e := range bs.Units() {
+			ids = append(ids, strconv.FormatUint(uint64(e), 10))
+		}
+		comment = "boss; any of " + strings.Join(ids, "/")
+		if bs.SkipUnreachable != "" {
+			comment += "; out of reach: " + bs.SkipUnreachable
+		}
+		comment = clip(comment, MaxComment)
+		entries = uniq(bs.AnyOf)
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): boss row any_of needs TortoiseBots kPlanFlagBossAnyOf (65536); an older module reads entries as kill-first adds and would wait for all four", b.leg_, b.plan.Legs[b.leg_].Name))
+	}
 	b.at("boss", -1, 0)
-	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Radius: bs.Radius, Flags: flags, Entries: uniq(bs.First), TimeoutS: bs.WaitS, Comment: comment})
+	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Radius: bs.Radius, Flags: flags, Entries: entries, TimeoutS: bs.WaitS, Comment: comment})
 	stand := bs.Position
 	if bs.StandPull {
 		// The party fought there, and P is in deep water: the next move's hop is measured from the stand.

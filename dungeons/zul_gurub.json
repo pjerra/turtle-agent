@@ -2711,12 +2711,13 @@
         }
       ],
       "boss": {
-        "entry": 15085,
+        "entry": 15082,
+        "any_of": [15082, 15083, 15084, 15085],
         "position": {"x": -11901.3, "y": -1906.52, "z": 65.36}
       },
       "notes": [
         "OPTIONAL leg (spec A, 2026-11-15; appended at the end of legs so existing leg indices 0-8 do not shift; in the route the operator runs it right after high_priest_thekal): Gurubashi Mojo Madness (19931, spell 24264 OPEN_LOCK_ITEM) used on the Brazier of Madness (180327, lock 1619, at -11887.1 -1889.8 63.50) temp-summons the active Edge of Madness boss at -11901.3 -1906.52 65.36 after 15 s (900000 ms). Thekal's leg already clears the Mad Servants (15111) and Blood Priests (11340) around the brazier. Stand (-11888.6, -1889.5, 63.5) is a frames point 1.53 yd from the brazier; via enters the courtyard from the north-west ramp.",
-        "boss.entry 15085 (Wushoolay) is fixed to the active madness boss for the first live test (event 32 on 2026-11-15 until 11-17 07:00; the four events 29 Gri'lek 15082, 30 Hazza'rah 15083, 31 Renataki 15084, 32 Wushoolay 15085 rotate 14 days each). A later AnyOf change (kPlanFlagBossAnyOf / Boss.AnyOf) will list all four entries on the boss row."
+        "boss.any_of lists the four madness bosses (events 29 Gri'lek 15082, 30 Hazza'rah 15083, 31 Renataki 15084, 32 Wushoolay 15085, 14 days each): the row takes whichever ONE the active event summons, and entry 15082 (Gri'lek) is its canonical id for names, boss goals and the dashboard. The single-entry Wushoolay 15085 test row is gone. The exported row needs TortoiseBots kPlanFlagBossAnyOf (65536): an older module reads the row's entries as kill-first adds and would wait for all four."
       ]
     },
     {

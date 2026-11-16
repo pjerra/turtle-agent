@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -61,8 +62,9 @@ func TestZulGurubEdgeOfMadnessLeg(t *testing.T) {
 	if w == nil || w.Unit == nil || !slices.Equal(w.Unit.Entries, []uint32{15082, 15083, 15084, 15085}) || w.TimeoutS != 40 {
 		t.Fatalf("wait_for = %+v, want entries [15082 15083 15084 15085] timeout 40", w)
 	}
-	if leg.Boss == nil || leg.Boss.Entry != 15085 || leg.Boss.Position.X != -11901.3 || leg.Boss.Position.Y != -1906.52 || leg.Boss.Position.Z != 65.36 {
-		t.Fatalf("boss = %+v, want 15085 at (-11901.3, -1906.52, 65.36)", leg.Boss)
+	if leg.Boss == nil || leg.Boss.Entry != 15082 || !slices.Equal(leg.Boss.AnyOf, []uint32{15082, 15083, 15084, 15085}) ||
+		leg.Boss.Position.X != -11901.3 || leg.Boss.Position.Y != -1906.52 || leg.Boss.Position.Z != 65.36 {
+		t.Fatalf("boss = %+v, want 15082 with any_of [15082 15083 15084 15085] at (-11901.3, -1906.52, 65.36)", leg.Boss)
 	}
 
 	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
@@ -86,12 +88,76 @@ func TestZulGurubEdgeOfMadnessLeg(t *testing.T) {
 		if s.Kind == KindUseOn && s.Entry == 180327 && s.Item == 19931 {
 			gotUseOn = true
 		}
-		if s.Kind == KindBoss && s.Entry == 15085 {
+		if s.Kind == KindBoss && s.Entry == 15082 {
 			gotBoss = true
 		}
 	}
 	if !gotUseOn || !gotBoss {
 		t.Fatalf("exported edge_of_madness rows: gotUseOn=%v gotBoss=%v", gotUseOn, gotBoss)
+	}
+}
+
+// TestZulGurubEdgeOfMadnessBossAnyOf is the Edge of Madness row: the four madness bosses are the row's alternatives, the
+// row carries FlagBossAnyOf (65536) so a module that does not know the flag must not load it, and 15082 is its canonical
+// entry. Without Boss.AnyOf and this export the leg wrote one boss row fixed to 15085 (the boss of the 2026-11-15 event),
+// which is wrong once the 14-day rotation turns over.
+func TestZulGurubEdgeOfMadnessBossAnyOf(t *testing.T) {
+	p := loadZGPlan(t)
+	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var boss *StepRow
+	for i := range res.Rows.Steps {
+		if RowBossIs(res.Rows.Steps[i], 15084) {
+			boss = &res.Rows.Steps[i]
+			break
+		}
+	}
+	if boss == nil {
+		t.Fatalf("no boss row of the edge_of_madness leg takes 15084: %+v", res.Rows.Steps)
+	}
+	if boss.Kind != KindBoss || boss.Entry != 15082 {
+		t.Fatalf("boss row = %+v, want kind boss with the canonical entry 15082", boss)
+	}
+	if boss.Flags&FlagBossAnyOf == 0 {
+		t.Fatalf("boss row flags = %d, want FlagBossAnyOf (%d) set: an older module would read entries as kill-first adds", boss.Flags, FlagBossAnyOf)
+	}
+	if !slices.Equal(boss.Entries, []uint32{15082, 15083, 15084, 15085}) {
+		t.Fatalf("boss row entries = %v, want the four madness bosses", boss.Entries)
+	}
+	if want := "boss; any of 15082/15083/15084/15085"; boss.Comment != want {
+		t.Fatalf("boss row comment = %q, want %q", boss.Comment, want)
+	}
+}
+
+// TestBossAnyOfExportWarning: an any_of boss row is always exported with the warning that it needs TortoiseBots
+// kPlanFlagBossAnyOf, because an older module would wait for all of the row's entries. The default export (no
+// --with-optional) has neither the row nor the warning.
+func TestBossAnyOfExportWarning(t *testing.T) {
+	p := loadZGPlan(t)
+	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "leg 9 (edge_of_madness): boss row any_of needs TortoiseBots kPlanFlagBossAnyOf (65536)"
+	var found bool
+	for _, w := range res.Warnings {
+		if strings.Contains(w, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings %q, want one with %q", res.Warnings, want)
+	}
+	def, err := Build(p, Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range def.Warnings {
+		if strings.Contains(w, "kPlanFlagBossAnyOf") {
+			t.Fatalf("the default export warned about an any_of row it left out: %q", w)
+		}
 	}
 }
 
