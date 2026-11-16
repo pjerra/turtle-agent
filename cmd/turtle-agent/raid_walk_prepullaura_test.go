@@ -300,6 +300,11 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		v = session.StatusInfo{Character: a.selfName, GUID: a.selfGUID, State: session.StatusInWorld,
 			Map: a.selfMap, X: a.selfX, Y: a.selfY, TeleportSeq: a.selfSeq}
 	case "unit":
+		// The real client returns ctx.Err() the moment the call's context is done (slotClient.Call selects on it): a read
+		// under an expired context is no row, never the last row the store had.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var p struct {
 			GUID string `json:"guid"`
 		}
@@ -3524,8 +3529,10 @@ func TestPrepullAuraTopupPauseCappedAt15Seconds(t *testing.T) {
 	}
 }
 
-// Pause refused: top-up sends still go out unheld, no resume is sent, and the unheld warning is logged once per step.
-func TestPrepullAuraTopupPauseRefusedSendsUnheldWithoutResume(t *testing.T) {
+// Pause refused: top-up sends still go out unheld, the resume goes out all the same (a pause that was ATTEMPTED is
+// resumed, as the boss-row fire does: a resume against a running run is a no-op, a run left paused is a dead raid), and
+// the unheld warning is logged once per step.
+func TestPrepullAuraTopupPauseRefusedSendsUnheldAndResumes(t *testing.T) {
 	a := newPrepullAgent(t)
 	a.pauseRefused = "already paused by player"
 	// Drop 22888 so the first call leaves all 6 hires pending for a second poll on the same step.
@@ -3540,8 +3547,8 @@ func TestPrepullAuraTopupPauseRefusedSendsUnheldWithoutResume(t *testing.T) {
 	if len(a.sent) == 0 {
 		t.Fatalf("pause refused sent no auras, want unheld sends")
 	}
-	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause" {
-		t.Fatalf("pause refused run verbs %q, want only pause (no resume)", got)
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("pause refused run verbs %q, want pause resume (an attempted pause is resumed)", got)
 	}
 	// A second poll on the same step must not repeat the unheld warning.
 	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
@@ -3903,6 +3910,11 @@ func TestPrepullAuraTopupPartialBatchInTally(t *testing.T) {
 	if strings.Contains(lines[0], id) {
 		t.Fatalf("the tally line %q names %s, which this call put on the hire", lines[0], id)
 	}
+	// The count is what went out, not the size of the planned list: one id of the three, and the line must not claim
+	// three (a4 review: len(tg.missing) was logged).
+	if !strings.Contains(lines[0], got+" +1 (") {
+		t.Fatalf("the tally line %q does not name %s as +1 (the ids this call actually sent)", lines[0], got)
+	}
 }
 
 // The run pause is asked for with the time the call has left, not the flat 10 s: 12 s spent in the reads leave 3 s.
@@ -4238,4 +4250,96 @@ func TestPrepullAuraTopupResentAuraCountsAsPartial(t *testing.T) {
 		return
 	}
 	t.Fatalf("the record holds no line for Flitz")
+}
+
+// A pause cut by the budget sent `.bot run pause` and never saw its answer: the run may be paused, so the resume goes
+// out anyway — the boss-row fire resumes on the attempt for the same reason (prepullAuraSendPending). On f3a0b7ab
+// pauseHeld was set only on an ACK, so the cap's resume was a no-op and the run could stay paused at the pull.
+func TestPrepullAuraTopupPauseCutStillResumes(t *testing.T) {
+	a := newPrepullAgent(t)
+	// The pause's line goes out, its answer never comes, and the clock is past the call's budget when the RPC returns.
+	a.advanceOnPause = 20 * time.Second
+	a.pauseErr = errors.New("run pause: the ACK did not arrive")
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the cut pause: fired %v err %v", fired, err)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("the cut pause asked the run for %q, want pause resume (a pause that went out is resumed)", got)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the cut pause sent %v, want nothing: the budget is spent", a.sent)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+}
+
+// The read-back's window ends inside its own pass: the hires it reached keep what it read, and the ones it did not
+// reach are named as NOT read — never rewritten as missing their whole list (a read under a done context answers no
+// row), never marked done for the step. On f3a0b7ab one 1 s context covered the whole pass and the hire after the
+// expiry was recorded as missing everything.
+func TestPrepullAuraTopupReadBackExpiryKeepsEarlierReads(t *testing.T) {
+	a := newPrepullAgent(t)
+	// Only Mtbot and Otbot lack the ids: the other four carry them, so the call sends to exactly two hires.
+	for _, b := range a.bots[2:] {
+		a.auras[b.GUID][22888] = true
+		a.auras[b.GUID][23768] = true
+	}
+	// Mtbot never shows its second id (the tally then has one to name; the first id lands, so the batch keeps its one
+	// send per id and no landing retry) and its read holds the pass past the window: the window is real time, so the
+	// test shortens both it and the poll's wait.
+	a.drop[a.bots[0].GUID] = map[uint32]bool{23768: true}
+	oldWait, oldFloor := prepullAuraVerifyWait, prepullTopupReadBackMin
+	prepullAuraVerifyWait, prepullTopupReadBackMin = 100*time.Millisecond, 100*time.Millisecond
+	defer func() { prepullAuraVerifyWait, prepullTopupReadBackMin = oldWait, oldFloor }()
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768")
+	mt, ot := a.bots[0].Name, a.bots[1].Name
+	a.onUnitRead = func(name string) {
+		if name == mt {
+			time.Sleep(150 * time.Millisecond)
+		}
+	}
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the cut read-back: fired %v err %v", fired, err)
+	}
+	if want := mt + " 22888 " + mt + " 23768 " + ot + " 22888 " + ot + " 23768"; strings.Join(a.sent, " ") != want {
+		t.Fatalf("the call sent %v, want the two short hires' two ids each (%s)", a.sent, want)
+	}
+	lines := prepullNotes(w, "topup before step 2:")
+	if len(lines) != 1 {
+		t.Fatalf("the top-up lines %q, want exactly one", lines)
+	}
+	if !strings.Contains(lines[0], "; read-back cut, not read: "+ot) {
+		t.Fatalf("the line %q does not name %s as not read back", lines[0], ot)
+	}
+	if !strings.Contains(lines[0], "missing by id: 23768 x1") {
+		t.Fatalf("the line %q, want the read hire's one missing id (23768 x1)", lines[0])
+	}
+	// The hire the pass reached keeps its read; the one it did not reach is not rewritten.
+	var gotMt, gotOt bool
+	for _, rec := range readPrepullAuraFile(t, w).Bots {
+		switch rec.Bot {
+		case mt:
+			gotMt = true
+			if len(rec.Missing) != 1 || rec.Missing[0] != 23768 {
+				t.Fatalf("%s: missing %v, want [23768] (the read-back reached it)", rec.Bot, rec.Missing)
+			}
+		case ot:
+			gotOt = true
+			if len(rec.Missing) != 0 || len(rec.Seen) != 0 {
+				t.Fatalf("%s: missing %v seen %v, want no read-back result (the window ended before it)", rec.Bot, rec.Missing, rec.Seen)
+			}
+		}
+	}
+	if !gotMt || !gotOt {
+		t.Fatalf("the record does not hold both hires (%v/%v)", gotMt, gotOt)
+	}
+	// Not read is not done: a later status of the step reads that hire again.
+	if w.prepullTopupMark(2, ot).read {
+		t.Fatalf("%s was marked done for the step off a read-back it never got", ot)
+	}
+	if w.prepullTopupCapped[2] {
+		t.Fatalf("the step was capped, but this call only ran out of read-back window")
+	}
 }
