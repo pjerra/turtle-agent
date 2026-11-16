@@ -67,6 +67,28 @@ func TestBossRowsCounts(t *testing.T) {
 	}
 }
 
+// TestBossRowsAnyOfEntriesAreCore: a boss's any_of alternatives (the one boss of several an event makes active, Zul'Gurub's
+// Edge of Madness 15082/15083/15084/15085) are that row's boss: the gates, the one-shot latch and the injector's filter
+// (Counts), and the guid rule that keys the boss on its own entry (Owns), must read each of them as the boss.
+func TestBossRowsAnyOfEntriesAreCore(t *testing.T) {
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{{
+		Name: "edge_of_madness",
+		Boss: &dungeon.Boss{Entry: 15082, AnyOf: []uint32{15082, 15083, 15084, 15085}},
+	}}}
+	b := NewBossRows(plan)
+	for _, e := range []uint32{15082, 15083, 15084, 15085} {
+		if !b.Owns(e) {
+			t.Errorf("Owns(%d) = false, want true: it is the row's entry or one of its any_of alternatives", e)
+		}
+		if !b.Counts(e, 0, 0) {
+			t.Errorf("Counts(%d) = false, want true: a unit of that entry at any spot is the boss row's boss", e)
+		}
+	}
+	if b.Owns(15086) || b.Counts(15086, 0, 0) {
+		t.Error("15086 is no unit of the row")
+	}
+}
+
 // TestBossRowsAmbiguousRealPlans pins the ambiguous first entries of the real plans: Zul'Gurub's is exactly the
 // Zulian Tiger 11361 (Thekal's add, also ZG trash), and Naxxramas has none (the Horsemen, Stalagg/Feugen and the
 // crypt guards count wherever they stand). Thekal's phase entries are core boss rows. A new ambiguous entry must be

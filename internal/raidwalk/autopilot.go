@@ -8,10 +8,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
 // The autopilot's actions.
@@ -50,6 +53,34 @@ type AutoGoal struct {
 	Leg    string // Kind leg: the leg name or number
 	Boss   uint32 // Kind boss and practice: the boss's creature entry
 	Cycles int    // Kind practice: the mechanic cycles the run must collect
+	// Alts are the units of the boss row Boss names, when that row's entries are alternatives (planexport.FlagBossAnyOf,
+	// ResolveAutoGoalBoss): exactly one of them is the boss the instance's event makes active, so a kill of any meets
+	// the goal. Nil for a goal that names a plain boss row, no row at all, or is not a boss goal.
+	Alts []uint32
+}
+
+// ResolveAutoGoalBoss fills a boss goal's Alts from the rows: a goal may name ANY unit of a row whose entries are
+// alternatives (boss:15085 on Zul'Gurub's Edge of Madness row, whose canonical entry is 15082), and it is the same row's
+// goal. A goal of another kind, a boss no row names, or a plain boss row is returned as it came.
+func ResolveAutoGoalBoss(rows planexport.Rows, g AutoGoal) AutoGoal {
+	if g.Kind != "boss" || g.Boss == 0 {
+		return g
+	}
+	g.Alts = nil
+	for _, s := range rows.Steps {
+		if s.Flags&planexport.FlagBossAnyOf == 0 || !planexport.RowBossIs(s, g.Boss) {
+			continue
+		}
+		// The row's units, its canonical entry first (a goal naming any of them resolves here).
+		g.Alts = append(g.Alts, s.Entry)
+		for _, e := range s.Entries {
+			if e != 0 && e != s.Entry && !slices.Contains(g.Alts, e) {
+				g.Alts = append(g.Alts, e)
+			}
+		}
+		return g
+	}
+	return g
 }
 
 // ParseAutoGoal reads a goal token: full, leg:<L>, boss:<ENTRY> or practice:<ENTRY>:<CYCLES>.
@@ -526,12 +557,19 @@ func GoalBossIDs(boss uint32) []uint32 {
 	return []uint32{boss}
 }
 
-// GoalBossDead says the run's summary reported the goal boss dead (a kill of any entry of it, see GoalBossIDs).
+// GoalBossDead says the run's summary reported the goal boss dead (a kill of any entry of it, see GoalBossIDs), or of
+// any unit of its row when the goal resolved to a boss row of alternatives (AutoGoal.Alts, ResolveAutoGoalBoss): the
+// instance's event makes exactly one of them active, and the summary reports the row's canonical entry.
 func GoalBossDead(g AutoGoal, o AutoObservation) bool {
 	if g.Kind != "boss" {
 		return false
 	}
 	for _, e := range GoalBossIDs(g.Boss) {
+		if o.KilledBosses[e] {
+			return true
+		}
+	}
+	for _, e := range g.Alts {
 		if o.KilledBosses[e] {
 			return true
 		}

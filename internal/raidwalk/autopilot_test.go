@@ -1,9 +1,12 @@
 package raidwalk
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
 var autoNow = time.Date(2026, 11, 4, 21, 0, 0, 0, time.UTC)
@@ -869,5 +872,42 @@ func TestPracticeNeverEngagedIsNoBossDeath(t *testing.T) {
 	d = DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, time.Unix(0, 0), time.Minute)
 	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "gave up after 2 relaunches") {
 		t.Fatalf("%+v, want the relaunch cap to stop it", d)
+	}
+}
+
+// TestAutoGoalAnyOfEntryResolvesTheRow: a boss goal may name ANY unit of a row whose entries are alternatives (a plan's
+// boss.any_of; Zul'Gurub's Edge of Madness lists 15082/15083/15084/15085 and its canonical entry is 15082). The goal
+// then resolves to that row, and a kill the walk reports under the row's canonical entry meets it — without this the
+// autopilot relaunches walks for a dead boss whenever the goal names a non-canonical alternative (boss:15085).
+func TestAutoGoalAnyOfEntryResolvesTheRow(t *testing.T) {
+	rows := planexport.Rows{Steps: []planexport.StepRow{
+		{Kind: planexport.KindBoss, Entry: 15082, Entries: []uint32{15082, 15083, 15084, 15085}, Flags: planexport.FlagBossAnyOf},
+	}}
+	want := []uint32{15082, 15083, 15084, 15085}
+	for _, entry := range want {
+		g := ResolveAutoGoalBoss(rows, AutoGoal{Kind: "boss", Boss: entry})
+		if !slices.Equal(g.Alts, want) {
+			t.Fatalf("boss:%d resolved to %v, want the row's units %v", entry, g.Alts, want)
+		}
+	}
+	// The summary reports the kill under the row's canonical entry whatever alternative the event made active.
+	resolved := ResolveAutoGoalBoss(rows, AutoGoal{Kind: "boss", Boss: 15085})
+	o := AutoObservation{Exited: true, KilledBosses: map[uint32]bool{15082: true}}
+	if !GoalBossDead(resolved, o) || !GoalAchieved(resolved, o) {
+		t.Fatal("a kill of 15082 must meet boss:15085 on that row")
+	}
+	if GoalBossDead(AutoGoal{Kind: "boss", Boss: 15085}, o) {
+		t.Fatal("an unresolved goal: the summary's 15082 is no kill of 15085")
+	}
+	// A plain boss row and a non-boss goal resolve nothing.
+	plain := planexport.Rows{Steps: []planexport.StepRow{{Kind: planexport.KindBoss, Entry: 14834, Entries: []uint32{14509}}}}
+	if g := ResolveAutoGoalBoss(plain, AutoGoal{Kind: "boss", Boss: 14834}); g.Alts != nil {
+		t.Fatalf("a plain boss row resolved to %v", g.Alts)
+	}
+	if g := ResolveAutoGoalBoss(rows, AutoGoal{Kind: "practice", Boss: 15085, Cycles: 3}); g.Alts != nil {
+		t.Fatalf("a practice goal resolved to %v", g.Alts)
+	}
+	if g := ResolveAutoGoalBoss(rows, AutoGoal{Kind: "boss", Boss: 15114}); g.Alts != nil {
+		t.Fatalf("a boss no row names resolved to %v", g.Alts)
 	}
 }

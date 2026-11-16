@@ -75,6 +75,12 @@ func NewBossRows(plan *dungeon.Plan) *BossRows {
 		}
 		b.core[leg.Boss.Entry] = true
 		b.own[leg.Boss.Entry] = true
+		// A boss's any_of alternatives are that row's boss too: one of them is the creature the event makes active, and
+		// the gates, the one-shot latch and the injector's filter must read it as the boss (BossRows.Owns).
+		for _, e := range leg.Boss.AnyOf {
+			b.core[e] = true
+			b.own[e] = true
+		}
 		for _, e := range leg.Boss.PhaseEntries {
 			b.core[e] = true
 		}

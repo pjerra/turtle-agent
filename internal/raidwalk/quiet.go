@@ -101,7 +101,9 @@ func PlanHomeSpawns(plan *dungeon.Plan) QuietHomeSpawns {
 			}
 		}
 		if l.Boss != nil {
-			out = append(out, QuietHomeSpawn{Entry: l.Boss.Entry, At: l.Boss.Position})
+			for _, e := range l.Boss.Units() {
+				out = append(out, QuietHomeSpawn{Entry: e, At: l.Boss.Position})
+			}
 		}
 		for _, lv := range l.Leave {
 			out = append(out, QuietHomeSpawn{Entry: lv.Entry, Spawn: lv.Spawn, At: lv.At})

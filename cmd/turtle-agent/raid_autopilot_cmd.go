@@ -281,7 +281,11 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	if o.dryRun {
 		for _, t := range targets {
 			out := filepath.Join(o.walkDir, fmt.Sprintf("%s-1", t.ID))
-			fmt.Fprintf(stdout, "%s %s slot %s goal %s: %s\n", t.ID, t.Server, t.Slot, t.Goal, strings.Join(autoCommandArgs(o.binary, t, out, t.Start, false, o.forwardInstanceCap()), " "))
+			goal := t.Goal.String()
+			if alts := autoGoalAltsWords(t.Goal); alts != "" {
+				goal += " " + alts
+			}
+			fmt.Fprintf(stdout, "%s %s slot %s goal %s: %s\n", t.ID, t.Server, t.Slot, goal, strings.Join(autoCommandArgs(o.binary, t, out, t.Start, false, o.forwardInstanceCap()), " "))
 		}
 		return exitOK
 	}
@@ -441,7 +445,31 @@ func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 	if len(issues) > 0 {
 		return nil, issues[0].Err
 	}
+	// A boss goal may name ANY unit of a boss row whose entries are alternatives (planexport.FlagBossAnyOf, a plan's
+	// boss.any_of): resolve it from the rows the walk is placed against, so a kill the summary reports under the row's
+	// canonical entry still meets it.
+	for i := range targets {
+		if targets[i].Goal.Kind != "boss" {
+			continue
+		}
+		if rows, ok := autoReadRows(targets[i]); ok {
+			targets[i].Goal = raidwalk.ResolveAutoGoalBoss(rows, targets[i].Goal)
+		}
+	}
 	return targets, nil
+}
+
+// autoGoalAltsWords names a resolved boss goal's alternatives for the dry run: "(any of 15082/15083/15084/15085)", ""
+// for a goal that names a plain boss row.
+func autoGoalAltsWords(g raidwalk.AutoGoal) string {
+	if len(g.Alts) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(g.Alts))
+	for _, e := range g.Alts {
+		ids = append(ids, strconv.FormatUint(uint64(e), 10))
+	}
+	return "(any of " + strings.Join(ids, "/") + ")"
 }
 
 // savedChildAlive says the walk a checkpointed id last launched still answers: its pid or a process of its group, the
@@ -1155,7 +1183,9 @@ func autoSameTargets(a, b *autoState) bool {
 		x, y := a.goals[i].target, b.goals[i].target
 		// The boss-wipe budget is a goal option (--boss-wipe-max is taken out of Args), so an edit of it alone is a
 		// changed goal line too.
-		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax {
+		// The goal token is compared as its text: AutoGoal.Alts comes from the deployed rows, not from the file, and is no
+		// edit of the line.
+		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal.String() != y.Goal.String() || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax {
 			return false
 		}
 		if len(x.Args) != len(y.Args) {

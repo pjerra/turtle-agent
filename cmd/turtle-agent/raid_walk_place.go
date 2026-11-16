@@ -1148,7 +1148,9 @@ func (w *walk) placeBossNear(u ttUnit, dist float64) bool {
 		start = w.place.Start
 	}
 	for i := start - 1; i < len(w.rows.Steps); i++ {
-		if st := w.rows.Steps[i]; st.Kind == planexport.KindBoss && st.Entry == u.Entry {
+		// planexport.RowBossIs: a boss row of alternatives (a plan's boss.any_of) is the boss whoever the event made
+		// active there, so a unit of any of its entries standing near the landing is still that boss.
+		if st := w.rows.Steps[i]; planexport.RowBossIs(st, u.Entry) {
 			return true
 		}
 	}
@@ -2010,8 +2012,15 @@ func (w *walk) placeFreshNeeded(now time.Time) string {
 	leg := w.rows.Steps[w.place.Start-1].Leg
 	boss := map[uint32]bool{}
 	for _, r := range w.rows.Steps {
-		if r.Kind == planexport.KindBoss && r.Leg == leg && r.Entry != 0 {
-			boss[r.Entry] = true
+		if r.Kind != planexport.KindBoss || r.Leg != leg || r.Entry == 0 {
+			continue
+		}
+		boss[r.Entry] = true
+		if r.Flags&planexport.FlagBossAnyOf != 0 {
+			// The row's alternatives are the one boss the event made active: any of them engaged is the boss engaged.
+			for _, e := range r.Entries {
+				boss[e] = true
+			}
 		}
 	}
 	hire := map[uint64]bool{}

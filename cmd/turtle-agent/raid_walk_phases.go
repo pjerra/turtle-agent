@@ -2576,7 +2576,8 @@ func packRowFor(rows planexport.Rows, entry uint32, seed [3]float32) raidwalk.Pa
 }
 
 // rowHasEntry says a pull/boss row owns entry: the boss row's own entry, or
-// one of the row's listed pack entries.
+// one of the row's listed pack entries. A boss row of alternatives needs no
+// special case: its entries column carries them (planexport.FlagBossAnyOf).
 func rowHasEntry(s planexport.StepRow, entry uint32) bool {
 	if s.Entry == entry {
 		return true
@@ -3522,10 +3523,11 @@ func (w *walk) bossRowAt(step int) (planexport.StepRow, bool) {
 	return planexport.StepRow{}, false
 }
 
-// bossStepOf is the step of the plan's boss row whose entry is entry (0: none of the rows is his own boss row).
+// bossStepOf is the step of the plan's boss row whose boss can be entry (0: none of the rows is his own boss row): a
+// row of alternatives (planexport.RowBossIs) is found from any of its units.
 func (w *walk) bossStepOf(entry uint32) int {
 	for i, s := range w.rows.Steps {
-		if s.Kind == planexport.KindBoss && s.Entry == entry {
+		if planexport.RowBossIs(s, entry) {
 			return i + 1
 		}
 	}
@@ -3956,8 +3958,9 @@ func (w *walk) bossKillSummary() *raidwalk.BossKillSummary {
 	return &k
 }
 
-// bossUnits is the boss's units for the kill evidence: the step's boss entry and the phase entries that are the
-// boss reborn (plan.Legs, the leg whose Boss.Entry is boss; Zul'Gurub's Thekal 14599 -> 14509). The `first` adds
+// bossUnits is the boss's units for the kill evidence: the row's units (its entry and a boss.any_of's alternatives, of
+// which the instance's event makes exactly one active; dungeon.Boss.Units) and the phase entries that are the boss
+// reborn (plan.Legs, the leg whose Boss.Is(boss); Zul'Gurub's Thekal 14599 -> 14509). The `first` adds
 // and the hold entries are not boss units, and neither is a phase entry the frames have shown more than one live
 // unit of at once (w.bossAdds, trackFrame): an add that exists several at a time, such as Thekal's two Zulian
 // Guardians 15068, leaves corpses that prove nothing (review round 1, item 1). Looked up by the boss entry, not by
@@ -3969,9 +3972,10 @@ func (w *walk) bossUnits(boss uint32) []uint32 {
 	}
 	for i := range w.plan.Legs {
 		l := &w.plan.Legs[i]
-		if l.Boss == nil || l.Boss.Entry != boss {
+		if l.Boss == nil || !l.Boss.Is(boss) {
 			continue
 		}
+		units = l.Boss.Units()
 		for _, e := range l.Boss.PhaseEntries {
 			if w.bossPhaseUnit(l.Boss, e) {
 				units = append(units, e)
@@ -3986,7 +3990,7 @@ func (w *walk) bossUnits(boss uint32) []uint32 {
 // unit, and a phase entry that is a `first` add, a hold entry or an add the frames showed several live units
 // of at once (w.bossAdds, trackFrame) is not one either (bossUnits).
 func (w *walk) bossPhaseUnit(b *dungeon.Boss, entry uint32) bool {
-	if b == nil || entry == b.Entry {
+	if b == nil || b.Is(entry) {
 		return false
 	}
 	for _, e := range b.PhaseEntries {
@@ -4009,7 +4013,7 @@ func (w *walk) bossUnit(entry uint32) bool {
 		if b == nil {
 			continue
 		}
-		if entry == b.Entry || w.bossPhaseUnit(b, entry) {
+		if b.Is(entry) || w.bossPhaseUnit(b, entry) {
 			return true
 		}
 	}
@@ -4505,21 +4509,23 @@ func (w *walk) bossSeenAliveSince(boss uint32, t time.Time) bool {
 }
 
 // bossSpot is the plan boss row's position: the spot the run leader's own boss step searches around (30 yd) and
-// the point the toolkit's corpse read is made at.
+// the point the toolkit's corpse read is made at. A boss row of alternatives is found from any of its units
+// (planexport.RowBossIs): the event decides which one stands there.
 func (w *walk) bossSpot(boss uint32) (dungeon.Point, bool) {
 	for _, s := range w.rows.Steps {
-		if s.Kind == planexport.KindBoss && s.Entry == boss {
+		if planexport.RowBossIs(s, boss) {
 			return dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, true
 		}
 	}
 	return dungeon.Point{}, false
 }
 
-// bossFamily is the plan's entries that belong to a boss: its own entry, its phase entries and its hold entries
-// (plan.Legs, the leg whose Boss.Entry is boss). The `first` adds are NOT part of it here: runFightsBoss adds them
-// for the early rule (they can wake the encounter early), while bossKilled reads bossUnits instead (the boss's own
-// entry and its phase entries: a hold add's or a first add's corpse is no boss kill). No such leg -> just {boss}.
-// Looked up by the boss entry, not by a StepRow.Leg index, so a 0/1-based mix-up cannot bite.
+// bossFamily is the plan's entries that belong to a boss: its units (its own entry and a boss.any_of's alternatives,
+// of which the instance's event makes exactly one active), its phase entries and its hold entries (plan.Legs, the leg
+// whose Boss.Is(boss)). The `first` adds are NOT part of it here: runFightsBoss adds them for the early rule (they can
+// wake the encounter early), while bossKilled reads bossUnits instead (the boss's own entry and its phase entries: a
+// hold add's or a first add's corpse is no boss kill). No such leg -> just {boss}. Looked up by the boss entry, not by
+// a StepRow.Leg index, so a 0/1-based mix-up cannot bite.
 func (w *walk) bossFamily(boss uint32) map[uint32]bool {
 	fam := map[uint32]bool{boss: true}
 	if w.plan == nil {
@@ -4527,8 +4533,11 @@ func (w *walk) bossFamily(boss uint32) map[uint32]bool {
 	}
 	for i := range w.plan.Legs {
 		l := &w.plan.Legs[i]
-		if l.Boss == nil || l.Boss.Entry != boss {
+		if l.Boss == nil || !l.Boss.Is(boss) {
 			continue
+		}
+		for _, e := range l.Boss.Units() {
+			fam[e] = true
 		}
 		for _, e := range l.Boss.PhaseEntries {
 			fam[e] = true
@@ -4552,7 +4561,7 @@ func (w *walk) bossFamilyWithFirst(boss uint32) map[uint32]bool {
 	}
 	for i := range w.plan.Legs {
 		l := &w.plan.Legs[i]
-		if l.Boss != nil && l.Boss.Entry == boss {
+		if l.Boss != nil && l.Boss.Is(boss) {
 			for _, e := range l.Boss.First {
 				fam[e] = true
 			}

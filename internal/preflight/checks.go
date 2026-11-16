@@ -768,9 +768,11 @@ func isReserved(server, id string) bool {
 	return (server == "m910q" || server == "tortoise-test2") && id == "3"
 }
 
+// bossLeg is the leg a goal's boss entry names: its own boss entry, or one of a boss row's any_of alternatives (the one
+// boss of several an event makes active), which resolve to the same row.
 func bossLeg(p *dungeon.Plan, entry uint32) (int, string, bool) {
 	for i := range p.Legs {
-		if p.Legs[i].Boss != nil && p.Legs[i].Boss.Entry == entry {
+		if p.Legs[i].Boss.Is(entry) {
 			return i, p.Legs[i].Name, true
 		}
 	}

@@ -101,13 +101,15 @@ func (o *Overlay) Points() []Pos {
 	return pts
 }
 
-// BossEntries lists the creature entries of the plan's bosses, the creatures it names to kill before them and the
-// entries the encounters turn into or summon (boss.phase_entries).
+// BossEntries lists the creature entries of the plan's bosses, the creatures it names to kill before them, the entries
+// the encounters turn into or summon (boss.phase_entries) and a boss's any_of alternatives (the one of several an event
+// makes active).
 func BossEntries(p *dungeon.Plan) []uint32 {
 	var out []uint32
 	for _, l := range p.Legs {
 		if l.Boss != nil {
 			out = append(out, l.Boss.Entry)
+			out = append(out, l.Boss.AnyOf...)
 			out = append(out, l.Boss.First...)
 			out = append(out, l.Boss.PhaseEntries...)
 		}
