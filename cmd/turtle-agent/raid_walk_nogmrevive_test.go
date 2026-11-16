@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -324,8 +326,181 @@ func TestRaidWalkNoGMReviveDryRunPrintsIt(t *testing.T) {
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
 	}
-	want := "strict: --no-gm-revive: no .revive is sent; a wipe recovers only by the run's own corpse run (self-regroup), else the walk ends; a near-wipe rests and resumes without reviving; --no-place-revive is on\n"
+	want := "strict: --no-gm-revive: no .revive is sent; a wipe recovers only by the run's own corpse run (self-regroup), else the walk ends; a near-wipe rests and resumes without reviving, and a hire still dead when the rest's window ends the walk; --no-place-revive is on; --practice is refused\n"
 	if !strings.Contains(f.stdout.String(), want) {
 		t.Fatalf("dry-run plan lacks %q:\n%s", want, f.stdout.String())
+	}
+}
+
+// TestRaidWalkNoGMReviveRefusesPractice is the first layer of the T45 review 1 fix: strict and practice are
+// opposites, because a practice cycle's sustain revives the dead hires through gm_revive. The parse refuses the
+// pair with exit 2 before any slot, lease or GM line.
+func TestRaidWalkNoGMReviveRefusesPractice(t *testing.T) {
+	for _, args := range [][]string{
+		{"onyxias_lair", "--no-gm-revive", "--practice", "14834", "--place", "--from", "onyxia"},
+		{"onyxias_lair", "--practice", "14834", "--place", "--from", "onyxia", "--no-gm-revive"},
+		{"onyxias_lair", "--practice=14834", "--place", "--from", "onyxia", "--no-gm-revive"},
+	} {
+		var stderr bytes.Buffer
+		if _, code := parseRaidWalkArgs(args, &stderr); code != exitUsage {
+			t.Fatalf("%q: exit %d, want %d: %s", args, code, exitUsage, stderr.String())
+		}
+		line := stderr.String()
+		if !strings.Contains(line, "--no-gm-revive") || !strings.Contains(line, "--practice") {
+			t.Fatalf("%q: stderr %q, want a line naming both flags", args, line)
+		}
+	}
+	// Each flag on its own still parses: the refusal is the pair, not the strict flag.
+	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--no-gm-revive"}, io.Discard); code != exitOK {
+		t.Fatalf("--no-gm-revive alone: exit %d, want 0", code)
+	}
+}
+
+// TestPracticeGMReviveRefusedUnderNoGMRevive is the defence in depth: the practice RPC itself refuses gm_revive
+// under the flag, so even a practice loop started past the parse guard sends nothing.
+func TestPracticeGMReviveRefusedUnderNoGMRevive(t *testing.T) {
+	a := newFakeAgent(t, newFakeClock())
+	w := &walk{
+		env:   walkEnv{now: a.clock.now, sleep: a.clock.sleep},
+		agent: a,
+		opts:  raidWalkOptions{noGMRevive: true, server: "m910q"},
+	}
+	err := w.practiceGMRevive(context.Background(), "Bot02")
+	if err == nil {
+		t.Fatal("practiceGMRevive sent gm_revive under --no-gm-revive")
+	}
+	if code, reason := stopInfo(err); code != exitRaidWalkFailed || !strings.Contains(reason, "--no-gm-revive") {
+		t.Fatalf("stop %d %q, want exit %d naming the flag", code, reason, exitRaidWalkFailed)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, entry := range a.log {
+		if strings.HasPrefix(entry, "gm_revive") {
+			t.Fatalf("%q was sent: the refused revive must send nothing", entry)
+		}
+	}
+	if len(a.log) != 0 {
+		t.Fatalf("RPCs went out for a refused revive: %q", a.log)
+	}
+}
+
+// TestWaitCorpseRunPartialFrameKeepsWaiting is the review 1 fix for waitCorpseRun: a hire missing from the frame is
+// unread, not alive. A partial frame with none dead must not finish the wait; only the frame that reads every hire
+// and shows none dead does. The timeout's note counts the unread apart from the dead.
+func TestWaitCorpseRunPartialFrameKeepsWaiting(t *testing.T) {
+	clock := newFakeClock()
+	a := newFakeAgent(t, clock)
+	a.mu.Lock()
+	a.party = []string{"Bot01", "Bot02", "Bot03"}
+	a.mu.Unlock()
+	a.viewFn = func(int) (bool, string) { return false, "Bot03" } // Bot03 is not in the frame; nobody is dead
+	w := &walk{
+		env:   walkEnv{now: clock.now, sleep: clock.sleep},
+		agent: a,
+		mt:    "Bot01", ots: []string{"Bot02"}, rest: []string{"Bot03"},
+		botAt:    map[string]botPos{},
+		partyG:   map[uint64]bool{},
+		hostiles: map[string]hostileState{},
+		opts:     raidWalkOptions{wipeRest: 10 * time.Minute},
+	}
+	start := clock.now()
+	const window = 15 * time.Second
+	err := w.waitCorpseRun(context.Background(), start.Add(window))
+	timeout, ok := err.(*recoveryTimeout)
+	if !ok {
+		t.Fatalf("waitCorpseRun returned %v (%T), want the recovery timeout: a partial frame must keep the wait going", err, err)
+	}
+	if elapsed := clock.now().Sub(start); elapsed < window {
+		t.Fatalf("the wait finished after %s, want at least %s (it never saw every hire)", elapsed, window)
+	}
+	note := timeout.end(7).(*timeoutWalkStop).note
+	if !strings.Contains(note, "0 hire(s) still dead, 1 not in the frame (unread)") {
+		t.Fatalf("timeout note %q, want the unread hire counted apart from the dead", note)
+	}
+}
+
+// TestRaidWalkNoGMReviveNearWipeDeadLeftEndsPromptly is the second review 1 fix: under --no-gm-revive the near-wipe
+// rest can never go quiet while a hire is dead, so once it has waited its window with a hire still dead the walk ends
+// at once (exit 19) with the strict reason, instead of waiting out the recovery's long deadline (3 x the rest).
+func TestRaidWalkNoGMReviveNearWipeDeadLeftEndsPromptly(t *testing.T) {
+	f := newFixture(t)
+	f.opts.noGMRevive = true
+	f.opts.reviveAtRaid = true
+	f.opts.wipeResume = 3
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	var pausedAt, lastViewAt time.Time
+	prevEvents := f.agent.eventsHook
+	f.agent.eventsHook = func(served string) {
+		if prevEvents != nil {
+			prevEvents(served)
+		}
+		if pausedAt.IsZero() && strings.Contains(served, "3 near wipes within 10 min") {
+			pausedAt = f.clock.now()
+		}
+	}
+	prevView := f.agent.viewHook
+	f.agent.viewHook = func() {
+		if prevView != nil {
+			prevView()
+		}
+		lastViewAt = f.clock.now()
+	}
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|paused|10/29|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+	}
+	f.agent.mu.Unlock()
+	a := [3]float32{100, 100, 50}
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".bot hire raid ") {
+			return
+		}
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		if len(f.agent.party) < 39 {
+			return
+		}
+		if f.agent.pos == nil {
+			f.agent.pos = map[string][3]float32{}
+		}
+		for i, n := range f.agent.party {
+			if i == 0 {
+				f.agent.pos[n] = a
+				continue
+			}
+			f.agent.dead[n] = true
+			f.agent.pos[n] = [3]float32{a[0] + reviveFar, a[1], a[2]}
+		}
+	}
+	// The living healers never bring the dead hires back: every frame shows them dead to the end.
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if pausedAt.IsZero() {
+		t.Fatal("the near-wipe pause was never served")
+	}
+	f.agent.mu.Lock()
+	dead := len(f.agent.party) - 1
+	f.agent.mu.Unlock()
+	sum := f.summary()
+	want := fmt.Sprintf("near-wipe at step 10: %d hire(s) still dead, no GM revive (--no-gm-revive)", dead)
+	if sum.EndReason != want {
+		t.Fatalf("end %q, want %q", sum.EndReason, want)
+	}
+	if !hasNote(sum, fmt.Sprintf("near-wipe rest at step 10: --no-gm-revive: %d hire(s) still dead after 10m, no GM revive: the walk ends", dead)) {
+		t.Fatalf("notes %q, want the strict rest note", sum.Notes)
+	}
+	gm := f.agent.gmLines()
+	if n := countPrefix(gm, ".revive "); n != 0 {
+		t.Fatalf("%d .revive lines under --no-gm-revive, want none: %q", n, gm)
+	}
+	// The ending is the corpse-run window (the rest's own 10m), not the recovery's long timeout (3 x the rest).
+	waited := lastViewAt.Sub(pausedAt)
+	if waited < f.opts.wipeRest {
+		t.Fatalf("the rest ended %s after the pause, want at least the %s window", waited, f.opts.wipeRest)
+	}
+	if waited >= 3*f.opts.wipeRest {
+		t.Fatalf("the rest ended %s after the pause, want under the long %s timeout", waited, 3*f.opts.wipeRest)
 	}
 }

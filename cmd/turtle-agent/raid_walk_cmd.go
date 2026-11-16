@@ -305,7 +305,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&wipeEnd, "wipe-end", "", "\"fast\": a wipe that ends the walk at a boss row skips the reset wait and the revive recipe (the copy is discarded: the autopilot's fresh-instance relaunch) and revives only the dead hires; the default keeps the recipe")
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.BoolVar(&o.reviveAtRaid, "revive-at-raid", true, "a wipe recovery revives the raid AT the revive point: a hire revived more than 100 yd away is summoned to it, and the resume waits up to 60s for every hire to be in range and out of combat (false: the old revive in place)")
-	fs.BoolVar(&o.noGMRevive, "no-gm-revive", false, "a strict run: never send `.revive` (nor the revive recipe's `.go xyz` and `.summon`), so no GM help recovers the raid. Implies --no-place-revive (the fast fail stays: half or more of the hires dead is exit 29, \"party dead\"). A wipe recovers only by the run's own corpse run (the run's self-regroup), else the walk ends (exit 19); a near-wipe rests and resumes with the dead hires left to the run (living healers' resurrections or TB's own regroup); a missed `.revive` path fails the walk (exit 18) instead of sending")
+	fs.BoolVar(&o.noGMRevive, "no-gm-revive", false, "a strict run: never send `.revive` (nor the revive recipe's `.go xyz` and `.summon`), so no GM help recovers the raid. Implies --no-place-revive (the fast fail stays: half or more of the hires dead is exit 29, \"party dead\"); cannot be combined with --practice (a practice cycle revives through gm_revive). A wipe recovers only by the run's own corpse run (the run's self-regroup), else the walk ends (exit 19); a near-wipe rests and resumes with the dead hires left to the run (living healers' resurrections or TB's own regroup), and a hire still dead when the rest has waited its window ends the walk (exit 19); a missed `.revive` path fails the walk (exit 18) instead of sending")
 	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait at most after the last hire for its join summons before the refit and the bind (the wait ends when every hire has joined; 0 skips it)")
 	fs.IntVar(&o.capPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour (stock 5; a patched test core may be 30). The server's entry in instance-cap-per-account.json is used when this flag is not given")
 	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at the cap's raid count (one below --instance-cap-per-account) in the last hour on the server, wait up to this long for the oldest to age out, then exit 26 (0: no wait, exit 26 at that count)")
@@ -353,6 +353,13 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 			o.practiceGiven = true
 		}
 	})
+	// Strict and practice are opposites: a practice cycle's sustain revives the dead hires through gm_revive, which
+	// is GM help, so a run that claims no GM revive cannot be a practice run. Refused before the other argument
+	// checks, so the pair is always named.
+	if o.noGMRevive && (o.practice != "" || o.practiceGiven) {
+		fmt.Fprintf(stderr, "raid-walk: --no-gm-revive and --practice are opposites: a practice cycle revives its hires through GM (gm_revive), so it cannot be a strict run\n")
+		return o, exitUsage
+	}
 	if o.capPerAccount < 1 {
 		fmt.Fprintf(stderr, "raid-walk: --instance-cap-per-account must be 1 or more, not %d\n", o.capPerAccount)
 		return o, exitUsage
@@ -2028,7 +2035,7 @@ func (w *walk) printPlan(out io.Writer) {
 	}
 	fmt.Fprintf(out, "until %s; from %s; enter %s; server %s slot %s holder %s\n", untilLine, from, w.opts.enter, w.opts.server, slot, w.opts.holder)
 	if w.opts.noGMRevive {
-		fmt.Fprintf(out, "strict: --no-gm-revive: no .revive is sent; a wipe recovers only by the run's own corpse run (self-regroup), else the walk ends; a near-wipe rests and resumes without reviving; --no-place-revive is on\n")
+		fmt.Fprintf(out, "strict: --no-gm-revive: no .revive is sent; a wipe recovers only by the run's own corpse run (self-regroup), else the walk ends; a near-wipe rests and resumes without reviving, and a hire still dead when the rest's window ends the walk; --no-place-revive is on; --practice is refused\n")
 	}
 	outDir := slots.ExpandTilde(w.opts.out)
 	if outDir == "" {
