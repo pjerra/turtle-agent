@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -3464,7 +3465,8 @@ func TestPrepullAuraTopupCombatDuringSendsStillResumes(t *testing.T) {
 	}
 }
 
-// (o) Fix 3 cap: a top-up pause is capped at 15 s; reaching it resumes the run and logs one WARN.
+// (o) Fix 3 cap, B2: a top-up pause is capped at 15 s; reaching it resumes the run, marks the pull step capped and logs
+// the budget line once.
 func TestPrepullAuraTopupPauseCappedAt15Seconds(t *testing.T) {
 	a := newPrepullAgent(t)
 	w := newPrepullTopupWalk(t, a, "role=all:22888")
@@ -3481,9 +3483,9 @@ func TestPrepullAuraTopupPauseCappedAt15Seconds(t *testing.T) {
 	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
 		t.Fatalf("capped top-up run verbs %q, want pause resume", got)
 	}
-	warns := prepullNotes(w, "the run pause reached 15s")
+	warns := prepullNotes(w, "the 15s pause budget is spent")
 	if len(warns) != 1 {
-		t.Fatalf("cap WARN lines %q, want exactly 1", warns)
+		t.Fatalf("budget lines %q, want exactly 1", warns)
 	}
 }
 
@@ -3554,5 +3556,200 @@ func TestPrepullAuraTopupSlowPauseAckResumesWithin15sOfRequest(t *testing.T) {
 	}
 	if elapsed := a.resumeAt.Sub(a.pauseReqAt); elapsed > prepullTopupPauseCap {
 		t.Fatalf("resume sent %s after pause request, want <= %s", elapsed, prepullTopupPauseCap)
+	}
+}
+
+// B1: a hire is in combat before the top-up asks for its pause. No pause goes out (a pause asked for while the raid
+// fights is the round trip whose late ACK left a4-1's run paused at the wrong moment) and no `.aura` either: only the
+// step's stop line, written once.
+func TestPrepullAuraTopupCombatBeforePauseSendsNoPause(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.combatBots[a.bots[0].GUID] = true
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("combat before the pause: fired %v err %v (want the walk to go on)", fired, err)
+	}
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("the combat read asked the run for %v, want no pause and no resume", verbs)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the combat read sent %v, want nothing", a.sent)
+	}
+	lines := prepullNotes(w, "top-up stopped")
+	if len(lines) != 1 || !strings.Contains(lines[0], "combat started") || !strings.Contains(lines[0], "pull goes on") {
+		t.Fatalf("the stop line %q, want one naming the combat", lines)
+	}
+	// The step is not capped by combat: a later status of it reads the raid again (combat may be over), and the same
+	// line is not repeated.
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("the later status: %v", err)
+	}
+	if lines := prepullNotes(w, "combat started"); len(lines) != 1 {
+		t.Fatalf("the later status repeated the combat line: %q", lines)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the later status sent %v while a hire still fights", a.sent)
+	}
+}
+
+// B2: the budget is spent mid-batch, so the pull step is capped: a later status of the same step (the a4-1 case, a
+// status that comes back paused) reads nothing, sends nothing and asks the run for nothing, and the budget line was
+// written once.
+func TestPrepullAuraTopupCapSpendsTheStep(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// Every hire lacks the id, and the cap stops the batch before the last ones are read: those hires stay pending, so
+	// the step is not done by its reads and only the cap can make a later status read nothing.
+	a.advanceOnAura = 3 * time.Second
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the capped top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 4 {
+		t.Fatalf("the capped top-up sent %d line(s) (%v), want 4 before the 15s budget", len(a.sent), a.sent)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	verbs, sent, reads := len(prepullHoldVerbs(a)), len(a.sent), a.unitReads
+	// The same pull step again, this time already paused: the late ACK a4-1 read as "paused" after the walk's resume.
+	st := prepullRest(1)
+	st.State = tbm.RunPaused
+	if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+		t.Fatalf("the later status of the capped step: fired %v err %v", fired, err)
+	}
+	if got := prepullHoldVerbs(a)[verbs:]; len(got) != 0 {
+		t.Fatalf("the capped step asked the run for %v", got)
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("the capped step sent %v", a.sent[sent:])
+	}
+	if a.unitReads != reads {
+		t.Fatalf("the capped step read the units again (%d reads, want %d)", a.unitReads, reads)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q after the later status, want exactly one", lines)
+	}
+}
+
+// B3: the run is already paused when the top-up starts, so it sends no pause of its own — and the call's wall budget,
+// counted from before its reads, still bounds the sends and caps the step.
+func TestPrepullAuraTopupWallBudgetWhenAlreadyPaused(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.paused = true
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	a.advanceOnAura = 3 * time.Second
+	st := prepullRest(1)
+	st.State = tbm.RunPaused
+	if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+		t.Fatalf("the already paused top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 4 {
+		t.Fatalf("the wall-bounded top-up sent %d line(s) (%v), want 4 before the 15s budget", len(a.sent), a.sent)
+	}
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("the already paused top-up asked the run for %v, want none", verbs)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	verbs, sent := len(prepullHoldVerbs(a)), len(a.sent)
+	if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+		t.Fatalf("the later status of the capped step: fired %v err %v", fired, err)
+	}
+	if got := prepullHoldVerbs(a)[verbs:]; len(got) != 0 {
+		t.Fatalf("the capped step asked the run for %v", got)
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("the capped step sent %v", a.sent[sent:])
+	}
+}
+
+// Part A: the tolerance is per bot, and the line now says which id each short bot misses. Two bots miss one different
+// id each (tolerance 4: well within the bound), and each carries a fake extra aura the walk's lists do not name — the
+// bot's own food in the a4-1 case — which the read-back records as `others`; a bot that misses nothing carries none.
+func TestPrepullAuraTolerancePerBotTally(t *testing.T) {
+	a := newPrepullAgent(t)
+	// Flitz (hunter, ranged) and Zap (mage, caster), each short one id and each holding an extra aura of its own.
+	flitz, zap := a.bots[3], a.bots[4]
+	if flitz.Name != "Flitz" || zap.Name != "Zap" {
+		t.Fatalf("the fake's bots 4 and 5 are %s and %s, not Flitz and Zap", flitz.Name, zap.Name)
+	}
+	a.drop[flitz.GUID] = map[uint32]bool{15366: true}
+	a.drop[zap.GUID] = map[uint32]bool{23768: true}
+	a.auras[flitz.GUID][25661] = true // the fake extra: a food aura none of the walk's lists sends
+	a.auras[zap.GUID][24799] = true
+	w := newPrepullWalk(t, a, "role=all:22888,23768,15366")
+	w.opts.prepullAuraTolerance = 4
+	logFile, err := os.Create(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.logF = logFile
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("the tolerated misses: fired %v err %v", fired, err)
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := "within the tolerance of 4"
+	if !strings.Contains(string(raw), line) {
+		t.Fatalf("run.log %s", raw)
+	}
+	for _, want := range []string{"missing by id:", "15366 x1", "23768 x1"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("run.log %s: want %q", raw, want)
+		}
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.Bots) != 6 {
+		t.Fatalf("the file's bots %+v", f.Bots)
+	}
+	for _, b := range f.Bots {
+		switch b.Bot {
+		case "Flitz":
+			if len(b.Missing) != 1 || b.Missing[0] != 15366 || len(b.Others) != 1 || b.Others[0] != 25661 {
+				t.Fatalf("Flitz's record %+v, want missing 15366 and others [25661]", b)
+			}
+		case "Zap":
+			if len(b.Missing) != 1 || b.Missing[0] != 23768 || len(b.Others) != 1 || b.Others[0] != 24799 {
+				t.Fatalf("Zap's record %+v, want missing 23768 and others [24799]", b)
+			}
+		default:
+			if len(b.Missing) != 0 || len(b.Others) != 0 {
+				t.Fatalf("%s's record %+v, want no miss and no others", b.Bot, b)
+			}
+		}
+	}
+}
+
+// The tally is the per-id count, largest first and ties by id, and empty when nobody misses anything.
+func TestPrepullMissTally(t *testing.T) {
+	recs := []*prepullAuraRecord{
+		{Bot: "a", Missing: []uint32{18192}},
+		{Bot: "b", Missing: []uint32{22730}},
+		{Bot: "c", Missing: []uint32{18192}},
+		{Bot: "d", Missing: []uint32{22730}},
+		{Bot: "e", Missing: []uint32{18192, 15366}},
+		{Bot: "f"},
+		nil,
+	}
+	if got, want := prepullMissTally(recs), "18192 x3, 22730 x2, 15366 x1"; got != want {
+		t.Fatalf("tally %q, want %q", got, want)
+	}
+	if got, want := prepullMissTally([]*prepullAuraRecord{{Missing: []uint32{22730}}, {Missing: []uint32{18192}}}), "18192 x1, 22730 x1"; got != want {
+		t.Fatalf("tie tally %q, want %q (by id, not by record order)", got, want)
+	}
+	if got := prepullMissTallySuffix([]*prepullAuraRecord{{Bot: "a"}}); got != "" {
+		t.Fatalf("suffix of a bot that misses nothing: %q, want empty", got)
+	}
+	if got, want := prepullMissTallySuffix([]*prepullAuraRecord{{Missing: []uint32{22730}}}), "; missing by id: 22730 x1"; got != want {
+		t.Fatalf("suffix %q, want %q", got, want)
 	}
 }

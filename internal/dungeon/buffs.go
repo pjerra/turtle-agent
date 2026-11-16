@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -158,16 +159,52 @@ func (d *Driver) missingBuffs(ctx context.Context, m Member, want []Buff) (missi
 // AurasMissing lists which of want the target does not carry. seen is false when the target cannot be seen (its auras
 // cannot be told).
 func AurasMissing(ctx context.Context, p AuraPort, t AuraTarget, want []Buff) (missing []Buff, seen bool) {
+	missing, _, seen = AurasRead(ctx, p, t, want)
+	return missing, seen
+}
+
+// AurasOtherMax bounds AurasOther's list: a diagnostics aid, not a copy of the target's aura bar.
+const AurasOtherMax = 24
+
+// AurasOther lists the spell ids the target carries that are NOT in want, sorted and de-duplicated, at most
+// AurasOtherMax of them. seen is false when the target cannot be seen. It says what a bot carries INSTEAD of an aura
+// it lacks (a Well Fed id the server refuses because the bot already holds another food buff: spell_group 1001 in the
+// core allows one), so the walk's miss is readable without a second look at the bot; it is nil when the target carries
+// nothing else.
+func AurasOther(ctx context.Context, p AuraPort, t AuraTarget, want []Buff) (ids []uint32, seen bool) {
+	_, ids, seen = AurasRead(ctx, p, t, want)
+	return ids, seen
+}
+
+// AurasRead is AurasMissing and AurasOther in ONE unit read, so a caller that wants both (the prepull fire's and the
+// top-up's read-back) does not read the same unit twice: the ids of want the target lacks, and the other spell ids it
+// carries (AurasOther's list). seen is false when the target cannot be seen, and both lists are nil then.
+func AurasRead(ctx context.Context, p AuraPort, t AuraTarget, want []Buff) (missing []Buff, others []uint32, seen bool) {
 	u, ok := p.ViewUnit(ctx, t)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 	for _, b := range want {
 		if !slices.ContainsFunc(u.Auras, func(a objects.Aura) bool { return a.SpellID == b.ID }) {
 			missing = append(missing, b)
 		}
 	}
-	return missing, true
+	seen = true
+	has := make(map[uint32]bool, len(u.Auras))
+	for _, a := range u.Auras {
+		if has[a.SpellID] || slices.ContainsFunc(want, func(b Buff) bool { return b.ID == a.SpellID }) {
+			continue
+		}
+		has[a.SpellID] = true
+		others = append(others, a.SpellID)
+	}
+	// The store's own order is the aura slot order, not a stable id order: sort, then bound, so the record reads the
+	// same whatever order the server listed the auras in.
+	sort.Slice(others, func(i, j int) bool { return others[i] < others[j] })
+	if len(others) > AurasOtherMax {
+		others = others[:AurasOtherMax]
+	}
+	return missing, others, true
 }
 
 // auraPresent says whether the target carries b; seen is false when it cannot be told.
