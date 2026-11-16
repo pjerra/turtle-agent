@@ -88,6 +88,10 @@ func (d *RemoteDriver) skipOptionalLeg(ctx context.Context, i int) (bool, error)
 		return false, err
 	}
 	if why == "" {
+		if d.optItemHolder == nil {
+			d.optItemHolder = map[int]string{}
+		}
+		d.optItemHolder[i] = holder // the leg's use_item runs on this bot (doObjectStep), not the carrier
 		d.rep.note(fmt.Sprintf("leg %d (%s): optional; %s carries %s: the leg runs", i, d.plan.Legs[i].Name, holder, d.plan.Legs[i].Optional.Ref()))
 		return false, nil
 	}
@@ -122,4 +126,21 @@ func (d *RemoteDriver) keyHolder(ctx context.Context, c tbm.PartyRec, req *ItemR
 		return lead
 	}
 	return c
+}
+
+// optItemHolderBot is the bot that does a use_item step of an optional leg: the stored holder (skipOptionalLeg
+// chose it for carrying every need) when that bot is still in the party and alive, else the carrier c (the step
+// then fails naming the item). A leg without a stored holder, and a use_item of any other leg, use the carrier.
+func (d *RemoteDriver) optItemHolderBot(c tbm.PartyRec, leg int) tbm.PartyRec {
+	name, ok := d.optItemHolder[leg]
+	if !ok || name == "" || strings.EqualFold(name, c.Name) {
+		return c
+	}
+	d.look()
+	m, ok := d.memberByName(name)
+	if !ok || m.Dead {
+		return c
+	}
+	d.rep.note(fmt.Sprintf("the carrier %s does not carry the optional leg's items; %s does, and uses them", c.Name, m.Name))
+	return m
 }

@@ -38,31 +38,37 @@ func skipNeedText(need *ItemNeed, held int) string {
 
 var errOptionalMissing = errors.New("optional item missing")
 
-// skipOptionalLeg is called at an optional leg's start and reports whether the leg was skipped. The leader's
-// inventory read carries counts, so every need is checked at its count: the leg runs only when one read shows
-// every need at its count.
+// skipOptionalLeg is called at an optional leg's start and reports whether the leg was skipped. The leg runs
+// only when one inventory read shows every need at its count. Bags that cannot be read yet (no ItemSource, or
+// an item still loading) prove nothing: the leg runs without burning ItemsWait. An empty list waits out
+// ItemsWait in checkItem, then skips the leg — exactly the single-item path.
 func (d *Driver) skipOptionalLeg(ctx context.Context, i int) (bool, error) {
 	o := d.plan.Legs[i].Optional
 	if o == nil {
 		return false, nil
 	}
-	// With no Also entries the loop below is the old presence check (Need count 1, never exempt, ItemRef text):
-	// byte-exact legacy behaviour.
-	// checkItem checks presence only, so wait through it for a readable list (an unknown list proves nothing),
-	// then count from that same inventory: every need at its count in one read.
+	legacy := len(o.Also) == 0
+	// The single-item path waits through an unknown list for a readable one with checkItem (its miss fires only
+	// on a read list), then reads the count from that same inventory: every need at its count in one read. A list
+	// that cannot be read yet (no ItemSource, or an item still loading) proves nothing: the leg runs. An empty
+	// list waits out ItemsWait in checkItem, then skips.
+	unread := func(nd ItemNeed) bool {
+		_, known, empty := d.itemState(nd.Item)
+		return !known && !empty
+	}
 	miss := func(it *ItemRef, where string) error { return errOptionalMissing }
 	var first *ItemNeed
 	var firstRef ItemRef
 	var held int
-	legacy := len(o.Also) == 0
 	for _, nd := range o.Needs() {
 		nd := nd
 		it := ItemRef{Entry: nd.Item, Name: nd.Name}
-		exempt := d.itemsExempt()
-		if legacy {
-			exempt = false
+		// Like the single-item path before it, a GM leader is no exemption: the lock is not the question,
+		// the leg is a test set up with the item.
+		if unread(nd) {
+			return false, nil
 		}
-		if err := d.checkItem(ctx, &it, exempt, miss); err != nil {
+		if err := d.checkItem(ctx, &it, false, miss); err != nil {
 			if !errors.Is(err, errOptionalMissing) {
 				return false, err
 			}

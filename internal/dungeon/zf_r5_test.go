@@ -289,3 +289,19 @@ func TestWipeRecoveryOutsideWithoutAGMFailsAfterABoundedWait(t *testing.T) {
 		t.Fatalf("%v %v", err, g.log)
 	}
 }
+
+// TestKeyGapsOptionalAlsoScopedToLeg: an optional leg's Also items are consumed by its own use: they excuse
+// only that leg's steps. A later leg that needs one still reports a key gap.
+func TestKeyGapsOptionalAlsoScopedToLeg(t *testing.T) {
+	p, err := Parse("t.json", []byte(`{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":0,"y":0,"z":0},"optional":{"item":19974,"name":"Mudskunk Lure","also":[{"item":19975,"count":5,"name":"Zulian Mudskunk"}]},
+  "steps":[{"use_item":{"entry":19974,"name":"Mudskunk Lure"}}]},
+ {"to":{"x":10,"y":0,"z":0},"steps":[{"use_item":{"entry":7,"requires_item":{"entry":19975,"name":"Zulian Mudskunk"}}}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gaps := p.KeyGaps(0)
+	if len(gaps) != 1 || gaps[0].Leg != 1 || !strings.Contains(gaps[0].String(), "19975") {
+		t.Fatalf("an Also item must not excuse a later leg: %v", gaps)
+	}
+}

@@ -704,3 +704,90 @@ func TestPlanViaItemRules(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// TestRemoteOptionalLegLeadHolderRunsUseItemOnLead: only the lead bot (not the carrier) holds the Mudskunk
+// Lure and 5x Zulian Mudskunk. The leg runs, and its use_item goes to the lead bot that carries the items,
+// not to the carrier (whose bags lack the lure, so the step would fail naming it).
+func TestRemoteOptionalLegLeadHolderRunsUseItemOnLead(t *testing.T) {
+	lureLeg := Leg{
+		Name: "gahzranka", To: Point{20, 0, 0},
+		PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{40, 5, 0}}}},
+		Optional:   &OptionalLeg{Item: 19974, Name: "Mudskunk Lure", Also: []ItemNeed{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}}},
+		Steps: []Step{
+			{UseItem: &UseItem{Entry: 19974, Name: "Mudskunk Lure"}},
+			{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{npcGahz}, State: UnitSeen}, TimeoutS: 30}},
+		},
+		Boss: &Boss{Entry: npcGahz, Position: Point{60, 0, 0}},
+	}
+	plan := remotePlan(lureLeg, Leg{Name: "after", To: Point{100, 0, 0}})
+	g := gongGame(t)
+	g.bag("Tanky")[19974] = 1
+	g.bag("Tanky")[19975] = 5
+	rep, err := runCarrier(t, g, plan, objOpts())
+	if err != nil || rep.State != "done" {
+		t.Fatalf("the lead holds the lure and the mudskunks: %v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if g.indexOf("cmd use 19974 Tanky") < 0 {
+		t.Fatalf("the lure was not used by the lead bot that carries it: %v", g.orders)
+	}
+	if g.indexOf("cmd use 19974 Magey") >= 0 {
+		t.Fatalf("the carrier was ordered to use a lure it does not carry: %v", g.orders)
+	}
+	if len(rep.Legs) != 2 || rep.Legs[0].Result != "done" || rep.Legs[1].Result != "done" {
+		t.Fatalf("legs %+v", rep.Legs)
+	}
+}
+
+// TestOptionalLegUnreadBagsWaitsNotSkips: bags that are still loading (an Entry == 0 item) prove nothing:
+// the multi-need leg is not skipped on them, without burning the wait. Read bags with every need at its
+// count run the leg. A GM account is no exemption either: the leg is a test set up with the item.
+func TestOptionalLegUnreadBagsWaitsNotSkips(t *testing.T) {
+	mk := func(bag []objects.Item) (*fakeGame, *Plan) {
+		src := strings.Replace(runPlanKey, `{"name":"a","to":{"x":10,"y":0,"z":0},`, `{"name":"a","to":{"x":10,"y":0,"z":0},"optional":{"item":7733,"name":"Staff of Prehistoria","also":[{"item":5678,"count":5,"name":"Reagent"}]},`, 1)
+		g, _ := runFixture(t)
+		g.bag = bag
+		return g, mustPlan(t, src)
+	}
+	g, p := mk([]objects.Item{{Slot: 23}})
+	d := NewDriver(p, g, Config{GM: GMNone, ItemsWait: 5 * time.Second}, g.clock())
+	d.st = NewStepperAt(p, stepWorld{d}, d.clk.Now, 0)
+	_ = d.st.Next().Label
+	began := g.now
+	if skipped, err := d.skipOptionalLeg(context.Background(), 0); err != nil || skipped {
+		t.Fatalf("loading bags: skipped=%v err=%v (an unread list proves nothing)", skipped, err)
+	}
+	if g.now.Sub(began) >= 5*time.Second {
+		t.Fatalf("loading bags burned %s of the wait on an unread list", g.now.Sub(began))
+	}
+	g, p = mk([]objects.Item{{Slot: 23}})
+	d = NewDriver(p, g, Config{GM: GMAssumed, ItemsWait: 5 * time.Second}, g.clock())
+	d.st = NewStepperAt(p, stepWorld{d}, d.clk.Now, 0)
+	_ = d.st.Next().Label
+	if skipped, err := d.skipOptionalLeg(context.Background(), 0); err != nil || skipped {
+		t.Fatalf("loading bags (GM): skipped=%v err=%v (no exemption for an optional leg)", skipped, err)
+	}
+	// A game with no ItemSource has no readable list either: the leg runs.
+	g, p = mk([]objects.Item{{Slot: 23}})
+	d = NewDriver(p, noItems{g}, Config{GM: GMNone, ItemsWait: 5 * time.Second}, g.clock())
+	d.st = NewStepperAt(p, stepWorld{d}, d.clk.Now, 0)
+	_ = d.st.Next().Label
+	if skipped, err := d.skipOptionalLeg(context.Background(), 0); err != nil || skipped {
+		t.Fatalf("no item source: skipped=%v err=%v (an unread list proves nothing)", skipped, err)
+	}
+	// Empty bags under a GM account skip too: no exemption for an optional leg, exactly the single-item path.
+	g, p = mk([]objects.Item{{Entry: 6948, Count: 1}})
+	d = NewDriver(p, g, Config{GM: GMAssumed, ItemsWait: time.Second}, g.clock())
+	d.st = NewStepperAt(p, stepWorld{d}, d.clk.Now, 0)
+	_ = d.st.Next().Label
+	if skipped, err := d.skipOptionalLeg(context.Background(), 0); err != nil || !skipped {
+		t.Fatalf("empty bags (GM): skipped=%v err=%v (want a skip, no GM exemption)", skipped, err)
+	}
+	g, p = mk([]objects.Item{{Entry: 6948, Count: 1}, {Entry: 7733, Count: 1}, {Entry: 5678, Count: 5}})
+	d = NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if rep := d.Report(); len(rep.Legs) != 2 || rep.Legs[0].Result != "done" || len(g.used) != 1 {
+		t.Fatalf("%+v used %v", rep.Legs, g.used)
+	}
+}

@@ -700,6 +700,9 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	if a.Kind == ActUse {
 		c = d.keyHolder(ctx, c, a.Requires) // a lock's key may be in the lead bot's bags (give_items "lead"), not the carrier's
 	}
+	if a.Kind == ActItem {
+		c = d.optItemHolderBot(c, a.Leg) // an optional leg's items may sit with the lead bot, not the carrier
+	}
 	rec := d.newObjRec(a.Leg, a.Label, kind, c.Name)
 	var note string
 	switch a.Kind {

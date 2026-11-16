@@ -620,7 +620,11 @@ type RemoteDriver struct {
 	maint        maintState                // the automatic `.bot maintenance` that is due (remote_maint.go)
 	// objectTouched is set when the Stepper asked for game objects, i.e. it is on an object step.
 	objectTouched bool
-	obj           objState                   // the object steps' carrier, corpses and step reports (remote_objects.go)
+	obj           objState // the object steps' carrier, corpses and step reports (remote_objects.go)
+	// optItemHolder is the bot that carries the optional leg's items, by leg index: stored when an optional
+	// leg starts (skipOptionalLeg runs it) and cleared when the leg ends (endLeg). A use_item step of that
+	// leg runs on the holder, the way a use_object step runs on keyHolder — not on the carrier by default.
+	optItemHolder map[int]string
 	team          string                     // the party's team for the team gate ("" when unknown: everything runs)
 	killedAt      map[uint32][]Point         // where mobs of an entry were killed in this run (evidence that a pack is gone)
 	ledger        map[packet.GUID]*ledgerMob // every hostile seen fighting the party in this run (remote_ledger.go)
@@ -1851,6 +1855,7 @@ func (d *RemoteDriver) endLeg(result string) {
 	if i < 0 {
 		return
 	}
+	delete(d.optItemHolder, i) // the stored optional-leg holder ends with the leg
 	d.maintLegEnd()
 	d.legAoEOn()
 	d.legLootOn()

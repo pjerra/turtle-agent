@@ -47,9 +47,22 @@ func (p *Plan) KeyGaps(from int) []KeyGap {
 	for li, l := range p.Legs {
 		if l.Optional != nil && l.Optional.Item != 0 {
 			made[l.Optional.Item] = true
-			for _, n := range l.Optional.Also {
-				made[n.Item] = true
+		}
+		// Also items are the spell reagents the leg's own use consumes (the Mudskunk Lure's 5x Mudskunk):
+		// they count only inside this leg, as its own optional Item does (an optional leg can be skipped at
+		// runtime, so its reagents are no source for what comes after).
+		has := func(entry uint32) bool {
+			if made[entry] {
+				return true
 			}
+			if l.Optional != nil {
+				for _, n := range l.Optional.Also {
+					if n.Item == entry {
+						return true
+					}
+				}
+			}
+			return false
 		}
 		check := func(path string, st Step) {
 			var needs []ItemRef
@@ -75,7 +88,7 @@ func (p *Plan) KeyGaps(from int) []KeyGap {
 				needs = append(needs, *st.UseItem.RequiresItem)
 			}
 			for _, n := range needs {
-				if !made[n.Entry] {
+				if !has(n.Entry) {
 					add(fmt.Sprintf("needs %s, which no step before it makes: add a boss loot_item, a loot_object or use_item with that expect_item, or an optional leg for it", n))
 				}
 			}
