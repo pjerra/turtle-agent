@@ -128,14 +128,14 @@ func (d *Driver) itemState(entry uint32) (has, known, empty bool) {
 		return false, false, false
 	}
 	items := src.Items()
-	pending := false
+	has, pending := false, false
 	for _, it := range items {
-		if it.Entry == entry && it.Count > 0 {
-			return true, true, false
-		}
+		// The whole list is scanned: a stack of the item that is already there does not make a list with a slot
+		// still loading (Entry == 0) trusted, and the rest of a count may be in that slot.
+		has = has || (it.Entry == entry && it.Count > 0)
 		pending = pending || it.Entry == 0
 	}
-	return false, len(items) > 0 && !pending, len(items) == 0
+	return has, len(items) > 0 && !pending, len(items) == 0
 }
 
 // itemsExempt says whether the run takes the leader past a lock without the key: only when the caller said it is a GM (gm: true,

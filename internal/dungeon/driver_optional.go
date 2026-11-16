@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
 )
@@ -40,8 +41,9 @@ var errOptionalMissing = errors.New("optional item missing")
 
 // skipOptionalLeg is called at an optional leg's start and reports whether the leg was skipped. The leg runs
 // only when one inventory read shows every need at its count. Bags that cannot be read yet (no ItemSource, or
-// an item still loading) prove nothing: the leg runs without burning ItemsWait. An empty list waits out
-// ItemsWait in checkItem, then skips the leg — exactly the single-item path.
+// an item still loading) prove nothing: the leg runs, and a short count seen next to a loading slot waits for
+// the list to settle instead of skipping on it. An empty list waits out ItemsWait in checkItem, then skips the
+// leg — exactly the single-item path.
 func (d *Driver) skipOptionalLeg(ctx context.Context, i int) (bool, error) {
 	o := d.plan.Legs[i].Optional
 	if o == nil {
@@ -52,9 +54,22 @@ func (d *Driver) skipOptionalLeg(ctx context.Context, i int) (bool, error) {
 	// on a read list), then reads the count from that same inventory: every need at its count in one read. A list
 	// that cannot be read yet (no ItemSource, or an item still loading) proves nothing: the leg runs. An empty
 	// list waits out ItemsWait in checkItem, then skips.
-	unread := func(nd ItemNeed) bool {
-		_, known, empty := d.itemState(nd.Item)
-		return !known && !empty
+	//
+	// settle waits up to ItemsWait for a partly read list (a slot still loading) to finish, so a short count next to
+	// a loading slot is not taken for short: the rest of the stack may be in that slot. It reports whether the list
+	// became readable; a list still unread after the wait proves nothing either, and the leg runs.
+	settle := func(nd ItemNeed) (bool, error) {
+		for waited := time.Duration(0); ; waited += d.cfg.Poll {
+			if _, known, empty := d.itemState(nd.Item); known || empty {
+				return true, nil
+			}
+			if waited >= d.cfg.ItemsWait {
+				return false, nil
+			}
+			if err := d.sleep(ctx, d.cfg.Poll); err != nil {
+				return false, err
+			}
+		}
 	}
 	miss := func(it *ItemRef, where string) error { return errOptionalMissing }
 	var first *ItemNeed
@@ -65,8 +80,21 @@ func (d *Driver) skipOptionalLeg(ctx context.Context, i int) (bool, error) {
 		it := ItemRef{Entry: nd.Item, Name: nd.Name}
 		// Like the single-item path before it, a GM leader is no exemption: the lock is not the question,
 		// the leg is a test set up with the item.
-		if unread(nd) {
-			return false, nil
+		has, known, empty := d.itemState(nd.Item)
+		if !known && !empty {
+			if !has {
+				return false, nil
+			}
+			if d.itemCount(nd.Item) >= nd.Count {
+				continue // the count is already at the need: a loading slot can only add to it
+			}
+			readable, err := settle(nd)
+			if err != nil {
+				return false, err
+			}
+			if !readable {
+				return false, nil
+			}
 		}
 		if err := d.checkItem(ctx, &it, false, miss); err != nil {
 			if !errors.Is(err, errOptionalMissing) {

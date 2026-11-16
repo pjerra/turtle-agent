@@ -791,3 +791,59 @@ func TestOptionalLegUnreadBagsWaitsNotSkips(t *testing.T) {
 		t.Fatalf("%+v used %v", rep.Legs, g.used)
 	}
 }
+
+// TestRemoteOptionalLegUseObjectRoutesThroughHolder: the carrier and the lead both hold the primary item,
+// but only the lead holds every Also item. The leg runs, and its use_object (which uses the primary item)
+// goes to the lead bot that carries every need — not to the carrier, which keyHolder would pick on the key
+// alone and which lacks the reagents the cast consumes.
+func TestRemoteOptionalLegUseObjectRoutesThroughHolder(t *testing.T) {
+	lureLeg := Leg{
+		Name: "gahzranka", To: Point{20, 0, 0},
+		PullGroups: []PullGroup{{Entries: []uint32{299}, Positions: []Point{{40, 5, 0}}}},
+		Optional:   &OptionalLeg{Item: 19974, Name: "Mudskunk Lure", Also: []ItemNeed{{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}}},
+		Steps: []Step{
+			{UseObject: &UseObject{ObjectRef: ObjectRef{Entry: goGong, Near: &Point{20, 0, 0}}, Stand: &Point{20, 0, 0}, RequiresItem: &ItemRef{Entry: 19974, Name: "Mudskunk Lure"}, ViaItem: true}},
+			{WaitFor: &WaitFor{Unit: &UnitWait{Entries: []uint32{npcGahz}, State: UnitSeen}, TimeoutS: 30}},
+		},
+		Boss: &Boss{Entry: npcGahz, Position: Point{60, 0, 0}},
+	}
+	plan := remotePlan(lureLeg, Leg{Name: "after", To: Point{100, 0, 0}})
+	g := gongGame(t)
+	g.bag("Tanky")[19974] = 1 // the lead holds the lure and all 5 mudskunks
+	g.bag("Tanky")[19975] = 5
+	g.bag("Magey")[19974] = 1 // the carrier holds the lure but no mudskunks
+	rep, err := runCarrier(t, g, plan, objOpts())
+	if err != nil || rep.State != "done" {
+		t.Fatalf("the lead holds the lure and the mudskunks: %v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if g.indexOf("cmd use 19974 Tanky") < 0 {
+		t.Fatalf("the object was not used by the lead bot that carries every need: %v", g.orders)
+	}
+	if g.indexOf("cmd use 19974 Magey") >= 0 {
+		t.Fatalf("the carrier was ordered to use the object without the reagents: %v", g.orders)
+	}
+	if len(rep.Legs) != 2 || rep.Legs[0].Result != "done" || rep.Legs[1].Result != "done" {
+		t.Fatalf("legs %+v", rep.Legs)
+	}
+}
+
+// TestOptionalLegPartialStackWithLoadingSlotWaits: one loaded stack short of its count plus a slot still
+// loading (Entry == 0) proves nothing: the leg is not skipped on the partial count. The short count waits
+// out ItemsWait for the loading slot to settle; still unread after the wait, the leg runs.
+func TestOptionalLegPartialStackWithLoadingSlotWaits(t *testing.T) {
+	src := strings.Replace(runPlan, `{"use_object":{"entry":124371}}`, `{"use_object":{"entry":124371,"requires_item":{"entry":19974,"name":"Mudskunk Lure"}}}`, 1)
+	src = strings.Replace(src, `{"name":"a","to":{"x":10,"y":0,"z":0},`, `{"name":"a","to":{"x":10,"y":0,"z":0},"optional":{"item":19974,"name":"Mudskunk Lure","also":[{"item":19975,"count":5,"name":"Zulian Mudskunk"}]},`, 1)
+	g, _ := runFixture(t)
+	g.bag = []objects.Item{{Entry: 19974, Count: 1}, {Entry: 19975, Count: 3}, {Slot: 23}}
+	p := mustPlan(t, src)
+	d := NewDriver(p, g, Config{GM: GMNone, ItemsWait: 5 * time.Second, Poll: time.Second}, g.clock())
+	d.st = NewStepperAt(p, stepWorld{d}, d.clk.Now, 0)
+	_ = d.st.Next().Label
+	began := g.now
+	if skipped, err := d.skipOptionalLeg(context.Background(), 0); err != nil || skipped {
+		t.Fatalf("partial stack with a loading slot: skipped=%v err=%v (an unread list proves nothing)", skipped, err)
+	}
+	if g.now.Sub(began) < 5*time.Second {
+		t.Fatalf("partial stack with a loading slot burned only %s of the wait (the short count waits for the loading slot)", g.now.Sub(began))
+	}
+}

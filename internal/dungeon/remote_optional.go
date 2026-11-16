@@ -128,9 +128,18 @@ func (d *RemoteDriver) keyHolder(ctx context.Context, c tbm.PartyRec, req *ItemR
 	return c
 }
 
-// optItemHolderBot is the bot that does a use_item step of an optional leg: the stored holder (skipOptionalLeg
-// chose it for carrying every need) when that bot is still in the party and alive, else the carrier c (the step
-// then fails naming the item). A leg without a stored holder, and a use_item of any other leg, use the carrier.
+// legOptional is leg i's Optional when the leg is optional, nil for a plain leg and for an index out of range.
+func (d *RemoteDriver) legOptional(leg int) *OptionalLeg {
+	if leg < 0 || leg >= len(d.plan.Legs) {
+		return nil
+	}
+	return d.plan.Legs[leg].Optional
+}
+
+// optItemHolderBot is the bot that does a use_item or use_object step of an optional leg: the stored holder
+// (skipOptionalLeg chose it for carrying every need) when that bot is still in the party and alive, else the
+// carrier c (the step then fails naming the item). A leg without a stored holder, and a step of any other leg,
+// use the carrier.
 func (d *RemoteDriver) optItemHolderBot(c tbm.PartyRec, leg int) tbm.PartyRec {
 	name, ok := d.optItemHolder[leg]
 	if !ok || name == "" || strings.EqualFold(name, c.Name) {

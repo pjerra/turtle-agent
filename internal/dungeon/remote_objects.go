@@ -699,6 +699,11 @@ func (d *RemoteDriver) doObjectStep(ctx context.Context, a Action) error {
 	}
 	if a.Kind == ActUse {
 		c = d.keyHolder(ctx, c, a.Requires) // a lock's key may be in the lead bot's bags (give_items "lead"), not the carrier's
+		// When the key is the optional leg's primary item, the bot that carries every need of the leg uses the object, exactly as
+		// it uses the leg's items: keyHolder picks on the key alone and would choose a carrier whose bags lack the Also items.
+		if o := d.legOptional(a.Leg); o != nil && a.Requires != nil && a.Requires.Entry == o.Item {
+			c = d.optItemHolderBot(c, a.Leg)
+		}
 	}
 	if a.Kind == ActItem {
 		c = d.optItemHolderBot(c, a.Leg) // an optional leg's items may sit with the lead bot, not the carrier
