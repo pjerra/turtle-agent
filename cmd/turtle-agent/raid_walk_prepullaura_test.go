@@ -103,8 +103,12 @@ type prepullAgent struct {
 	pauseRefused   string
 	resumeErr      error
 	advanceOnPause time.Duration // if > 0, advances a.clock on each run pause call
-	pauseReqAt     time.Time
-	resumeAt       time.Time
+	// advanceOnResume, if > 0, advances a.clock on each run resume call (a resume whose ACK outlasts the top-up's
+	// budget), and resumeWaitMS is the wait_ms of the last resume the commander was asked for.
+	advanceOnResume time.Duration
+	resumeWaitMS    int
+	pauseReqAt      time.Time
+	resumeAt        time.Time
 	// applyToSelf makes every ".aura" land on the commander instead of the target: the selection did not hold.
 	applyToSelf bool
 	// drop is the ids a bot never shows after its ".aura" (an aura the server refuses, or a selection that did not hold).
@@ -433,6 +437,10 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			v = commanderReply{Sent: ".bot run pause", Reply: tbm.Reply{Kind: tbm.KindAck, OK: true, Line: "TBM:ACTION_ACK|run pause"}}
 		case "resume":
 			a.resumeAt = a.clock
+			a.resumeWaitMS = p.WaitMS
+			if a.advanceOnResume > 0 {
+				a.advance(a.advanceOnResume)
+			}
 			if a.resumeErr != nil {
 				return a.resumeErr
 			}
@@ -4007,39 +4015,227 @@ func TestPrepullMissTally(t *testing.T) {
 }
 
 // A bot can carry only one Well Fed aura: the core's spell_group 1001 holds 18192, 18194, 22730, 24799, 25661 and
-// others (tw_world_spell_group.sql), so a second one of them is refused or replaces the first. No list of a
-// tb-prepull-auras preset may name two of that group: the walk would send the second and read it back missing on every
-// bot, and a per-bot tolerance would hide it. The group is hard-coded (18192 and 22730 are the two the a4-1 walk was
-// short of; 18194, 24799 and 25661 are the other members the presets name).
+// others (tw_world_spell_group.sql), so a second one of them is refused or replaces the first. No list a bot is SENT
+// may name two of that group, and what a bot is sent is its merged list — every "all" list and its role's own
+// (PrepullAuras.For), never one file role alone: "all" holding 18192 and "tank" holding 22730 passes a per-list check
+// while every tank carries both. The walk would send the second and read it back missing on every bot of that role,
+// and a per-bot tolerance would hide it. The group is hard-coded (18192 and 22730 are the two the a4-1 walk was short
+// of; 18194, 24799 and 25661 are the other members the presets name).
 func TestPrepullPresetListsOneFoodAura(t *testing.T) {
 	food := []uint32{18192, 18194, 22730, 24799, 25661}
+	// over is the first role whose merged list names more than one food aura.
+	over := func(set raidwalk.PrepullAuras) (string, []uint32) {
+		for _, role := range raidwalk.PrepullRoles {
+			var got []uint32
+			for _, b := range set.For(role) {
+				if slices.Contains(food, b.ID) {
+					got = append(got, b.ID)
+				}
+			}
+			if len(got) > 1 {
+				return role, got
+			}
+		}
+		return "", nil
+	}
 	files, err := filepath.Glob("../../dungeons/prepull/*.json")
 	if err != nil || len(files) == 0 {
 		t.Fatalf("the prepull presets: %v (%d files)", err, len(files))
 	}
 	for _, name := range files {
-		raw, err := os.ReadFile(name)
+		set, err := raidwalk.PlanPrepullAuras([]string{name})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		var doc struct {
-			Roles map[string]struct {
-				IDs []uint32 `json:"ids"`
-			} `json:"roles"`
-		}
-		if err := json.Unmarshal(raw, &doc); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		for role, r := range doc.Roles {
-			got := make([]uint32, 0, len(r.IDs))
-			for _, id := range r.IDs {
-				if slices.Contains(food, id) {
-					got = append(got, id)
-				}
-			}
-			if len(got) > 1 {
-				t.Fatalf("%s: role %q names %v: a bot can carry only one food aura (spell_group 1001)", name, role, got)
-			}
+		if role, ids := over(set); len(ids) > 0 {
+			t.Fatalf("%s: a %s bot's merged list holds %v: a bot can carry only one food aura (spell_group 1001)", name, role, ids)
 		}
 	}
+	// A fixture that is fine per role and not merged: "all" names one food aura, "tank" another, so every tank is sent
+	// both. The merged check has to see it (on r3 this test read each file role on its own and passed it).
+	doc := `{"format":"tb-prepull-auras","version":1,"roles":{"all":{"ids":[22888,18192]},"tank":{"ids":[17626,22730]}}}`
+	path := filepath.Join(t.TempDir(), "merged.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("%v", err)
+	}
+	set, err := raidwalk.PlanPrepullAuras([]string{path})
+	if err != nil {
+		t.Fatalf("the merged fixture: %v", err)
+	}
+	role, ids := over(set)
+	if role != raidwalk.PrepullTank || len(ids) != 2 {
+		t.Fatalf("the merged fixture: a %s bot's list holds %v, want tank with both food auras (18192 from all, 22730 from tank)",
+			role, ids)
+	}
+}
+
+// (B3) A resume blocks past the call's deadline: it is asked for with the call's own short bound, and the call it
+// pushed past the deadline counts as capped, so its read-back is ONE immediate read and never the 5 s verify poll. On
+// r3 the resume ran on the original context and a call past its deadline kept the full verify window (rbWait was only
+// clamped while the time left was positive), so the poll loop sat up to 5 s more.
+func TestPrepullAuraTopupResumeOverrunCapsReadBack(t *testing.T) {
+	a := newPrepullAgent(t)
+	// The second id never lands: every hire is short after the sends, so the verify loop has something to wait for.
+	for _, b := range a.bots {
+		a.drop[b.GUID] = map[uint32]bool{23768: true}
+	}
+	a.advanceOnResume = 20 * time.Second
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768")
+	var sleeps []time.Duration
+	origSleep := w.env.sleep
+	w.env.sleep = func(ctx context.Context, d time.Duration) error {
+		sleeps = append(sleeps, d)
+		return origSleep(ctx, d)
+	}
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the resume overrun: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 12 {
+		t.Fatalf("the call sent %d auras (%v), want 12", len(a.sent), a.sent)
+	}
+	// The resume is asked for with the time the budget had left, never the flat 10 s (the pause took no time here, the
+	// sends did: the bound is min(10 s, max(2 s, time left))).
+	left := a.pauseReqAt.Add(prepullTopupPauseCap).Sub(a.resumeAt)
+	wantMS := int(max(left, 2*time.Second) / time.Millisecond)
+	if wantMS >= 10000 {
+		t.Fatalf("the call had %s left at the resume, so the test would not check the clamp", left)
+	}
+	if a.resumeWaitMS != wantMS {
+		t.Fatalf("the resume waited %dms, want %dms (the call's own bound, %s left)", a.resumeWaitMS, wantMS, left)
+	}
+	// The cap: no verify poll, and nothing slept after the resume.
+	for i, d := range sleeps {
+		if d == prepullAuraVerifyPoll {
+			t.Fatalf("the overrun call slept the verify poll %s (%d of %d): %v", d, i+1, len(sleeps), sleeps)
+		}
+	}
+	if want := a.resumeAt.Add(a.advanceOnResume); !a.clock.Equal(want) {
+		t.Fatalf("the call ended %s after its resume ACK, want no wait after the cap", a.clock.Sub(want))
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	lines := prepullNotes(w, "missing by id")
+	if len(lines) != 1 || !strings.Contains(lines[0], "23768 x6") {
+		t.Fatalf("the tally line %q, want one naming 23768 x6 (the read-back is the one immediate read)", lines)
+	}
+	// The record still shows every hire short of the dropped id.
+	for _, rec := range readPrepullAuraFile(t, w).Bots {
+		if len(rec.Missing) != 1 || rec.Missing[0] != 23768 {
+			t.Fatalf("%s: missing %v, want [23768] from the capped call's one read-back", rec.Bot, rec.Missing)
+		}
+	}
+}
+
+// (B3/agy) The verify window ends on its own context before the walk clock reaches it: the read-back still runs once,
+// the tally line and the record are still written, and the call does not stop there. On r3 rbctx was created with the
+// window BEFORE the window's deadline, so the poll hit context.DeadlineExceeded first and an early return skipped the
+// line, the per-hire completion marks and prepull-auras.json.
+func TestPrepullAuraTopupVerifyTimeoutStillWritesRecord(t *testing.T) {
+	a := newPrepullAgent(t)
+	// The second id never lands, so the read-back sees every hire short and the loop wants its poll.
+	for _, b := range a.bots {
+		a.drop[b.GUID] = map[uint32]bool{23768: true}
+	}
+	// The window is real time (context.WithTimeout): short, so the test is. The env's sleep blocks on the read-back's
+	// context for the poll, the way the walk's own sleepCtx does on a real deadline.
+	oldWait := prepullAuraVerifyWait
+	prepullAuraVerifyWait = 50 * time.Millisecond
+	defer func() { prepullAuraVerifyWait = oldWait }()
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768")
+	origSleep := w.env.sleep
+	w.env.sleep = func(ctx context.Context, d time.Duration) error {
+		if d == prepullAuraVerifyPoll {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return origSleep(ctx, d)
+	}
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the unverified auras: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 12 {
+		t.Fatalf("the call sent %d auras (%v), want 12", len(a.sent), a.sent)
+	}
+	lines := prepullNotes(w, "missing by id")
+	if len(lines) != 1 || !strings.Contains(lines[0], "23768 x6") {
+		t.Fatalf("the tally line %q, want one naming 23768 x6: the record is written after the window ends", lines)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.Bots) != 6 {
+		t.Fatalf("the record holds %d bot(s), want all 6", len(f.Bots))
+	}
+	for _, rec := range f.Bots {
+		if len(rec.Missing) != 1 || rec.Missing[0] != 23768 {
+			t.Fatalf("%s: missing %v, want [23768]", rec.Bot, rec.Missing)
+		}
+		if len(rec.Seen) != 1 || rec.Seen[0] != 22888 {
+			t.Fatalf("%s: seen %v, want [22888]", rec.Bot, rec.Seen)
+		}
+	}
+	for _, n := range w.notesCopy() {
+		if strings.Contains(n, "stopped") {
+			t.Fatalf("the verify window's end wrote a stop line %q, want the record written instead", n)
+		}
+	}
+}
+
+// (B3/agy) An aura the record already names is re-sent (an expiry stripped it after an earlier pull) and the budget cuts
+// the batch after that one send: the hire got an aura of this call, so it is read back and named in the tally. On r3
+// the caller compared len(rec.Sent) before and after, which cannot grow for a re-sent id (SendAura deduplicates into
+// the record), so the hire was left out of the read-back and the tally.
+func TestPrepullAuraTopupResentAuraCountsAsPartial(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768")
+	ctx := context.Background()
+	// Pull step 2's top-up puts both ids on every hire, so each record names them.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the first top-up: fired %v err %v", fired, err)
+	}
+	first := len(a.sent)
+	if first != 12 {
+		t.Fatalf("the first top-up sent %d auras (%v), want 12", first, a.sent)
+	}
+	// Flitz loses both ids, and the next pull step's top-up spends the whole budget on its first send: the second is
+	// cut, and that hire carries one of the two.
+	flitz := a.bots[3]
+	if flitz.Name != "Flitz" {
+		t.Fatalf("the fourth fake bot is %s, not Flitz", flitz.Name)
+	}
+	delete(a.auras[flitz.GUID], 22888)
+	delete(a.auras[flitz.GUID], 23768)
+	a.advance(61 * time.Second)
+	a.advanceOnAura = 14 * time.Second
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+		t.Fatalf("the re-sent aura: fired %v err %v", fired, err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the cut batch sent %v, want only Flitz's first id", tail)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	lines := prepullNotes(w, "missing by id")
+	if len(lines) != 1 {
+		t.Fatalf("the tally lines %q, want exactly one naming the hire the cut batch left half-sent", lines)
+	}
+	if !strings.Contains(lines[0], "Flitz") {
+		t.Fatalf("the tally line %q does not name Flitz, the hire the cap left half-sent", lines[0])
+	}
+	if !strings.Contains(lines[0], "23768") || strings.Contains(lines[0], "22888") {
+		t.Fatalf("the tally line %q: want the id Flitz still lacks (23768), not the one it got (22888)", lines[0])
+	}
+	for _, rec := range readPrepullAuraFile(t, w).Bots {
+		if rec.Bot != "Flitz" {
+			continue
+		}
+		if len(rec.Seen) != 1 || rec.Seen[0] != 22888 {
+			t.Fatalf("Flitz: seen %v, want [22888]", rec.Seen)
+		}
+		if len(rec.Missing) != 1 || rec.Missing[0] != 23768 {
+			t.Fatalf("Flitz: missing %v, want [23768]", rec.Missing)
+		}
+		return
+	}
+	t.Fatalf("the record holds no line for Flitz")
 }

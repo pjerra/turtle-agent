@@ -1256,13 +1256,16 @@ type walk struct {
 	// step, the one-per-step lines already written (keyed "unheld", "combat"). prepullTopupCapped marks the pull steps
 	// whose 15 s top-up budget is spent: every later status of such a step reads and sends nothing. The budget itself
 	// is prepullTopupSendDeadline, set for the length of one top-up call: no `.aura` of that call goes out after it,
-	// held, already paused or unheld.
+	// held, already paused or unheld. prepullTopupSent counts the `.aura` sends one target's batch made in that call,
+	// reset per target and bumped by SendAura's success path: the record cannot tell (a re-sent id is deduplicated into
+	// rec.Sent, and a batch the budget cut returns before its end), so the read-back and the tally need this count.
 	prepullTopupDone         map[int]map[string]*prepullTopupHire
 	prepullTopupDied         map[string]bool
 	prepullTopupSeen         map[string]map[uint32]bool
 	prepullTopupSaid         map[int]map[string]bool
 	prepullTopupCapped       map[int]bool
 	prepullTopupSendDeadline time.Time
+	prepullTopupSent         int
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
