@@ -1178,6 +1178,21 @@ func Validate(r Rows) error {
 		if s.Flags&FlagProofCreature != 0 && s.Kind != KindOpenProof {
 			return bad("flag %d (the proof is a creature) is for an open_proof row (the loader refuses it on a %s)", FlagProofCreature, s.Kind)
 		}
+		// FlagBossAnyOf makes the row's entries alternatives, not kill-first adds: the module reads whichever ONE of
+		// them shows as the row's boss. Only a boss row means that, the row's canonical Entry must be one of the
+		// alternatives (its name, its `boss:<ENTRY>` goal and the dashboard read it), and one alternative is no
+		// alternatives at all — the plan's boss.any_of refuses a list under two entries the same way.
+		if s.Flags&FlagBossAnyOf != 0 {
+			if s.Kind != KindBoss {
+				return bad("the boss-any-of flag (%d) is for a boss row, not a %s", FlagBossAnyOf, s.Kind)
+			}
+			if len(s.Entries) < 2 {
+				return bad("a boss-any-of row lists at least 2 entries (the one boss of several an event makes active), not %d", len(s.Entries))
+			}
+			if !slices.Contains(s.Entries, s.Entry) {
+				return bad("the boss-any-of row's entry %d is its canonical id and must be one of its entries", s.Entry)
+			}
+		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {
 				return bad("the exact flag is for a move row (the loader refuses it on a %s)", s.Kind)

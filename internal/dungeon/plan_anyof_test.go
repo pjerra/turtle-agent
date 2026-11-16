@@ -150,3 +150,83 @@ func TestBossAnyOfValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestBossAnyOfEntryInSameLegPullGroupRejected: an any_of alternative may appear nowhere else in the plan, its own
+// leg included. raid-walk counts a kill of ANY alternative as the row's boss and the injector never picks one as
+// trash, so a leg that also pulls it as trash would register the boss early and derive false boss evidence. Before
+// the check covered the owning leg this plan parsed.
+func TestBossAnyOfEntryInSameLegPullGroupRejected(t *testing.T) {
+	// legs[0]'s own pull group lists 5, and 5 is one of its boss row's alternatives.
+	_, err := Parse("t.json", []byte(anyOfSrc(`"entry":100,"any_of":[100,5,102]`, `"entry":103`)))
+	if err == nil {
+		t.Fatal("a same-leg pulled alternative was accepted")
+	}
+	want := "legs[0].boss.any_of[1]: any_of entry 5 of the boss of legs[0] (one) is also in legs[0] (one).pull_groups[0].entries"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q, want it to name both places (%q)", err, want)
+	}
+}
+
+// TestBossAnyOfEntryInAnotherLegSkipRejected: a leg that skips an alternative would never wait for it, while the boss
+// row's kill evidence still counts it. The parser refuses the listing and names both places.
+func TestBossAnyOfEntryInAnotherLegSkipRejected(t *testing.T) {
+	const src = `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"one","to":{"x":1,"y":0,"z":0},"pull_groups":[{"entries":[6],"positions":[{"x":2,"y":0,"z":0}]}],
+  "boss":{"entry":100,"any_of":[100,5,102],"position":{"x":3,"y":0,"z":0}}},
+ {"name":"two","to":{"x":4,"y":0,"z":0},"skip":[5],"boss":{"entry":103,"position":{"x":5,"y":0,"z":0}}}]}`
+	_, err := Parse("t.json", []byte(src))
+	if err == nil {
+		t.Fatal("an alternative some leg skips was accepted")
+	}
+	want := "legs[0].boss.any_of[1]: any_of entry 5 of the boss of legs[0] (one) is also in legs[1] (two).skip"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q, want it to name both places (%q)", err, want)
+	}
+}
+
+// TestBossAnyOfEntryInPhaseEntriesRejected: a phase entry is an always-on boss row for the walk's gates, so an
+// alternative cannot also be one — in its own leg's phase list or another leg's. The parser names both places.
+func TestBossAnyOfEntryInPhaseEntriesRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		boss0 string
+		boss1 string
+		want  string
+	}{
+		{
+			name:  "its own leg",
+			boss0: `"entry":100,"any_of":[100,105,102],"phase_entries":[105]`,
+			boss1: `"entry":103`,
+			want:  "legs[0].boss.any_of[1]: any_of entry 105 of the boss of legs[0] (one) is also in legs[0] (one).boss.phase_entries",
+		},
+		{
+			name:  "another leg",
+			boss0: `"entry":100,"any_of":[100,105,102]`,
+			boss1: `"entry":103,"phase_entries":[105]`,
+			want:  "legs[0].boss.any_of[1]: any_of entry 105 of the boss of legs[0] (one) is also in legs[1] (two).boss.phase_entries",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse("t.json", []byte(anyOfSrc(tc.boss0, tc.boss1)))
+			if err == nil {
+				t.Fatalf("want a refusal with %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestBossAnyOfEntryInAnotherBossAnyOfRejected: two boss rows cannot share an alternative: each would count the same
+// unit's kill as its own boss. The parser names both rows.
+func TestBossAnyOfEntryInAnotherBossAnyOfRejected(t *testing.T) {
+	_, err := Parse("t.json", []byte(anyOfSrc(`"entry":100,"any_of":[100,105,102]`, `"entry":103,"any_of":[103,105]`)))
+	if err == nil {
+		t.Fatal("an alternative two boss rows share was accepted")
+	}
+	want := "legs[0].boss.any_of[1]: any_of entry 105 of the boss of legs[0] (one) is also in legs[1] (two).boss.any_of"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q, want it to name both rows (%q)", err, want)
+	}
+}

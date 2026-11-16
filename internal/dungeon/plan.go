@@ -1399,9 +1399,11 @@ func legLabel(p *Plan, i int) string {
 	return fmt.Sprintf("legs[%d]", i)
 }
 
-// bossAnyOf refuses a boss.any_of entry that the route also uses elsewhere: an alternative at this row's point that is
-// another leg's boss, phase entry or pulled pack entry would make raid-walk read the plan two ways, because it counts a
-// kill of ANY any_of entry as this row's boss.
+// bossAnyOf refuses a boss.any_of entry that the plan uses anywhere else. An alternative is one of this row's boss
+// units wherever it stands — raid-walk counts a kill of ANY of them as this row's boss, its gates count the entry
+// whenever it is seen, and the injector never picks it as trash — so the only legal place for it is its own boss row
+// (and its own canonical entry there): the same leg's pull_groups, skip or phase_entries, another leg's, another
+// boss's entry or any other boss's any_of would make raid-walk read the plan two ways. The error names both places.
 func (c *checker) bossAnyOf(p *Plan) {
 	for li, l := range p.Legs {
 		if l.Boss == nil || len(l.Boss.AnyOf) == 0 {
@@ -1413,21 +1415,37 @@ func (c *checker) bossAnyOf(p *Plan) {
 				c.fail(at, "any_of entry %d of the boss of %s is also %s", e, legLabel(p, li), where)
 			}
 			for lj, o := range p.Legs {
-				if lj == li {
-					continue
-				}
+				// The owning leg included: pulling an alternative as trash on the way to its own boss row makes
+				// the boss evidence fire before the boss is reached (BossRows.Owns marks every alternative).
 				for gi, g := range o.PullGroups {
 					if slices.Contains(g.Entries, e) {
 						clash(fmt.Sprintf("in %s.pull_groups[%d].entries", legLabel(p, lj), gi))
 					}
 				}
-				if ob := o.Boss; ob != nil {
-					if ob.Entry == e {
-						clash(fmt.Sprintf("the boss entry of %s", legLabel(p, lj)))
-					}
-					if slices.Contains(ob.PhaseEntries, e) {
-						clash(fmt.Sprintf("in %s.boss.phase_entries", legLabel(p, lj)))
-					}
+				if slices.Contains(o.Skip, e) {
+					clash(fmt.Sprintf("in %s.skip", legLabel(p, lj)))
+				}
+				ob := o.Boss
+				if ob == nil {
+					continue
+				}
+				// One boss row may hold the alternative: its own, as the canonical Entry or in its any_of (both
+				// reported by the leg's own checks). Any other listing, the own row's phase_entries included,
+				// makes the row ambiguous.
+				if lj != li && ob.Entry == e {
+					clash(fmt.Sprintf("the boss entry of %s", legLabel(p, lj)))
+				}
+				if slices.Contains(ob.PhaseEntries, e) {
+					clash(fmt.Sprintf("in %s.boss.phase_entries", legLabel(p, lj)))
+				}
+				if slices.Contains(ob.First, e) {
+					clash(fmt.Sprintf("in %s.boss.first", legLabel(p, lj)))
+				}
+				if ob.Hold != nil && slices.Contains(ob.Hold.Entries, e) {
+					clash(fmt.Sprintf("in %s.boss.hold.entries", legLabel(p, lj)))
+				}
+				if lj != li && slices.Contains(ob.AnyOf, e) {
+					clash(fmt.Sprintf("in %s.boss.any_of", legLabel(p, lj)))
 				}
 			}
 		}

@@ -1039,9 +1039,11 @@ type walk struct {
 	// record is an earlier walk's or instance's) from one the walk never saw alive (walk 41 tj-9's shape:
 	// the record is the only evidence, and it credits).
 	bossAliveWalk map[uint32]bool
-	// bossGUIDs is the guid -> plan boss entry of the units the frames showed with a plan boss's OWN entry
+	// bossGUIDs is the guid -> plan boss row entry of the units the frames showed with a plan boss's OWN unit
 	// (trackFrame): a script that changes a creature's entry (core UpdateEntry) keeps its guid, so a unit whose
 	// guid the frames showed as the boss entry is the boss whatever entry it now reads (spec 6, D5 b, #1453).
+	// The value is the ROW's canonical entry even when the frame read one of its any_of alternatives (bossCanonicalEntry),
+	// because every reader compares it with the row's entry; the active alternative is in bossForms and the track's active.
 	// A guid in it is never an add; bossForms keeps the entries that guid was seen with, one per change.
 	bossGUIDs map[string]uint32
 	bossForms map[string][]uint32
@@ -1292,7 +1294,10 @@ type bossKey struct {
 // the frames showed the boss with and the entries that guid read while this step was tracked. The summary lists one
 // record per boss step; the last engaged one also fills the summary's single boss_kill field.
 type bossStepTrack struct {
-	entry    uint32
+	entry uint32
+	// active is the any_of alternative the run saw engaged or the frames showed, when it is not the row's canonical
+	// entry (bossCanonicalEntry): the summary's active_entry, kept apart from entry so the row's id stays canonical.
+	active   uint32
 	step     int
 	engaged  bool
 	killed   bool

@@ -2281,9 +2281,12 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		}
 	}
 	// The guid rule (spec 6, D5 b, #1453): the frames are keyed by guid, and a script that changes a creature's
-	// entry (core UpdateEntry) keeps that guid. So a row whose guid the frames showed with a plan boss's OWN entry
+	// entry (core UpdateEntry) keeps that guid. So a row whose guid the frames showed with a plan boss's OWN unit
 	// is the boss whatever entry it now reads: bossGUIDs remembers the guid, bossForms the entries it was seen with,
-	// one per change (the summary's phase is 1 + the changes).
+	// one per change (the summary's phase is 1 + the changes). The value is the ROW's canonical entry: every reader
+	// compares w.bossGUIDs[g] with a row entry (bossGUIDFor, bossFormsFor, bossKilled's guid rule), and an any_of
+	// row seen as the alternative its event made active (15084 of the row 15082) must match the row's entry. The
+	// active alternative stays in bossForms and in the boss track's active field.
 	for _, h := range f.Hostiles {
 		if h.GUID == 0 {
 			continue
@@ -2293,7 +2296,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			if w.bossGUIDs == nil {
 				w.bossGUIDs = map[string]uint32{}
 			}
-			w.bossGUIDs[g] = h.Entry
+			w.bossGUIDs[g] = w.bossCanonicalEntry(0, h.Entry)
 		}
 		if _, boss := w.bossGUIDs[g]; !boss {
 			continue
@@ -3534,20 +3537,60 @@ func (w *walk) bossStepOf(entry uint32) int {
 	return 0
 }
 
+// bossCanonicalEntry is entry as its boss row's canonical entry: when a boss row lists entry as one of its any_of
+// alternatives, the row's Entry. The plan decides when the walk has one (the alternatives are unique plan-wide:
+// checker.bossAnyOf), and the exported rows answer for a walk built from rows alone. TortoiseBots' statuses, the
+// autopilot's goal and the summary name the canonical row; the alternative the event made active is kept beside it
+// (bossStepTrack.active, the summary's active_entry).
+func (w *walk) bossCanonicalEntry(step int, entry uint32) uint32 {
+	if entry == 0 {
+		return entry
+	}
+	if w.plan != nil {
+		for i := range w.plan.Legs {
+			if b := w.plan.Legs[i].Boss; b != nil && b.Entry != entry && b.Is(entry) {
+				return b.Entry
+			}
+		}
+		return entry
+	}
+	if step > 0 {
+		if row, ok := w.bossRowAt(step); ok {
+			if row.Flags&planexport.FlagBossAnyOf != 0 && row.Entry != entry && planexport.RowBossIs(row, entry) {
+				return row.Entry
+			}
+			return entry
+		}
+	}
+	for _, s := range w.rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Flags&planexport.FlagBossAnyOf != 0 && s.Entry != entry && planexport.RowBossIs(s, entry) {
+			return s.Entry
+		}
+	}
+	return entry
+}
+
 // bossTrackAt is the record of a boss step (or of the boss's entry when the step is unknown), created on first
-// sight. A known step is keyed by the step, so each boss row the run's statuses show keeps its own record.
+// sight. A known step is keyed by the step, so each boss row the run's statuses show keeps its own record. An any_of
+// alternative is normalised to its row's canonical entry BEFORE the key (a track the statuses made for the row and
+// one the tracker's latch would make for the active alternative are the same record), and the alternative is kept
+// on the record as active.
 func (w *walk) bossTrackAt(step int, entry uint32) *bossStepTrack {
+	canonical := w.bossCanonicalEntry(step, entry)
 	if w.bossTracks == nil {
 		w.bossTracks = map[bossKey]*bossStepTrack{}
 	}
 	k := bossKey{step: step}
 	if step <= 0 {
-		k = bossKey{entry: entry}
+		k = bossKey{entry: canonical}
 	}
 	t, ok := w.bossTracks[k]
 	if !ok {
-		t = &bossStepTrack{entry: entry, step: step}
+		t = &bossStepTrack{entry: canonical, step: step}
 		w.bossTracks[k] = t
+	}
+	if canonical != entry {
+		t.active = entry
 	}
 	return t
 }
@@ -3762,7 +3805,16 @@ func (w *walk) bossFormsForTrack(t *bossStepTrack) (phase int, phaseEntry uint32
 // record showed a phase the retry never saw (review round 4).
 func (w *walk) resetBossForms() {
 	for g, entry := range w.bossGUIDs {
-		w.bossForms[g] = []uint32{entry}
+		// The identity form is the row's canonical entry, but for an any_of row the unit that stays active across the
+		// wipe is the alternative: resetting to the canonical id would make the retry's first sighting read as one
+		// entry change (phase 2) when the boss never changed entry.
+		first := entry
+		if forms := w.bossForms[g]; len(forms) > 0 {
+			if last := forms[len(forms)-1]; last != entry && w.bossCanonicalEntry(0, last) == entry {
+				first = last
+			}
+		}
+		w.bossForms[g] = []uint32{first}
 	}
 }
 
@@ -3771,8 +3823,14 @@ func (w *walk) resetBossForms() {
 // with the reason, instead of staying silent.
 func (w *walk) bossKillSummaryFor(t *bossStepTrack) raidwalk.BossKillSummary {
 	phase, phaseEntry := w.bossFormsForTrack(t)
+	active := t.active
+	if active == 0 && phaseEntry != t.entry && w.bossCanonicalEntry(0, phaseEntry) == t.entry {
+		// The frames showed the row's guid as an any_of alternative and no latch named it: the active entry is the
+		// form it reads (a phase entry, which maps to itself above, is no alternative and stays out).
+		active = phaseEntry
+	}
 	k := raidwalk.BossKillSummary{
-		Entry: t.entry, Step: t.step, Engaged: t.engaged,
+		Entry: t.entry, ActiveEntry: active, Step: t.step, Engaged: t.engaged,
 		Killed: t.killed || t.skipped, Skipped: t.skipped,
 		Phase: phase, PhaseEntry: phaseEntry,
 	}

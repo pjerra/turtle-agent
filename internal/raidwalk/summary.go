@@ -285,10 +285,14 @@ type BossSummary struct {
 // read last. `evidence` is the run leader's own `boss down` note (or the walk's skip evidence) when the kill holds,
 // and the reason when it does not.
 type BossKillSummary struct {
-	Entry   uint32 `json:"entry"`
-	Step    int    `json:"step"`
-	Engaged bool   `json:"engaged,omitempty"`
-	Killed  bool   `json:"killed"`
+	// Entry is the boss row's canonical entry (dungeon.Boss.Entry): the id the plan's name, a `boss:<ENTRY>` goal and
+	// the dashboard use. ActiveEntry is the any_of alternative the run actually saw when it was not the canonical
+	// entry (Zul'Gurub's Edge of Madness row 15082 was fought as 15084): the entry the encounter's event made active.
+	Entry       uint32 `json:"entry"`
+	ActiveEntry uint32 `json:"active_entry,omitempty"`
+	Step        int    `json:"step"`
+	Engaged     bool   `json:"engaged,omitempty"`
+	Killed      bool   `json:"killed"`
 	// Skipped is the walk's own `.bot run skip` for the step (the old-module path, where no `boss down` note
 	// arrives): it is kill evidence too.
 	Skipped    bool   `json:"skipped,omitempty"`
@@ -298,15 +302,20 @@ type BossKillSummary struct {
 }
 
 // BossKillLine is the summary.txt line of the boss kill (spec 6): the entry and step, the verdict with its reason
-// when the kill does not hold, the phase and the evidence.
+// when the kill does not hold, the phase and the evidence. An any_of row fought as a non-canonical alternative says
+// both ids, so a reader never mistakes the row's canonical entry for the unit the run met.
 func (k *BossKillSummary) Line() string {
+	who := fmt.Sprintf("%d", k.Entry)
+	if k.ActiveEntry != 0 && k.ActiveEntry != k.Entry {
+		who = fmt.Sprintf("%d (active %d)", k.Entry, k.ActiveEntry)
+	}
 	if !k.Engaged && !k.Killed && !k.Skipped {
-		return fmt.Sprintf("boss step: %d at step %d, not engaged", k.Entry, k.Step)
+		return fmt.Sprintf("boss step: %s at step %d, not engaged", who, k.Step)
 	}
 	if !k.Killed {
-		return fmt.Sprintf("boss kill: %d at step %d, not killed (%s), phase %d (%d)", k.Entry, k.Step, k.Evidence, k.Phase, k.PhaseEntry)
+		return fmt.Sprintf("boss kill: %s at step %d, not killed (%s), phase %d (%d)", who, k.Step, k.Evidence, k.Phase, k.PhaseEntry)
 	}
-	line := fmt.Sprintf("boss kill: %d at step %d, killed, phase %d (%d)", k.Entry, k.Step, k.Phase, k.PhaseEntry)
+	line := fmt.Sprintf("boss kill: %s at step %d, killed, phase %d (%d)", who, k.Step, k.Phase, k.PhaseEntry)
 	if k.Evidence != "" {
 		line += ": " + k.Evidence
 	}
