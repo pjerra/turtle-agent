@@ -65,6 +65,13 @@ type prepullAgent struct {
 	// onUnitRead, when set, runs after a unit RPC answered with a row (the self row included): a test uses it to place
 	// a clock advance inside one read (a read that blocks past the top-up's budget) and to log when reads happened.
 	onUnitRead func(name string)
+	// unitReadBlocks makes a unit read take that long: with unitReadBlockName set only that unit's reads block (the
+	// others answer at once). A read whose timeout is shorter than the block is cut at its timeout and fails, the way
+	// a store that does not answer in time does.
+	unitReadBlocks    time.Duration
+	unitReadBlockName string
+	// pauseWaitMS is the wait_ms of the last run pause the commander was asked for.
+	pauseWaitMS int
 	// paused is the run's state as the fake's `run status` answers it; holdPause=false makes a pause ACK without
 	// the run going paused. statusStep is the step the status line names (the rest before the boss row).
 	paused      bool
@@ -298,6 +305,15 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		if err != nil {
 			return err
 		}
+		if a.unitReadBlocks > 0 && (a.unitReadBlockName == "" || a.unitReadBlockName == a.nameOf(g)) {
+			if timeout < a.unitReadBlocks {
+				if timeout > 0 {
+					a.advance(timeout)
+				}
+				return fmt.Errorf("unit: the read of %s did not answer within %s", a.nameOf(g), timeout)
+			}
+			a.advance(a.unitReadBlocks)
+		}
 		if g == a.selfGUID {
 			u := objects.Unit{GUID: g, Type: "player", Name: a.selfName, InCombat: a.selfCombat}
 			for id := range a.caster {
@@ -377,8 +393,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		v = ttReplyOf(a.t, map[string]any{"units": units, "n": len(units), "trunc": a.arenaTrunc})
 	case "commander":
 		var p struct {
-			Op   string `json:"op"`
-			Verb string `json:"verb"`
+			Op     string `json:"op"`
+			Verb   string `json:"verb"`
+			WaitMS int    `json:"wait_ms"`
 		}
 		_ = json.Unmarshal(raw, &p)
 		if p.Op != "run" {
@@ -392,6 +409,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		switch p.Verb {
 		case "pause":
 			a.pauses++
+			a.pauseWaitMS = p.WaitMS
 			if a.pauseReqAt.IsZero() {
 				a.pauseReqAt = a.clock
 			}
@@ -3776,6 +3794,128 @@ func TestPrepullAuraTopupCappedSkipsVerifyWait(t *testing.T) {
 	lines := prepullNotes(w, "missing by id")
 	if len(lines) != 1 || !strings.Contains(lines[0], mt.Name) || !strings.Contains(lines[0], "22888") {
 		t.Fatalf("the tally line %q, want one naming %s and 22888", lines, mt.Name)
+	}
+}
+
+// B3: the budget is one for the whole call, so the preflight reads are bounded too: a hire read that blocks 10 s each
+// cannot spend the call's 15 s before the sends are even planned. Every read of the call gets the time left, and the
+// read the budget cuts ends the step on the budget line, not on a read failure.
+func TestPrepullAuraTopupPreflightReadsBoundedByBudget(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.unitReadBlocks = 10 * time.Second
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	begin := a.clock
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the slow store: fired %v err %v (want the walk to go on)", fired, err)
+	}
+	if took := a.clock.Sub(begin); took > prepullTopupPauseCap {
+		t.Fatalf("the call took %s, want no more than the %s budget: the preflight reads are not bounded by it",
+			took, prepullTopupPauseCap)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the slow store sent %v, want nothing once the budget is spent", a.sent)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	if len(w.prepullTopupCapped) != 1 {
+		t.Fatalf("the capped steps %v, want the pull step this status stands before", w.prepullTopupCapped)
+	}
+	for _, n := range w.notesCopy() {
+		if strings.Contains(n, "unit read") {
+			t.Fatalf("the capped call wrote a read line %q, want the step capped and no read failure", n)
+		}
+	}
+}
+
+// A read the budget cuts is the budget's business, not a broken store: the first combat recheck's commander read is cut
+// at the deadline, and the step is capped on the budget line instead of a "the unit read failed" stop.
+func TestPrepullAuraTopupBudgetCutReadCapsNotUnitFailed(t *testing.T) {
+	a := newPrepullAgent(t)
+	// Only the commander's reads block (20 s), so the cut lands in a combat recheck: every hire read answers at once, and
+	// the fake clock stands at 12 s when the first recheck starts, so its read gets the last 3 s.
+	a.unitReadBlocks = 20 * time.Second
+	a.unitReadBlockName = a.selfName
+	last := a.bots[len(a.bots)-1].Name
+	advanced := false
+	a.onUnitRead = func(name string) {
+		if name == last && !a.paused && !advanced {
+			advanced = true
+			a.advance(12 * time.Second)
+		}
+	}
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the cut combat read: fired %v err %v (want the walk to go on)", fired, err)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	if len(w.prepullTopupCapped) != 1 {
+		t.Fatalf("the capped steps %v, want the pull step this status stands before", w.prepullTopupCapped)
+	}
+	for _, n := range w.notesCopy() {
+		if strings.Contains(n, "unit read") || strings.Contains(n, "combat started") {
+			t.Fatalf("the cut read wrote %q, want the step capped instead", n)
+		}
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the cut combat read sent %v", a.sent)
+	}
+}
+
+// A batch the cap cuts mid-list leaves some of its auras on the hire: that hire is followed by the read-back and named
+// in the tally, so prepull-auras.json and the line say what it still lacks (not nothing, and not everything).
+func TestPrepullAuraTopupPartialBatchInTally(t *testing.T) {
+	a := newPrepullAgent(t)
+	// The first send spends 14 s of the 15 s budget: its landing check ends past it, so the second aura of the list
+	// meets the cap and the hire carries one of the three.
+	a.advanceOnAura = 14 * time.Second
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768,15366")
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the partial batch: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 1 {
+		t.Fatalf("the partial batch sent %v, want exactly one aura before the cap", a.sent)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	got, id, _ := strings.Cut(a.sent[0], " ")
+	lines := prepullNotes(w, "missing by id")
+	if len(lines) != 1 {
+		t.Fatalf("the tally lines %q, want exactly one", lines)
+	}
+	if !strings.Contains(lines[0], got) {
+		t.Fatalf("the tally line %q does not name %s, the hire the cap left half-sent", lines[0], got)
+	}
+	if !strings.Contains(lines[0], "23768") || !strings.Contains(lines[0], "15366") {
+		t.Fatalf("the tally line %q does not name the two ids the hire still lacks", lines[0])
+	}
+	if strings.Contains(lines[0], id) {
+		t.Fatalf("the tally line %q names %s, which this call put on the hire", lines[0], id)
+	}
+}
+
+// The run pause is asked for with the time the call has left, not the flat 10 s: 12 s spent in the reads leave 3 s.
+func TestPrepullAuraTopupPauseWaitBoundedByBudget(t *testing.T) {
+	a := newPrepullAgent(t)
+	advanced := false
+	a.onUnitRead = func(name string) {
+		if name == a.bots[0].Name && !advanced {
+			advanced = true
+			a.advance(12 * time.Second)
+		}
+	}
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the slow reads: fired %v err %v", fired, err)
+	}
+	if a.pauseWaitMS == 0 {
+		t.Fatalf("no run pause was asked for (verbs %v), so its wait was never bounded", prepullHoldVerbs(a))
+	}
+	if a.pauseWaitMS > 3000 {
+		t.Fatalf("the pause was asked for with wait_ms %d, want <= 3000 (the 3 s the reads left of the budget)", a.pauseWaitMS)
 	}
 }
 

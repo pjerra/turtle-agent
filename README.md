@@ -105,11 +105,14 @@ boss pull. It uses the fire's path (the commander join when the unit store canno
 combat recheck before each send), pauses the run only while there is something to send, and is bounded at 15 s in two
 ways so it can never hold the poll loop past a boss fire: combat is read BEFORE the pause (an in-combat raid gets no
 pause and no `.aura`), and one call stops sending 15 s after it started, before its reads, whether the run is paused by
-it, already paused or unheld. The check is repeated after each send's own combat read, and those reads are cut at the
-deadline, so a slow unit read cannot let one aura out past it. A pull step whose budget is spent is capped: every later
+it, already paused or unheld. That budget is the call's ONE budget: it is taken before the raid read, every RPC of the
+call (raid, join, roles, status, hire reads, combat rechecks, pause, sends) uses it with the time left as its own wait,
+the check is repeated after each send's own combat read, and a read it cut caps the step instead of reading as a unit
+failure. A pull step whose budget is spent is capped: every later
 status of that step reads and sends nothing (`prepull-aura: topup before step N: the 15s pause budget is spent; no
 further top-up before this pull`), and the capped call reads its sends back once with no wait, so its tally line still
-names what is short without holding the poll loop for the 5 s verify window. It never targets a dead bot, and never
+names what is short without holding the poll loop for the 5 s verify window — a hire a cut batch left half-done is read
+back and tallied with what it still lacks. It never targets a dead bot, and never
 fails the walk: combat during the top-up stops the batch
 quietly and the pull goes on. One `run.log` line names the pull and each topped bot with the ids put back and the
 cause (`death`, `expired`, or `never had`), and ends with the per-id tally of what is still short. Completion is tracked per hire: each hire is read once per pull step, and
