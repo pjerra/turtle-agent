@@ -546,27 +546,36 @@ var prepullTopupReadBackMin = time.Second
 var errTopupPauseCap = errors.New("prepull-aura: top-up 15s budget spent")
 
 // prepullTopupCtx derives the context one top-up call's RPCs are made with: a real-time bound of the budget left on the
-// walk's clock, the clock the deadline was taken on (a fake clock must not become a wall deadline). A call with no
+// walk's clock, the clock the deadline was taken on (a fake clock must not become a wall deadline). The budget is the
+// context's CAUSE, so prepullTopupCut can tell the top-up's own end from the walk's (a cancelled parent): a call with no
 // budget left starts on a cut context, so not one RPC of it can wait.
 func (w *walk) prepullTopupCtx(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
 	left := deadline.Sub(w.env.now())
 	if left <= 0 {
-		tctx, cancel := context.WithCancel(ctx)
-		cancel()
-		return tctx, cancel
+		tctx, cancel := context.WithCancelCause(ctx)
+		cancel(errTopupPauseCap)
+		return tctx, func() {}
 	}
-	return context.WithTimeout(ctx, left)
+	return context.WithDeadlineCause(ctx, time.Now().Add(left), errTopupPauseCap)
 }
 
-// prepullTopupCut reports errTopupPauseCap when the call's budget ended: its context is done, or the walk's clock
-// reached the deadline the call took at entry. A read that came back empty then was cut by the budget, not answered by
-// a broken store, and the step is capped instead of stopped. Outside a top-up (no deadline) it never reports a cut.
+// prepullTopupCut reports errTopupPauseCap when the call's budget ended: its context is done for the budget's own cause,
+// or the walk's clock reached the deadline the call took at entry. A read that came back empty then was cut by the
+// budget, not answered by a broken store, and the step is capped instead of stopped. A context that is done because the
+// WALK ended (its parent was cancelled) is not a budget: the parent's own error is returned, and the caller leaves
+// without a budget line, a read-back or a record. Outside a top-up (no deadline) it never reports a cut.
 func (w *walk) prepullTopupCut(ctx context.Context) error {
 	deadline := w.prepullTopupSendDeadline
 	if deadline.IsZero() {
 		return nil
 	}
-	if ctx.Err() != nil || !w.env.now().Before(deadline) {
+	if err := ctx.Err(); err != nil {
+		if errors.Is(context.Cause(ctx), errTopupPauseCap) {
+			return errTopupPauseCap
+		}
+		return err
+	}
+	if !w.env.now().Before(deadline) {
 		return errTopupPauseCap
 	}
 	return nil
@@ -635,15 +644,19 @@ func (w *walk) prepullTopupCause(name string, missing []dungeon.Buff) string {
 //     with it and with the time left as its own wait (the pause's wait and the resume's included), so no read can spend
 //     it unseen and no RPC can outlast it. Past prepullTopupPauseCap no send of it goes out — the run held by it,
 //     "already paused", or unheld alike — and a read the budget cut caps the step instead of reading as a failure. A
-//     resume is still always sent once a pause was sent, but with its own short context (min(10 s, max(2 s, time left)):
-//     a resume that blocks past the deadline caps the call too, so it is the last RPC of it, not one that extends it. A
+//     resume is still always sent once a pause was SENT, whatever its answer, but with its own short context
+//     (min(10 s, max(2 s, time left)): a resume that blocks past the deadline caps the call too, so it is the last RPC
+//     of it, not one that extends it; a walk cancelled around the pause resumes on a fresh 2 s window instead. A
 //     pull step whose budget is spent is capped (B2): prepullTopupSettled answers true for it, so every later status of
 //     that pull reads nothing and sends nothing, and one line says so. That is what keeps the poll loop free for the
 //     run's own lines (a4-1: the loop sat in the top-up while the run passed the boss fire's row); a capped call also
 //     waits for nothing after its last send — one immediate read-back names what is short, the 5 s verify poll is
 //     skipped, and a hire a cut batch left half-done is read back and tallied too. A call that is not capped verifies
 //     for at most the time its budget has left, and the verify window's own end (a context deadline, or the walk's
-//     clock) never skips the record: the tally line and prepull-auras.json are always written;
+//     clock) never skips the record: the tally line and prepull-auras.json are always written. A hire the window ended
+//     INSIDE its read is unread, not a hire missing its whole list (its record keeps the earlier read, and it does not
+//     count toward the give-up). A walk that was itself cancelled is the one exception: it writes no budget line, takes
+//     no read-back and leaves no record, and only the resume goes out;
 //   - nothing here fails the walk. A raid read, a join, a role or a unit read, a send and a read-back that does not
 //     land are a run.log line, never a stop: a missed top-up is the run the walk was already going to have, while the
 //     boss-row fire stays fail-closed.
@@ -676,9 +689,10 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	w.prepullTopupSendDeadline = sendDeadline
 	defer func() { w.prepullTopupSendDeadline = time.Time{} }()
 	// pauseTried is set BEFORE the pause RPC goes out, not after its ACK: a cut pause may have reached the run (the
-	// `.bot run pause` line was sent, and the budget cut the wait for its answer), and a run left paused is worse than
-	// a resume against a run that never paused — the resume is idempotent. The boss-row fire resumes the same way
-	// (prepullAuraSendPending).
+	// `.bot run pause` line was sent, and the budget cut the wait for its answer), and so may a pause whose answer is an
+	// error, a refusal or no ACK. The resume is deferred right there, before the RPC, so every exit after an attempted
+	// pause sends it exactly once: a run left paused is worse than a resume against a run that never paused — the resume
+	// is idempotent. The boss-row fire resumes the same way (prepullAuraSendPending).
 	pauseTried := false
 	resumed := false
 	// resume puts the run back whatever ended the call. It is still sent once whenever a pause was attempted — an
@@ -695,7 +709,14 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		if left := sendDeadline.Sub(w.env.now()); left < wait {
 			wait = max(left, 2*time.Second)
 		}
-		rctx, rcancel := context.WithTimeout(ctx, wait)
+		// The walk's own cancellation ends ctx too, and a resume on a done context never goes out: the run is put back
+		// on a fresh 2 s window instead (prepullTopupCut tells the walk's end from the budget's), because a run left
+		// paused is worse than a resume nobody waited for.
+		base := ctx
+		if ctx.Err() != nil {
+			base, wait = context.WithoutCancel(ctx), 2*time.Second
+		}
+		rctx, rcancel := context.WithTimeout(base, wait)
 		defer rcancel()
 		if rep, err := w.commander(rctx, commanderReq{Op: "run", Verb: "resume", WaitMS: int(wait / time.Millisecond)}); err != nil {
 			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up failed: %v", where, err)
@@ -712,11 +733,23 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		w.prepullTopupCapStep(pullStep, where)
 		resume()
 	}
+	// ended closes the call for a read its context ended: the top-up's own budget caps the step (the budget line), and
+	// the walk's own cancellation (the parent's error, see prepullTopupCut) leaves silently — no budget line, no
+	// read-back, no record — the deferred resume still puts the run back.
+	ended := func() bool {
+		cut := w.prepullTopupCut(tctx)
+		if cut == nil {
+			return false
+		}
+		if errors.Is(cut, errTopupPauseCap) {
+			capStep()
+		}
+		return true
+	}
 	// stop ends the call: a read the budget cut is the step's cap (the budget line), never a read or combat failure; any
 	// other failure keeps its own stop line.
 	stop := func(err error) {
-		if w.prepullTopupCut(tctx) != nil {
-			capStep()
+		if ended() {
 			return
 		}
 		w.prepullAuraTopupStop(where, err)
@@ -804,8 +837,7 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 			continue
 		}
 		u, seen := port.ViewUnit(tctx, unit)
-		if w.prepullTopupCut(tctx) != nil {
-			capStep()
+		if ended() {
 			return
 		}
 		if seen && (u.Dead || u.Ghost) {
@@ -836,8 +868,7 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 			continue
 		}
 		missing, ok := dungeon.AurasMissing(tctx, port, unit, want)
-		if w.prepullTopupCut(tctx) != nil {
-			capStep()
+		if ended() {
 			return
 		}
 		if !ok {
@@ -885,6 +916,11 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		if err == nil {
 			return true
 		}
+		if ctx.Err() != nil {
+			// The walk itself ended: the read proves nothing, but this is not the top-up's budget either, so neither
+			// the budget line nor a stop line is written.
+			return false
+		}
 		if errors.Is(err, errTopupPauseCap) || w.prepullTopupCut(tctx) != nil {
 			capStep()
 			return false
@@ -906,11 +942,14 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 			pauseWait = max(int(left/time.Millisecond), 1)
 		}
 		// From here the run may be paused whatever this call returns: a pause cut by the budget sent its line, and its
-		// answer never came. See pauseTried.
+		// answer never came, and an error or a refusal may still mean the command reached the run. See pauseTried. So
+		// every exit from here resumes, whatever the answer says: a resume against a running run is a no-op, a run left
+		// paused is a dead raid. The explicit resume() after the sends still runs first, so the run is unpaused before
+		// the read-back.
 		pauseTried = true
+		defer resume()
 		if rep, err := w.commander(tctx, commanderReq{Op: "run", Verb: "pause", WaitMS: pauseWait}); err != nil {
-			if w.prepullTopupCut(tctx) != nil {
-				capStep()
+			if ended() {
 				return
 			}
 			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause failed (%v): the top-up goes out unheld", where, err)
@@ -920,7 +959,6 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was not acknowledged (%s): the top-up goes out unheld", where, rep.Reply.Line)
 		} else {
 			w.logLine(w.env.now(), fmt.Sprintf("> .bot run pause (prepull-aura, %s)", where))
-			defer resume()
 		}
 	}
 	// The combat recheck after the pause too: the pause's own round trip is long enough for a pull to start.
@@ -969,6 +1007,12 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		}
 	}
 	resume()
+	// A walk that ended takes no read-back and leaves no record: a read its cancellation cut is no evidence about the
+	// hires, and the window below is the walk's own. The resume above already put the run back, and this is not the
+	// top-up's budget, so the cap's line is not written either.
+	if ctx.Err() != nil {
+		return
+	}
 	// A resume can still hold the clock past the deadline (a slow ACK): the call's budget is spent then, so the call
 	// counts as capped — the step gets its budget line and every later status of it reads nothing — and its read-back is
 	// the ONE immediate read below, never the verify wait.
@@ -999,19 +1043,34 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	defer rbcancel()
 	// One read-back of the ids just sent: an aura the store does not show is on disk as missing, so the record says so
 	// instead of trusting a send that left a bot short. over is how many sent hires still lack one. unread names the
-	// hires the window ended before: a read under a done context fails, and failing it would overwrite what an earlier
-	// read of that hire showed with "missing its whole list" (and let the per-hire give-up fire early), so the pass
-	// stops there and leaves those hires exactly as they were.
+	// hires the window ended before or inside: a read under a done context fails, and failing it would overwrite what an
+	// earlier read of that hire showed with "missing its whole list" (and let the per-hire give-up fire early), so the
+	// pass stops there and leaves those hires exactly as they were.
 	readBack := func() (over int, unread []string) {
+		// The window (or the walk) ended: the reads from here on are no reads of the hires.
+		ended := func() bool { return rbctx.Err() != nil || ctx.Err() != nil }
+		rest := func(n int) []string {
+			out := make([]string, 0, len(sent)-n)
+			for _, j := range sent[n:] {
+				out = append(out, targets[j].rec.Bot)
+			}
+			return out
+		}
 		for n, i := range sent {
-			if rbctx.Err() != nil {
-				for _, j := range sent[n:] {
-					unread = append(unread, targets[j].rec.Bot)
-				}
+			if ended() {
+				unread = append(unread, rest(n)...)
 				break
 			}
 			tg := &targets[i]
 			missing, others, seen := dungeon.AurasRead(rbctx, port, tg.unit, tg.want)
+			if !seen && ended() {
+				// The window ended INSIDE the call: AurasRead collapses the call's own error into !seen, so the
+				// context is the only evidence there is, and a hire straddling the window is unread — never a hire
+				// missing its whole list. Its record keeps what the earlier read showed, it is not counted short and
+				// it does not count toward the per-step give-up.
+				unread = append(unread, rest(n)...)
+				break
+			}
 			if !seen {
 				missing, others = tg.want, nil
 			}
@@ -1035,18 +1094,23 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		for {
 			var over int
 			over, unread = readBack()
-			if over == 0 || !w.env.now().Before(rbDeadline) || rbctx.Err() != nil {
+			if over == 0 || !w.env.now().Before(rbDeadline) || rbctx.Err() != nil || ctx.Err() != nil {
 				break
 			}
 			if err := w.env.sleep(rbctx, prepullAuraVerifyPoll); err != nil {
 				// The window ended between two polls (rbctx is the window): what the last read showed is written below.
-				if rbctx.Err() != nil {
+				if rbctx.Err() != nil || ctx.Err() != nil {
 					break
 				}
 				w.prepullAuraTopupStop(where, err)
 				return
 			}
 		}
+	}
+	// The walk ended inside the read-back: it leaves without the record, as it does before the pass (a cancelled walk's
+	// reads say nothing about the hires). The resume already went out.
+	if ctx.Err() != nil {
+		return
 	}
 	// The step's one line, written after the read-back so it can name what is still short per id: a line read as
 	// "26-31 of 39 carry their lists" says nothing about WHICH id the short bots miss, and the per-bot tolerance

@@ -70,6 +70,9 @@ type prepullAgent struct {
 	// a store that does not answer in time does.
 	unitReadBlocks    time.Duration
 	unitReadBlockName string
+	// unitReadHold names the bots whose unit read blocks until the call's context is done and then fails WITH IT, the
+	// way slotClient.Call selects on the context: a store the read-back's window ends inside.
+	unitReadHold map[string]bool
 	// pauseWaitMS is the wait_ms of the last run pause the commander was asked for.
 	pauseWaitMS int
 	// paused is the run's state as the fake's `run status` answers it; holdPause=false makes a pause ACK without
@@ -91,17 +94,22 @@ type prepullAgent struct {
 	botStateRefused bool
 	gmLines         []string
 	eventLines      []events.Event // the system lines `.bot roster` queued, served by the events RPC
-	// combat is what the party's unit rows report. combatOnPause starts it when the pause holds; combatAfter
-	// starts it after that many gm_aura calls (0: never).
-	combat        bool
-	combatOnPause bool
-	combatAfter   int
-	sends         int
+	// combat is what the party's unit rows report. combatOnPause starts it when the pause holds; combatOnPauseTry
+	// starts it with the pause RPC itself, whatever that answers (a pull can start inside the pause's round trip, and
+	// the recheck after the pause is what catches it); combatAfter starts it after that many gm_aura calls (0: never).
+	combat           bool
+	combatOnPause    bool
+	combatOnPauseTry bool
+	combatAfter      int
+	sends            int
 
-	// pauseErr, pauseRefused and resumeErr are the commander's own failures/refusals.
+	// pauseErr, pauseRefused and resumeErr are the commander's own failures/refusals. onPause and onResume run with
+	// that RPC (a test cancels the walk's context at the pause, or arms the read-back's cut at the resume).
 	pauseErr       error
 	pauseRefused   string
 	resumeErr      error
+	onPause        func()
+	onResume       func()
 	advanceOnPause time.Duration // if > 0, advances a.clock on each run pause call
 	// advanceOnResume, if > 0, advances a.clock on each run resume call (a resume whose ACK outlasts the top-up's
 	// budget), and resumeWaitMS is the wait_ms of the last resume the commander was asked for.
@@ -342,6 +350,15 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		if _, ok := a.auras[g]; !ok || !a.answers {
 			return errors.New("unit: no such unit")
 		}
+		if a.unitReadHold[a.nameOf(g)] {
+			// The store does not answer inside the call's window: the real client returns the context's own error the
+			// moment it is done, never the last row it had.
+			if ctx.Done() == nil {
+				return errors.New("unit: the read of " + a.nameOf(g) + " was asked to hold on a context that cannot end")
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}
 		if a.silent[a.nameOf(g)] || (!a.readyAt.IsZero() && a.clock.Before(a.readyAt)) {
 			return errors.New("unit: no such unit")
 		}
@@ -425,6 +442,12 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			if a.advanceOnPause > 0 {
 				a.advance(a.advanceOnPause)
 			}
+			if a.onPause != nil {
+				a.onPause()
+			}
+			if a.combatOnPauseTry {
+				a.combat = true
+			}
 			if a.pauseErr != nil {
 				return a.pauseErr
 			}
@@ -445,6 +468,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			a.resumeWaitMS = p.WaitMS
 			if a.advanceOnResume > 0 {
 				a.advance(a.advanceOnResume)
+			}
+			if a.onResume != nil {
+				a.onResume()
 			}
 			if a.resumeErr != nil {
 				return a.resumeErr
@@ -4341,5 +4367,131 @@ func TestPrepullAuraTopupReadBackExpiryKeepsEarlierReads(t *testing.T) {
 	}
 	if w.prepullTopupCapped[2] {
 		t.Fatalf("the step was capped, but this call only ran out of read-back window")
+	}
+}
+
+// (r5 HIGH, Codex) A pause whose answer is an error or a refusal may still have reached the run, and the combat recheck
+// after it can fail for a reason that is not the budget: every exit after an ATTEMPTED pause resumes. On 2ef89c33 the
+// resume was deferred only after an acknowledged pause, so a refused pause followed by a pull left the run PAUSED at the
+// pull — a dead raid. Both `pause` and `resume` must go out, and nothing may be sent.
+func TestPrepullAuraTopupPauseRefusedThenCombatFailStillResumes(t *testing.T) {
+	a := newPrepullAgent(t)
+	// The pause is refused, and the pull starts during its round trip: the recheck after the pause is what sees it.
+	a.pauseRefused = "the player holds the run"
+	a.combatOnPauseTry = true
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the refused pause: fired %v err %v", fired, err)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("the run verbs %q, want pause resume: a pause that was attempted is resumed whatever its answer", got)
+	}
+	if a.paused {
+		t.Fatal("the run was left paused after the top-up")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the combat recheck sent %v, want nothing", a.sent)
+	}
+	if lines := prepullNotes(w, "combat"); len(lines) != 1 {
+		t.Fatalf("the combat lines %q, want exactly one naming the pull", lines)
+	}
+}
+
+// (r5 HIGH, agy) The read-back's window ends INSIDE the AurasRead of a hire: the call answers no row because its
+// context was cut, not because the hire lacks its list. AurasRead collapses the call's error into !seen, so the hire must
+// be UNREAD — its record keeps what the earlier read showed, it is not counted short and it does not count toward the
+// per-step give-up. On 2ef89c33 !seen rewrote it as missing everything.
+func TestPrepullAuraTopupReadBackCutInsideCallIsUnread(t *testing.T) {
+	a := newPrepullAgent(t)
+	// Only Mtbot and Otbot lack the ids: the call sends to exactly those two, and the read-back reads exactly those two.
+	for _, b := range a.bots[2:] {
+		a.auras[b.GUID][22888] = true
+		a.auras[b.GUID][23768] = true
+	}
+	oldWait, oldFloor := prepullAuraVerifyWait, prepullTopupReadBackMin
+	prepullAuraVerifyWait, prepullTopupReadBackMin = 100*time.Millisecond, 100*time.Millisecond
+	defer func() { prepullAuraVerifyWait, prepullTopupReadBackMin = oldWait, oldFloor }()
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768")
+	mt, ot := a.bots[0].Name, a.bots[1].Name
+	// The read-back's read of the first hire starts inside the window and is still running when it ends: armed at the
+	// resume, which is the last RPC before the read-back (no role or aura read of the call is held).
+	a.onResume = func() { a.unitReadHold = map[string]bool{mt: true} }
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the cut read-back: fired %v err %v", fired, err)
+	}
+	if want := mt + " 22888 " + mt + " 23768 " + ot + " 22888 " + ot + " 23768"; strings.Join(a.sent, " ") != want {
+		t.Fatalf("the call sent %v, want the two short hires' two ids each (%s)", a.sent, want)
+	}
+	if a.sends == 0 {
+		t.Fatal("the call sent nothing")
+	}
+	lines := prepullNotes(w, "topup before step 2:")
+	if len(lines) != 1 {
+		t.Fatalf("the top-up lines %q, want exactly one", lines)
+	}
+	if !strings.Contains(lines[0], "; read-back cut, not read: "+mt+", "+ot) {
+		t.Fatalf("the line %q does not name %s and %s as not read back", lines[0], mt, ot)
+	}
+	if strings.Contains(lines[0], "missing by id") {
+		t.Fatalf("the line %q counts a hire short, but the window cut the reads", lines[0])
+	}
+	if strings.Contains(lines[0], "giving up") {
+		t.Fatalf("the line %q gives a hire up for the step off a read it never got", lines[0])
+	}
+	// The record keeps the earlier read: no hire is rewritten as missing its whole list, and neither is marked done.
+	f := readPrepullAuraFile(t, w)
+	if len(f.Bots) != 2 {
+		t.Fatalf("the record holds %d bot(s), want the two hires the call sent to: %+v", len(f.Bots), f.Bots)
+	}
+	for _, rec := range f.Bots {
+		if len(rec.Missing) != 0 || len(rec.Seen) != 0 {
+			t.Fatalf("%s: missing %v seen %v, want the earlier read untouched (the window ended inside the read-back)",
+				rec.Bot, rec.Missing, rec.Seen)
+		}
+	}
+	for _, name := range []string{mt, ot} {
+		if w.prepullTopupMark(2, name).read {
+			t.Fatalf("%s was marked done for the step off a read-back it never got", name)
+		}
+	}
+	if w.prepullTopupCapped[2] {
+		t.Fatal("the step was capped, but this call only ran out of read-back window")
+	}
+}
+
+// (r5 MEDIUM, agy) The walk's own context is cancelled while the top-up holds the pause: that is not the top-up's 15 s
+// budget. No budget line, no read-back, no record — and the run is still resumed, on a fresh 2 s window, because the
+// walk's cancelled context would never carry the line. On 2ef89c33 the cancel was read as a capped budget: it logged
+// "the 15s pause budget is spent", ran the read-back against a cancelled context and wrote a partial record.
+func TestPrepullAuraTopupParentCancelNotBudget(t *testing.T) {
+	a := newPrepullAgent(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The walk is cancelled with the pause RPC: the run is paused, and the recheck after it reads on a dead context.
+	a.onPause = cancel
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the cancelled walk: fired %v err %v", fired, err)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("the run verbs %q, want pause resume: a run paused by a cancelled walk is still resumed", got)
+	}
+	if a.paused {
+		t.Fatal("the run was left paused by the cancelled walk")
+	}
+	if a.resumeWaitMS != 2000 {
+		t.Fatalf("the resume waited %dms, want the fresh 2 s window (the walk's context is done)", a.resumeWaitMS)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 0 {
+		t.Fatalf("a cancelled walk wrote the budget line %q, want none", lines)
+	}
+	if lines := prepullNotes(w, "topup before step 2:"); len(lines) != 0 {
+		t.Fatalf("a cancelled walk wrote the top-up lines %q, want none", lines)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("a cancelled walk sent %v, want nothing", a.sent)
+	}
+	if _, err := os.Stat(filepath.Join(w.outDir, prepullAuraFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%s exists after a cancelled walk (stat error %v), want no record", prepullAuraFileName, err)
 	}
 }
