@@ -57,7 +57,33 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--paused-wait` | `10m` | How long a pause that is not a regroup may last. | `--paused-wait 5m` |
 | `--reset-wait` | `5m` | How long a wipe may wait for the instance to reset. | `--reset-wait 3m` |
 | `--revive-at-raid` | on | Revive the raid at the revive point: summon hires more than 100 yd away to it, and wait up to 60s for every hire to gather. `false` is the old revive in place. | `--revive-at-raid=false` |
+| `--no-gm-revive` | off | A strict run: never send `.revive` (nor the revive recipe's `.go xyz` and `.summon`), so no GM help recovers the raid. Implies `--no-place-revive` (the placement's fast fail stays: half or more of the hires dead is exit 29). A wipe recovers only by the run's own corpse run (the run's self-regroup), else the walk ends with exit 19; a near-wipe rests and resumes with the dead hires left to the run. A missed `.revive` path fails the walk (exit 18) instead of sending. | `--no-gm-revive` |
 | `--patrols` | none | A tb-patrols file for the revive quiet check. | `--patrols <file>` |
+
+### Strict runs
+
+`--no-gm-revive` is the walk the owner's strict runs ask for: no GM help after a wipe, whatever the log says. The five
+`.revive` call sites the walk had — the wipe recipe (`reviveHires`, reached from `endWipe`, `recoverWipe` and a
+near-wipe with every hire dead), the near-wipe revive of the dead hires, the `--wipe-end fast` bare revive, the
+placement revive and any future `w.gm(".revive ...")` — are all off, and `w.gm` fails closed on a `.revive` line
+(exit 18) so a missed path is a refusal, never a silent GM assist. The `--revive-at-raid` summons go with them: they
+follow a GM revive and there is none.
+
+What happens instead:
+
+- **A wipe with the run regrouping by itself** (TB released the party and runs it back — the corpse run): the walk
+  sends nothing (no `.go xyz`, no `.summon`) and polls the frames every 5 s until every hire is alive again or the
+  recovery's deadline passes; then the existing self-regroup flow goes on and the walk counts the wipe-resume. A
+  deadline that passes ends the walk the existing recovery-timeout way (exit 19).
+- **A wipe the run does not recover by itself**: the walk stops the run, saves the commanders and the fights, waits
+  for the instance to reset (the next placement must not land in a live fight) and exits 19 (`wipe at step N (no GM
+  revive)`). `--wipe-end fast` at a boss row still skips the reset wait and leaves the dead hires dead.
+- **A near-wipe**: every hire dead means no recovery (the existing paused ending); with someone alive the walk sends
+  no `.revive`, leaves the dead hires to the run (living healers' resurrections or TB's own regroup), rests and
+  resumes as usual.
+
+The summary carries `no_gm_revive: true`; `--dry-run` prints the strict line. The placement's implied
+`--no-place-revive` keeps its fast fail: half or more of the hires dead is still exit 29, `party dead`.
 
 ## Hires and tier
 

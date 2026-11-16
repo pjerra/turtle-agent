@@ -65,7 +65,7 @@ type rawFlag struct {
 
 // switchFlags are raid-walk flags that may stand alone (a bare --place turns it on).
 var switchFlags = map[string]bool{
-	"place": true, "reuse-instance": true, "dry-run": true, "revive-at-raid": true,
+	"place": true, "reuse-instance": true, "dry-run": true, "revive-at-raid": true, "no-gm-revive": true,
 	"instance-cap-fail": true, "instance-cap-unsafe": true, "instance-cap-reset": true,
 }
 

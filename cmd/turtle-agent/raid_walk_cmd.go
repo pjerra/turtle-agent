@@ -76,7 +76,7 @@ const walkPIDFile = "walk.pid"
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--no-place-revive] [--gm-instance-data LEG:"A B[;A B]"] [--prepull-aura role=ROLE:ID,ID|PRESET|FILE.json] [--prepull-aura-tolerance N] [--prepull-aura-when start|boss] [--prepull-aura-topup] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--no-gm-revive] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--practice ENTRY] [--practice-cycles N] [--practice-max 20m] [--practice-rest 30s] [--practice-boss-floor N] [--practice-sustain=on|off] [--practice-window 120s]
     [--decisions on|off] [--decisions-max-mib N]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
@@ -144,6 +144,7 @@ type raidWalkOptions struct {
 	wipeRest          time.Duration
 	wipeEndFast       bool          // --wipe-end fast: a wipe is not reset or revived by the recipe here (the autopilot discards the copy); the dead hires get a bare revive
 	reviveAtRaid      bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
+	noGMRevive        bool          // --no-gm-revive: a strict run that never sends `.revive` (nor the revive recipe's `.go xyz`/`.summon`); implies --no-place-revive
 	hireSettle        time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
 	capPerAccount     int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
 	capGiven          bool          // --instance-cap-per-account was given: it wins over instance-cap-per-account.json's value
@@ -304,6 +305,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&wipeEnd, "wipe-end", "", "\"fast\": a wipe that ends the walk at a boss row skips the reset wait and the revive recipe (the copy is discarded: the autopilot's fresh-instance relaunch) and revives only the dead hires; the default keeps the recipe")
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.BoolVar(&o.reviveAtRaid, "revive-at-raid", true, "a wipe recovery revives the raid AT the revive point: a hire revived more than 100 yd away is summoned to it, and the resume waits up to 60s for every hire to be in range and out of combat (false: the old revive in place)")
+	fs.BoolVar(&o.noGMRevive, "no-gm-revive", false, "a strict run: never send `.revive` (nor the revive recipe's `.go xyz` and `.summon`), so no GM help recovers the raid. Implies --no-place-revive (the fast fail stays: half or more of the hires dead is exit 29, \"party dead\"). A wipe recovers only by the run's own corpse run (the run's self-regroup), else the walk ends (exit 19); a near-wipe rests and resumes with the dead hires left to the run (living healers' resurrections or TB's own regroup); a missed `.revive` path fails the walk (exit 18) instead of sending")
 	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait at most after the last hire for its join summons before the refit and the bind (the wait ends when every hire has joined; 0 skips it)")
 	fs.IntVar(&o.capPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour (stock 5; a patched test core may be 30). The server's entry in instance-cap-per-account.json is used when this flag is not given")
 	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at the cap's raid count (one below --instance-cap-per-account) in the last hour on the server, wait up to this long for the oldest to age out, then exit 26 (0: no wait, exit 26 at that count)")
@@ -579,6 +581,11 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	if o.prepullAuraTopup && len(o.prepullAura) == 0 {
 		fmt.Fprintf(stderr, "raid-walk: --prepull-aura-topup needs --prepull-aura\n")
 		return o, exitUsage
+	}
+	// A strict run revives nobody, so the placement's revive would break it: --no-gm-revive implies --no-place-revive
+	// (the placement's fast fail stays).
+	if o.noGMRevive {
+		o.noPlaceRevive = true
 	}
 	return o, exitOK
 }
@@ -1841,8 +1848,14 @@ func dashboardWarning(err error) string {
 }
 
 // gm sends one GM line, but only after raidwalk.AllowedLine passes it: a refusal is a programming
-// error that stops the walk and prints the line (spec 3.6).
+// error that stops the walk and prints the line (spec 3.6). A --no-gm-revive walk fails closed on
+// `.revive` here: every revive path checks the flag first, so this catches a missed one.
 func (w *walk) gm(ctx context.Context, line string) error {
+	if w.opts.noGMRevive {
+		if trimmed := strings.TrimSpace(line); len(trimmed) >= len(".revive") && strings.EqualFold(trimmed[:len(".revive")], ".revive") {
+			return stopf(exitRaidWalkFailed, "raid-walk refused .revive under --no-gm-revive: %s", line)
+		}
+	}
 	if !raidwalk.AllowedLine(line, w.hires, w.partySet, w.plan.Map) {
 		return stopf(exitRaidWalkFailed, "raid-walk refused to send a GM line outside the allow-list: %s", line)
 	}
@@ -2014,6 +2027,9 @@ func (w *walk) printPlan(out io.Writer) {
 		untilLine = fmt.Sprintf("%s (the place shortens it to %s)", untilLine, w.untilLabel)
 	}
 	fmt.Fprintf(out, "until %s; from %s; enter %s; server %s slot %s holder %s\n", untilLine, from, w.opts.enter, w.opts.server, slot, w.opts.holder)
+	if w.opts.noGMRevive {
+		fmt.Fprintf(out, "strict: --no-gm-revive: no .revive is sent; a wipe recovers only by the run's own corpse run (self-regroup), else the walk ends; a near-wipe rests and resumes without reviving; --no-place-revive is on\n")
+	}
 	outDir := slots.ExpandTilde(w.opts.out)
 	if outDir == "" {
 		outDir = "<out>"
@@ -2225,6 +2241,7 @@ func (w *walk) finish(code int) {
 		GMInstanceDataUnsent: w.gmInstanceDataUnsent,
 		SpecFailed:           w.specFailed,
 		ReviveBrought:        len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
+		NoGMRevive: w.opts.noGMRevive,
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()
