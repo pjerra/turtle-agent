@@ -62,6 +62,9 @@ type prepullAgent struct {
 	pauses        int
 	// unitReads counts the unit RPC calls: the top-up's once-per-pull-step read is told from a second read by it.
 	unitReads int
+	// onUnitRead, when set, runs after a unit RPC answered with a row (the self row included): a test uses it to place
+	// a clock advance inside one read (a read that blocks past the top-up's budget) and to log when reads happened.
+	onUnitRead func(name string)
 	// paused is the run's state as the fake's `run status` answers it; holdPause=false makes a pause ACK without
 	// the run going paused. statusStep is the step the status line names (the rest before the boss row).
 	paused      bool
@@ -301,6 +304,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 				u.Auras = append(u.Auras, objects.Aura{SpellID: id})
 			}
 			v = u
+			if a.onUnitRead != nil {
+				a.onUnitRead(a.selfName)
+			}
 			break
 		}
 		if a.storeAfterAppear && !a.appeared {
@@ -319,6 +325,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		}
 		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g],
 			InCombat: a.combat || a.combatBots[g], Dead: a.deadBots[a.nameOf(g)], Auras: a.aurasOf(g)}
+		if a.onUnitRead != nil {
+			a.onUnitRead(a.nameOf(g))
+		}
 	case "gm_aura":
 		var p struct {
 			GUID    string `json:"guid"`
@@ -3664,6 +3673,109 @@ func TestPrepullAuraTopupWallBudgetWhenAlreadyPaused(t *testing.T) {
 	}
 	if len(a.sent) != sent {
 		t.Fatalf("the capped step sent %v", a.sent[sent:])
+	}
+}
+
+// B3: the budget bounds a send's own combat read too. The top-up's two combat rechecks run before the send loop; the
+// combat read inside the first SendAura is the one that outlasts the 15 s budget and still answers clear. The aura
+// must not go out: the step is capped with the same line the send loop writes, and the run pause is still resumed.
+func TestPrepullAuraTopupDeadlineDuringCombatReadSendsNothing(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// The last watched member's reads while the run is held: the post-pause combat recheck, then SendAura's own
+	// combat read. Only that second one blocks, past the budget, and comes back clear (no combat).
+	last := a.bots[len(a.bots)-1].Name
+	read := 0
+	a.onUnitRead = func(name string) {
+		if name != last || !a.paused {
+			return
+		}
+		read++
+		if read == 2 {
+			a.advance(20 * time.Second)
+		}
+	}
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the blocked combat read: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the blocked combat read sent %v, want no aura after the 15s budget", a.sent)
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	if len(w.prepullTopupCapped) != 1 {
+		t.Fatalf("the capped steps %v, want only the pull step this status stands before", w.prepullTopupCapped)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("run verbs %q, want the pause and its resume", got)
+	}
+}
+
+// The capped step does not wait out the read-back: it reads the sent hires once, writes the tally line and leaves the
+// poll loop, instead of polling for up to prepullAuraVerifyWait after the budget is spent.
+func TestPrepullAuraTopupCappedSkipsVerifyWait(t *testing.T) {
+	a := newPrepullAgent(t)
+	// Mtbot never shows the id, so its landing check misses and the batch goes on short: the step is capped after two
+	// sends and one of them still lacks its aura, which is what the old read-back waited out.
+	mt := a.bots[0]
+	a.drop[mt.GUID] = map[uint32]bool{22888: true}
+	a.advanceOnAura = 4 * time.Second
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	var sleeps []time.Duration
+	begins := []time.Time{}
+	origSleep := w.env.sleep
+	w.env.sleep = func(ctx context.Context, d time.Duration) error {
+		begins = append(begins, a.clock)
+		sleeps = append(sleeps, d)
+		return origSleep(ctx, d)
+	}
+	mtReads := []time.Time{}
+	a.onUnitRead = func(name string) {
+		if name == mt.Name {
+			mtReads = append(mtReads, a.clock)
+		}
+	}
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("the capped top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatalf("the capped top-up sent nothing, so its read-back was never taken")
+	}
+	if lines := prepullNotes(w, "the 15s pause budget is spent"); len(lines) != 1 {
+		t.Fatalf("the budget line %q, want exactly one", lines)
+	}
+	if len(sleeps) == 0 {
+		t.Fatalf("the fake recorded no sleep, so the wait check would pass vacuously")
+	}
+	for i, d := range sleeps {
+		if d == prepullAuraVerifyPoll {
+			t.Fatalf("the capped step slept the verify poll %s at %s (wanted none after the cap): %v",
+				d, begins[i].Add(d).Format("15:04:05.000"), sleeps)
+		}
+	}
+	// The call ends where its last landing check did: nothing was waited after the cap.
+	waitEnd := begins[len(begins)-1].Add(sleeps[len(sleeps)-1])
+	if !a.clock.Equal(waitEnd) {
+		t.Fatalf("the call ended at %s, its last landing check at %s: %s waited after the cap",
+			a.clock.Format("15:04:05.000"), waitEnd.Format("15:04:05.000"), a.clock.Sub(waitEnd))
+	}
+	// One read-back per sent hire: Mtbot is read once more (the read-back) after the batch's last send, whose own
+	// landing check reads that hire, not Mtbot.
+	var after []time.Time
+	for _, at := range mtReads {
+		if !at.Before(waitEnd) {
+			after = append(after, at)
+		}
+	}
+	if len(after) != 1 {
+		t.Fatalf("Mtbot was read %d time(s) after the cap, want exactly one read-back: %v", len(after), after)
+	}
+	lines := prepullNotes(w, "missing by id")
+	if len(lines) != 1 || !strings.Contains(lines[0], mt.Name) || !strings.Contains(lines[0], "22888") {
+		t.Fatalf("the tally line %q, want one naming %s and 22888", lines, mt.Name)
 	}
 }
 
