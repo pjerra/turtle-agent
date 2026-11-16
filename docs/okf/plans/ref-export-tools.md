@@ -38,7 +38,7 @@ Usage: `turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-compan
 | `--approach-hops` | `false` | With `--mmaps`, also cut the hop to a pull, boss, or hold over 50 yd into move rows. |
 | `--floor-aware` | `false` | With `--mmaps`, cut hops the floor-aware way instead. |
 | `--skip-legs` | _(empty)_ | Leg names (comma list) left out of the rows. Example: `--skip-legs farraki_arena,zeljeb`. |
-| `--with-optional` | _(empty)_ | Optional leg names written into the rows anyway. Example: `--with-optional gahzrilla`. |
+| `--with-optional` | _(empty)_ | Optional leg names written into the rows anyway. Example: `--with-optional gahzrilla`. Its warning names every need with its count and the GM lines (a multi-item leg: `--with-optional gahzranka` warns `give Mudskunk Lure (19974) and 5x Zulian Mudskunk (19975) ... (GM .additem 19974; .additem 19975 5, ...)`). |
 | `--with-legs` | _(empty)_ | `skip_export` leg names written into the rows anyway. |
 | `--force` | `false` | Let `--out` replace an existing file (never edit an applied migration). |
 

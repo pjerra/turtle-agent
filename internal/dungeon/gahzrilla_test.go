@@ -95,6 +95,47 @@ func TestGongLegOrderAndHolder(t *testing.T) {
 	}
 }
 
+// TestRemoteOptionalLegNeedsEveryCount: a holder with the lure and 2x Zulian Mudskunk is skipped (the text names
+// "has 2"); with 5 the leg runs. Every need must be in the same holder's bags.
+func TestRemoteOptionalLegNeedsEveryCount(t *testing.T) {
+	multiLeg := func() Leg {
+		l := gongLeg()
+		l.Optional = &OptionalLeg{Item: itMallet, Name: "Mallet of Zul'Farrak", Also: []ItemNeed{{Item: 5678, Count: 5, Name: "Reagent"}}}
+		return l
+	}
+	multiPlan := func() *Plan { return remotePlan(multiLeg(), Leg{Name: "after", To: Point{100, 0, 0}}) }
+
+	g := gongGame(t)
+	g.bag("Tanky")[itMallet] = 1
+	g.bag("Tanky")[5678] = 2
+	g.bag("Magey")[itMallet] = 1
+	g.bag("Magey")[5678] = 2
+	rep, err := runCarrier(t, g, multiPlan(), objOpts())
+	if err != nil || rep.State != "done" || rep.Error != "" {
+		t.Fatalf("a skipped optional leg is no failure: %v %s %s", err, rep.State, rep.Error)
+	}
+	if len(rep.Legs) != 2 || rep.Legs[1].Name != "after" || rep.Legs[1].Result != "done" {
+		t.Fatalf("legs %+v", rep.Legs)
+	}
+	if got := rep.Legs[0].Result; !strings.Contains(got, "skipped: no 5x Reagent (5678) in the bags of Magey (has 2)") {
+		t.Fatalf("result %q", got)
+	}
+	if g.indexOf("cmd pullback") >= 0 || g.indexOf("cmd use") >= 0 {
+		t.Fatalf("the skipped leg did something: %v", g.orders)
+	}
+
+	g = gongGame(t)
+	g.bag("Tanky")[itMallet] = 1
+	g.bag("Tanky")[5678] = 5
+	rep, err = runCarrier(t, g, multiPlan(), objOpts())
+	if err != nil || rep.State != "done" {
+		t.Fatalf("holds it: %v\n%s", err, notesOf(rep))
+	}
+	if len(rep.Legs) != 2 || rep.Legs[0].Result != "done" || rep.Legs[1].Result != "done" {
+		t.Fatalf("legs %+v", rep.Legs)
+	}
+}
+
 // Nobody carries the Mallet: the leg is skipped as a whole with the reason in its result, the run goes on and does not fail, and no pack is
 // pulled, no gong rung.
 func TestOptionalLegIsSkippedWithoutTheMallet(t *testing.T) {
@@ -145,8 +186,10 @@ func TestNonOptionalLegStillFailsWithoutItsItem(t *testing.T) {
 	}
 }
 
-// The plan format: optional {item, name} reads, writes back, and must name an item a use_object step of the leg requires.
-func TestPlanOptionalLeg(t *testing.T) {
+// TestOptionalLegAlsoValidation: the plan format's optional also entries are the extra items the leg consumes
+// (a spell reagent no step names). Each differs from the primary item and from the others, counts are 0-20,
+// at most 4 entries; the primary item must still name an item a use_object step of the leg requires.
+func TestOptionalLegAlsoValidation(t *testing.T) {
 	const src = `{"version":1,"name":"t","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"gong","to":{"x":20,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet of Zul'Farrak"},
   "steps":[{"use_object":{"entry":141832,"requires_item":{"entry":9240,"name":"Mallet of Zul'Farrak"}}},{"wait_for":{"unit":{"entries":[7273],"state":"seen"},"timeout_s":30}}],
@@ -168,6 +211,34 @@ func TestPlanOptionalLeg(t *testing.T) {
 		{`"optional":{"item":9240,"name":"Mallet of Zul'Farrak"}`, `"optional":{"item":9240,"name":"x","color":1}`, "color"},
 	} {
 		if _, err := Parse("t.json", []byte(strings.Replace(src, c.from, c.to, 1))); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.to, err)
+		}
+	}
+	// Also entries: each is an extra item the leg consumes (a spell reagent no step names). Each differs from the
+	// primary item and from the others, counts are 0-20, at most 4 entries; count 0 means 1.
+	const alsoSrc = `{"version":1,"name":"t","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"gong","to":{"x":20,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet of Zul'Farrak","also":[{"item":5678,"count":5,"name":"Reagent"}]},
+  "steps":[{"use_object":{"entry":141832,"requires_item":{"entry":9240,"name":"Mallet of Zul'Farrak"}}},{"wait_for":{"unit":{"entries":[7273],"state":"seen"},"timeout_s":30}}],
+  "boss":{"entry":7273,"position":{"x":60,"y":0,"z":0}}}]}`
+	p = mustPlan(t, alsoSrc)
+	if got := p.Legs[0].Optional.Needs(); len(got) != 2 || got[0] != (ItemNeed{Item: 9240, Count: 1, Name: "Mallet of Zul'Farrak"}) || got[1] != (ItemNeed{Item: 5678, Count: 5, Name: "Reagent"}) {
+		t.Fatalf("Needs %+v", got)
+	}
+	if q, err := Parse("t.json", func() []byte { b, _ := Marshal(p); return b }()); err != nil || len(q.Legs[0].Optional.Also) != 1 {
+		t.Fatalf("also round trip: %v", err)
+	}
+	if got := (&OptionalLeg{Item: 1, Also: []ItemNeed{{Item: 2}}}).Needs(); got[1].Count != 1 {
+		t.Fatalf("count 0 means 1: %+v", got)
+	}
+	for _, c := range []struct{ to, want string }{
+		{`"also":[{"item":0}]`, "legs[0].optional.also[0].item: required"},
+		{`"also":[{"item":9240}]`, "legs[0].optional.also[0].item: 9240 is already the leg's primary optional item"},
+		{`"also":[{"item":5678},{"item":5678}]`, "legs[0].optional.also[1].item: 5678 is already an also entry"},
+		{`"also":[{"item":5678,"count":21}]`, "legs[0].optional.also[0].count: 21 is outside 0-20"},
+		{`"also":[{"item":1},{"item":2},{"item":3},{"item":4},{"item":5}]`, "legs[0].optional.also: at most 4 entries"},
+	} {
+		bad := strings.Replace(alsoSrc, `"also":[{"item":5678,"count":5,"name":"Reagent"}]`, c.to, 1)
+		if _, err := Parse("t.json", []byte(bad)); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v", c.to, err)
 		}
 	}
@@ -214,6 +285,34 @@ func TestGroupDriverSkipsAnOptionalLeg(t *testing.T) {
 	g, _ = runFixture(t)
 	g.bag = []objects.Item{{Entry: 6948, Count: 1}, staff()}
 	d = NewDriver(mustPlan(t, src), g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	if rep := d.Report(); len(rep.Legs) != 2 || rep.Legs[0].Result != "done" || len(g.used) != 1 {
+		t.Fatalf("%+v used %v", rep.Legs, g.used)
+	}
+}
+
+// TestDriverOptionalLegNeedsEveryCount (group driver): the leader with the primary item and only 2 of the 5 reagents
+// is skipped (the text names "has 2"); with 5 the leg runs.
+func TestDriverOptionalLegNeedsEveryCount(t *testing.T) {
+	mk := func(bag []objects.Item) (*fakeGame, *Plan) {
+		src := strings.Replace(runPlanKey, `{"name":"a","to":{"x":10,"y":0,"z":0},`, `{"name":"a","to":{"x":10,"y":0,"z":0},"optional":{"item":7733,"name":"Staff of Prehistoria","also":[{"item":5678,"count":5,"name":"Reagent"}]},`, 1)
+		g, _ := runFixture(t)
+		g.bag = bag
+		return g, mustPlan(t, src)
+	}
+	g, p := mk([]objects.Item{{Entry: 6948, Count: 1}, {Entry: 7733, Count: 1}, {Entry: 5678, Count: 2}})
+	d := NewDriver(p, g, Config{GM: GMNone}, g.clock())
+	if err := d.Run(context.Background(), 0); err != nil {
+		t.Fatalf("%v\n%+v", err, d.Report())
+	}
+	rep := d.Report()
+	if rep.State != "done" || len(rep.Legs) != 2 || !strings.Contains(rep.Legs[0].Result, "no 5x Reagent (5678) in the bags of the leader (has 2)") || rep.Legs[1].Result != "done" || len(g.used) != 0 {
+		t.Fatalf("%+v used %v", rep.Legs, g.used)
+	}
+	g, p = mk([]objects.Item{{Entry: 6948, Count: 1}, {Entry: 7733, Count: 1}, {Entry: 5678, Count: 5}})
+	d = NewDriver(p, g, Config{GM: GMNone}, g.clock())
 	if err := d.Run(context.Background(), 0); err != nil {
 		t.Fatalf("%v\n%+v", err, d.Report())
 	}

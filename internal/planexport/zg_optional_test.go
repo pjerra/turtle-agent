@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -95,11 +96,10 @@ func TestZulGurubEdgeOfMadnessLeg(t *testing.T) {
 	}
 }
 
-// TestZulGurubGahzrankaLeg checks that zul_gurub.json has the optional gahzranka leg at the end
-// of legs (after hakkar, so existing leg indices stay unchanged), with optional item 19974,
-// use_item 19974, a dry beach stand near Gahz'ranka's beach, wait_for 15114, and boss row 15114 at
-// the beach (-11688.95, -1777.21, 12.59).
-func TestZulGurubGahzrankaLeg(t *testing.T) {
+// TestZulGurubGahzrankaLegNeedsFiveMudskunk: the loaded gahzranka leg's Optional.Needs() is [{19974 1} {19975 5}],
+// and the --with-optional gahzranka export warning names "5x Zulian Mudskunk (19975)" and ".additem 19975 5".
+// It fails without the change (no Also list, no Needs, no warning counts).
+func TestZulGurubGahzrankaLegNeedsFiveMudskunk(t *testing.T) {
 	p := loadZGPlan(t)
 	outer := findLegIndex(p, "hakkar_outer")
 	hakkar := findLegIndex(p, "hakkar")
@@ -110,6 +110,9 @@ func TestZulGurubGahzrankaLeg(t *testing.T) {
 	leg := p.Legs[gahz]
 	if leg.Optional == nil || leg.Optional.Item != 19974 {
 		t.Fatalf("optional = %+v, want item 19974", leg.Optional)
+	}
+	if got := leg.Optional.Needs(); len(got) != 2 || got[0] != (dungeon.ItemNeed{Item: 19974, Count: 1, Name: "Mudskunk Lure"}) || got[1] != (dungeon.ItemNeed{Item: 19975, Count: 5, Name: "Zulian Mudskunk"}) {
+		t.Fatalf("Needs = %+v, want [{19974 1} {19975 5}]", got)
 	}
 	if math.Hypot(float64(leg.To.X)-(-11674), float64(leg.To.Y)-(-1757.9)) > 2 {
 		t.Fatalf("stand/to = %+v, want near (-11674, -1757.9)", leg.To)
@@ -139,19 +142,28 @@ func TestZulGurubGahzrankaLeg(t *testing.T) {
 		t.Fatalf("gahzranka missing from --with-optional export: %+v", res.Rows.Legs)
 	}
 	var gotUseItem, gotBoss bool
-	for _, s := range res.Rows.Steps {
-		if s.Leg != rowLeg {
+	for _, st := range res.Rows.Steps {
+		if st.Leg != rowLeg {
 			continue
 		}
-		if s.Kind == KindUseItem && s.Entry == 19974 {
+		if st.Kind == KindUseItem && st.Entry == 19974 {
 			gotUseItem = true
 		}
-		if s.Kind == KindBoss && s.Entry == 15114 && s.X == -11688.95 && s.Y == -1777.21 && s.Z == 12.59 {
+		if st.Kind == KindBoss && st.Entry == 15114 && st.X == -11688.95 && st.Y == -1777.21 && st.Z == 12.59 {
 			gotBoss = true
 		}
 	}
 	if !gotUseItem || !gotBoss {
 		t.Fatalf("exported gahzranka rows: gotUseItem=%v gotBoss=%v", gotUseItem, gotBoss)
+	}
+	warn := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{
+		"give Mudskunk Lure (19974) and 5x Zulian Mudskunk (19975) to the lead bot before .bot run start",
+		"GM .additem 19974; .additem 19975 5",
+	} {
+		if !strings.Contains(warn, want) {
+			t.Errorf("the --with-optional warning lacks %q:\n%s", want, warn)
+		}
 	}
 }
 
