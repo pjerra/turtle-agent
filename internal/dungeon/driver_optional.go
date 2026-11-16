@@ -46,52 +46,43 @@ func (d *Driver) skipOptionalLeg(ctx context.Context, i int) (bool, error) {
 	if o == nil {
 		return false, nil
 	}
-	if len(o.Also) == 0 {
-		// Legacy shape: one item, presence only. Today's behaviour exactly when Also is absent.
-		item := o.Ref()
-		err := d.checkItem(ctx, &item, false, func(*ItemRef, string) error { return errOptionalMissing })
-		switch {
-		case err == nil:
-			return false, nil
-		case !errors.Is(err, errOptionalMissing):
-			return false, err
-		}
-		name := d.plan.Legs[i].Name
-		result := fmt.Sprintf("skipped: no %s in the leader's bags (an optional leg: it runs only when the leader carries the item)", item)
-		now := d.clk.Now()
-		d.rep.update(func(r *Report) {
-			r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: now, Result: result})
-		})
-		d.rep.note(fmt.Sprintf("leg %d (%s): %s", i, name, result))
-		d.emit(events.KindDungeonLeg, fmt.Sprintf("leg %d %s: %s", i, name, result), map[string]any{"leg": i, "name": name, "phase": "skipped", "result": result})
-		d.st.SkipLeg()
-		return true, nil
-	}
+	// With no Also entries the loop below is the old presence check (Need count 1, never exempt, ItemRef text):
+	// byte-exact legacy behaviour.
 	// checkItem checks presence only, so wait through it for a readable list (an unknown list proves nothing),
 	// then count from that same inventory: every need at its count in one read.
 	miss := func(it *ItemRef, where string) error { return errOptionalMissing }
 	var first *ItemNeed
+	var firstRef ItemRef
 	var held int
+	legacy := len(o.Also) == 0
 	for _, nd := range o.Needs() {
 		nd := nd
 		it := ItemRef{Entry: nd.Item, Name: nd.Name}
-		if err := d.checkItem(ctx, &it, d.itemsExempt(), miss); err != nil {
+		exempt := d.itemsExempt()
+		if legacy {
+			exempt = false
+		}
+		if err := d.checkItem(ctx, &it, exempt, miss); err != nil {
 			if !errors.Is(err, errOptionalMissing) {
 				return false, err
 			}
-			first, held = &nd, d.itemCount(nd.Item)
+			first, firstRef, held = &nd, it, d.itemCount(nd.Item)
 			break
 		}
 		if n := d.itemCount(nd.Item); n < nd.Count {
-			first, held = &nd, n
+			first, firstRef, held = &nd, it, n
 			break
 		}
 	}
 	if first == nil {
 		return false, nil
 	}
+	detail := skipNeedText(first, held)
+	if legacy {
+		detail = fmt.Sprintf("no %s in the leader's bags", firstRef)
+	}
 	name := d.plan.Legs[i].Name
-	result := fmt.Sprintf("skipped: %s (an optional leg: it runs only when the leader carries the item)", skipNeedText(first, held))
+	result := fmt.Sprintf("skipped: %s (an optional leg: it runs only when the leader carries the item)", detail)
 	now := d.clk.Now()
 	d.rep.update(func(r *Report) {
 		r.Legs = append(r.Legs, LegReport{Leg: i, Name: name, Started: now, Result: result})

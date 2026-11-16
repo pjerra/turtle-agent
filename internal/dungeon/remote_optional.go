@@ -45,19 +45,7 @@ func (d *RemoteDriver) optionalLegCheck(ctx context.Context, i int) (holder, why
 	if len(names) == 0 {
 		return "", "", fmt.Errorf("leg %d (%s): optional, but there is no bot whose bags could hold %s", i, d.plan.Legs[i].Name, o.Ref())
 	}
-	if len(needs) == 1 {
-		// Legacy shape: one item, presence only, all holders named. Today's behaviour exactly when Also is absent.
-		for _, n := range names {
-			inv, err := d.carrierInv(ctx, n)
-			if err != nil {
-				return "", "", fmt.Errorf("leg %d (%s) needs %s: %w", i, d.plan.Legs[i].Name, o.Ref(), err)
-			}
-			if inv.Count(needs[0].Item) > 0 {
-				return n, "", nil
-			}
-		}
-		return "", fmt.Sprintf("no %s in the bags of %s (an optional leg: it runs only when the lead bot or the carrier carries the item; give_items puts it there for a test)", o.Ref(), strings.Join(names, " or ")), nil
-	}
+	legacy := len(o.Also) == 0
 	for _, n := range names {
 		inv, err := d.carrierInv(ctx, n)
 		if err != nil {
@@ -81,6 +69,10 @@ func (d *RemoteDriver) optionalLegCheck(ctx context.Context, i int) (holder, why
 		if why == "" {
 			why = missing
 		}
+	}
+	if legacy {
+		// Byte-exact legacy skip text, after every holder was checked: one item, presence only, all holders named.
+		return "", fmt.Sprintf("no %s in the bags of %s (an optional leg: it runs only when the lead bot or the carrier carries the item; give_items puts it there for a test)", o.Ref(), strings.Join(names, " or ")), nil
 	}
 	return "", why + " (an optional leg: it runs only when the lead bot or the carrier carries the item; give_items puts it there for a test)", nil
 }
