@@ -39,6 +39,9 @@ const (
 	MaxFailText        = 400 // characters of a wait's fail_text
 	// MaxProofRadius is the most yards a use_object's proof is searched around the object (TortoiseBots kPlanMaxProofRadius).
 	MaxProofRadius = 20
+	// MaxAnyOfEntries is the most entries a boss's any_of may list (TortoiseBots kPlanMaxEntries: the same cap the row's entries
+	// column has).
+	MaxAnyOfEntries = 16
 )
 
 // Point is a position in the map's coordinates.
@@ -481,7 +484,15 @@ const MaxEquivLen = 40
 // Boss is the leg's boss. First lists the entries of the encounter to kill before the boss itself, in order (an add
 // that heals it, the first of a group of brothers); the boss entry is killed last and the leg is done when it dies.
 type Boss struct {
-	Entry    uint32   `json:"entry"`
+	Entry uint32 `json:"entry"`
+	// AnyOf lists the entries that can be this row's boss: whichever ONE of them the instance's event makes active is the
+	// boss at Position (Zul'Gurub's Edge of Madness: Gri'lek 15082, Hazza'rah 15083, Renataki 15084 and Wushoolay 15085
+	// summon at the brazier's point in the 14-day event's rotation). Entry stays the row's canonical id (its name, a
+	// boss:<ENTRY> goal and the dashboard), and a kill of ANY of these entries is this row's boss. 2-16 distinct entries,
+	// one of them Entry. A leg whose boss lists them has no `first` and no `hold`: the row's entries column can mean only
+	// one thing there, and plan-export writes these entries with its boss flag so an older run leader does not read them as
+	// kill-first adds.
+	AnyOf    []uint32 `json:"any_of,omitempty"`
 	Position Point    `json:"position"`
 	First    []uint32 `json:"first,omitempty"`
 	// PhaseEntries are entries the encounter turns into or summons that no other field names (Zul'Gurub's Thekal:
@@ -534,6 +545,30 @@ type Boss struct {
 	// without mmaps and 185 with), so a row number would break on the next export. Only raid-walk reads it; the driver
 	// and plan-export do not carry it (the rows have no field for it).
 	SummonOpenStep int `json:"summon_open_step,omitempty"`
+}
+
+// Is says entry is this row's boss: its Entry or one of its AnyOf entries. A nil boss is nobody's.
+func (b *Boss) Is(entry uint32) bool {
+	if b == nil {
+		return false
+	}
+	return entry == b.Entry || slices.Contains(b.AnyOf, entry)
+}
+
+// Units are the entries that can be this row's boss, Entry first and then the AnyOf entries that are not it, in the
+// plan's order. A boss without AnyOf is just its Entry.
+func (b *Boss) Units() []uint32 {
+	if b == nil {
+		return nil
+	}
+	units := make([]uint32, 0, 1+len(b.AnyOf))
+	units = append(units, b.Entry)
+	for _, e := range b.AnyOf {
+		if e != b.Entry {
+			units = append(units, e)
+		}
+	}
+	return units
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -987,7 +1022,9 @@ type rawPatrol struct {
 }
 
 type rawBoss struct {
-	Entry    uint32    `json:"entry"`
+	Entry uint32 `json:"entry"`
+	// AnyOf is Boss.AnyOf.
+	AnyOf    []uint32  `json:"any_of"`
 	Position *rawPoint `json:"position"`
 	First    []uint32  `json:"first"`
 	// PhaseEntries is Boss.PhaseEntries.
@@ -1294,6 +1331,7 @@ func Parse(name string, data []byte) (*Plan, error) {
 		p.Legs = append(p.Legs, c.leg(path, &l))
 	}
 	c.phaseEntries(p)
+	c.bossAnyOf(p)
 	p.Avoid = c.avoid(rp.Avoid)
 	c.offAvoid(p)
 	if len(c.errs) > 0 {
@@ -1306,12 +1344,7 @@ func Parse(name string, data []byte) (*Plan, error) {
 // always-on boss row for raid-walk's gates, so one that repeats, is pulled or skipped as trash, or is already some
 // boss's entry, first, hold or phase entry would make a gate read the plan two ways.
 func (c *checker) phaseEntries(p *Plan) {
-	legName := func(i int) string {
-		if n := p.Legs[i].Name; n != "" {
-			return fmt.Sprintf("legs[%d] (%s)", i, n)
-		}
-		return fmt.Sprintf("legs[%d]", i)
-	}
+	legName := func(i int) string { return legLabel(p, i) }
 	for li, l := range p.Legs {
 		if l.Boss == nil {
 			continue
@@ -1352,6 +1385,49 @@ func (c *checker) phaseEntries(p *Plan) {
 				}
 				if lj != li && slices.Contains(ob.PhaseEntries, e) {
 					clash(fmt.Sprintf("in %s.boss.phase_entries", legName(lj)))
+				}
+			}
+		}
+	}
+}
+
+// legLabel names a leg of p for a check's message: legs[i], with its name when it has one.
+func legLabel(p *Plan, i int) string {
+	if n := p.Legs[i].Name; n != "" {
+		return fmt.Sprintf("legs[%d] (%s)", i, n)
+	}
+	return fmt.Sprintf("legs[%d]", i)
+}
+
+// bossAnyOf refuses a boss.any_of entry that the route also uses elsewhere: an alternative at this row's point that is
+// another leg's boss, phase entry or pulled pack entry would make raid-walk read the plan two ways, because it counts a
+// kill of ANY any_of entry as this row's boss.
+func (c *checker) bossAnyOf(p *Plan) {
+	for li, l := range p.Legs {
+		if l.Boss == nil || len(l.Boss.AnyOf) == 0 {
+			continue
+		}
+		for i, e := range l.Boss.AnyOf {
+			at := fmt.Sprintf("legs[%d].boss.any_of[%d]", li, i)
+			clash := func(where string) {
+				c.fail(at, "any_of entry %d of the boss of %s is also %s", e, legLabel(p, li), where)
+			}
+			for lj, o := range p.Legs {
+				if lj == li {
+					continue
+				}
+				for gi, g := range o.PullGroups {
+					if slices.Contains(g.Entries, e) {
+						clash(fmt.Sprintf("in %s.pull_groups[%d].entries", legLabel(p, lj), gi))
+					}
+				}
+				if ob := o.Boss; ob != nil {
+					if ob.Entry == e {
+						clash(fmt.Sprintf("the boss entry of %s", legLabel(p, lj)))
+					}
+					if slices.Contains(ob.PhaseEntries, e) {
+						clash(fmt.Sprintf("in %s.boss.phase_entries", legLabel(p, lj)))
+					}
 				}
 			}
 		}
@@ -1626,11 +1702,39 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk, Radius: r.Boss.Radius, StandPull: r.Boss.StandPull, SkipUnreachable: r.Boss.SkipUnreachable}
+		b := Boss{Entry: r.Boss.Entry, AnyOf: r.Boss.AnyOf, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk, Radius: r.Boss.Radius, StandPull: r.Boss.StandPull, SkipUnreachable: r.Boss.SkipUnreachable}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
 			c.fail(bp+".entry", "required")
+		}
+		// any_of: the alternatives at the row's point. Entry stays the row's canonical id, so it must be one of them;
+		// `first` and `hold` are refused, because the exported row's entries column can mean only one thing.
+		if len(b.AnyOf) > 0 {
+			ap := bp + ".any_of"
+			if len(b.AnyOf) < 2 || len(b.AnyOf) > MaxAnyOfEntries {
+				c.fail(ap, "%d entries: list 2-%d alternatives (the one boss of several an event makes active)", len(b.AnyOf), MaxAnyOfEntries)
+			}
+			seen := map[uint32]bool{}
+			for i, e := range b.AnyOf {
+				switch {
+				case e == 0:
+					c.fail(fmt.Sprintf("%s[%d]", ap, i), "0 is not a creature entry")
+				case seen[e]:
+					c.fail(fmt.Sprintf("%s[%d]", ap, i), "%d is listed twice", e)
+				}
+				seen[e] = true
+			}
+			if b.Entry != 0 && !slices.Contains(b.AnyOf, b.Entry) {
+				c.fail(bp+".entry",
+					"%d is not in any_of: entry is the row's canonical id (its name, its boss:<ENTRY> goal and the dashboard), so it must be one of the alternatives", b.Entry)
+			}
+			if len(b.First) > 0 {
+				c.fail(ap, "a boss with any_of has no first: the exported row's entries column is the alternatives, not kill-first adds")
+			}
+			if r.Boss.Hold != nil {
+				c.fail(ap, "a boss with any_of has no hold: the exported row's entries column can mean only one thing")
+			}
 		}
 		b.Position = c.point(bp+".position", r.Boss.Position)
 		c.entries(bp+".first", b.First, false)
