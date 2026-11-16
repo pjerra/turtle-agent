@@ -237,14 +237,60 @@ type Leave struct {
 	Why   string `json:"why"`
 }
 
-// OptionalLeg is Leg.Optional: the item the leg needs (item entry, and its name for the messages).
+// OptionalLeg is Leg.Optional: the item the leg needs (item entry, and its name for the messages). The primary
+// Item is the item a step of the leg uses (a use_object's requires_item or a use_item's entry). Also lists extra
+// items the leg consumes that no step names: a spell reagent the core consumes from the caster's bags when the
+// primary item is used (Gahz'ranka's summoning: the Mudskunk Lure's cast consumes 5x Zulian Mudskunk). Also items
+// are NOT required to be used by a step.
 type OptionalLeg struct {
-	Item uint32 `json:"item"`
-	Name string `json:"name,omitempty"`
+	Item uint32     `json:"item"`
+	Name string     `json:"name,omitempty"`
+	Also []ItemNeed `json:"also,omitempty"`
+}
+
+// ItemNeed is one extra item an optional leg consumes (OptionalLeg.Also): its entry, its count, and its name for
+// the messages. Count 0 means 1.
+type ItemNeed struct {
+	Item  uint32 `json:"item"`
+	Count int    `json:"count,omitempty"`
+	Name  string `json:"name,omitempty"`
 }
 
 // Ref is the item as an ItemRef.
 func (o OptionalLeg) Ref() ItemRef { return ItemRef{Entry: o.Item, Name: o.Name} }
+
+// Needs returns every item the optional leg needs: the primary item with count 1, followed by Also with counts
+// normalised to at least 1.
+func (o OptionalLeg) Needs() []ItemNeed {
+	out := []ItemNeed{{Item: o.Item, Count: 1, Name: o.Name}}
+	for _, n := range o.Also {
+		c := n.Count
+		if c <= 0 {
+			c = 1
+		}
+		out = append(out, ItemNeed{Item: n.Item, Count: c, Name: n.Name})
+	}
+	return out
+}
+
+// Bare names the need as the export warning and the skip text do: "Mudskunk Lure (19974)", or "5x Zulian
+// Mudskunk (19975)" with a count above 1. Count 0 means 1.
+func (n ItemNeed) Bare() string {
+	c := n.Count
+	if c <= 0 {
+		c = 1
+	}
+	var s string
+	if n.Name == "" {
+		s = fmt.Sprintf("item %d", n.Item)
+	} else {
+		s = fmt.Sprintf("%s (%d)", n.Name, n.Item)
+	}
+	if c > 1 {
+		s = fmt.Sprintf("%dx %s", c, s)
+	}
+	return s
+}
 
 // The limits of a direct step, as TortoiseBots enforces them (RemoteCommanderPolicy.h): the lead bot must be within DirectMaxDistance
 // yards (horizontally) and DirectMaxVertical yards (up or down) of the point, and the point needs ground within DirectGroundTolerance.
@@ -1472,9 +1518,28 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		c.fail(path+".skip_export", "never with optional (an optional leg is already skipped unless asked for, by its item)")
 	}
 	if o := r.Optional; o != nil {
-		l.Optional = &OptionalLeg{Item: o.Item, Name: o.Name}
+		l.Optional = &OptionalLeg{Item: o.Item, Name: o.Name, Also: append([]ItemNeed(nil), o.Also...)}
 		if o.Item == 0 {
 			c.fail(path+".optional.item", "required (the item entry the leg needs)")
+		}
+		if len(o.Also) > 4 {
+			c.fail(path+".optional.also", "at most 4 entries (the extra items the leg consumes)")
+		}
+		seen := map[uint32]bool{o.Item: true}
+		for i, n := range o.Also {
+			ap := fmt.Sprintf("%s.optional.also[%d]", path, i)
+			switch {
+			case n.Item == 0:
+				c.fail(ap+".item", "required (the item entry the leg consumes)")
+			case n.Item == o.Item:
+				c.fail(ap+".item", "%d is already the leg's primary optional item (an also entry must differ from it)", n.Item)
+			case seen[n.Item]:
+				c.fail(ap+".item", "%d is already an also entry of this leg (each also entry must differ)", n.Item)
+			}
+			seen[n.Item] = true
+			if n.Count < 0 || n.Count > 20 {
+				c.fail(ap+".count", "%d is outside 0-20 (omit it for 1)", n.Count)
+			}
 		}
 	}
 	for i, w := range r.Via {
