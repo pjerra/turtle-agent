@@ -683,3 +683,156 @@ func TestNearWipeStaleDeadRowNotCounted(t *testing.T) {
 		t.Fatalf("completeQuietView = quiet %v dead %d unread %d, want false, 1 and 0: a fresh dead row is a death", quiet, dead, unread)
 	}
 }
+
+// strictRegroupLine10 is TB's own corpse-run regroup on the step the fixture walks on: the line handleWipe's
+// self-regroup rule reads (and selfRegroupRunning for the boss path).
+const strictRegroupLine10 = "TBM:RUN|onyxias_lair|running|10/21|onyxia|move|walk|19 dead (1 wipe): regrouping by itself (1 of 2 at this step)"
+
+// strictCorpseRunNeverEnds is the fixture for a strict colony whose corpse run never brings the raid back: nobody is
+// revived by the walk (it is strict), so every frame keeps the hires dead to the end.
+func strictDeadForever(f *fixture) {
+	f.opts.noGMRevive = true
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(int) []objects.Unit { return nil }
+	retirePack0Patrol(f)
+}
+
+// TestStrictWipeCorpseRunTimeoutExits19WithNote is review 3's HIGH: strictWipeEnding returned waitCorpseRun's
+// timeout as an unwrapped *timeoutWalkStop, which stopInfo reads as an unknown error: exit 18 and the note dropped.
+// A strict corpse-run timeout ends exit 19 with its note on both paths that carry it — endWipe's ending and the boss
+// wipe handleBoss owns.
+func TestStrictWipeCorpseRunTimeoutExits19WithNote(t *testing.T) {
+	t.Run("endWipe", func(t *testing.T) {
+		f := newFixture(t)
+		strictDeadForever(f)
+		f.opts.wipeResume = 0 // no resume slots: the wipe takes endWipe, with TB's regroup running
+		selfRegroupKill(f, strictRegroupLine10)
+		var regroupAt time.Time
+		prevEvents := f.agent.eventsHook
+		f.agent.eventsHook = func(served string) {
+			if prevEvents != nil {
+				prevEvents(served)
+			}
+			if regroupAt.IsZero() && served == strictRegroupLine10 {
+				regroupAt = f.clock.now()
+			}
+		}
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19 (the strict corpse-run timeout is a wipe ending): %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		if !hasNote(sum, "wipe recovery timed out") {
+			t.Fatalf("notes %q, want the recovery-timeout note (it was dropped with the unwrapped timeout)", sum.Notes)
+		}
+		if !strings.Contains(sum.EndReason, "wipe at step 10") {
+			t.Fatalf("end %q, want the wipe ending", sum.EndReason)
+		}
+		strictStopAfterWait(t, f, regroupAt)
+	})
+	t.Run("handleBoss", func(t *testing.T) {
+		f := newFixture(t)
+		strictDeadForever(f)
+		// The boss is engaged first (a target), then it resets: handleBoss owns the wipe and its ending.
+		f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+			targeted := n < 8
+			f.agent.mu.Lock()
+			f.agent.targeted = targeted
+			f.agent.mu.Unlock()
+			if targeted {
+				return []tbm.HostileRec{{GUID: 9, Entry: 10184, HPPct: 100, Target: packet.GUID(1000)}}
+			}
+			return []tbm.HostileRec{{GUID: 9, Entry: 10184, HPPct: 100}}
+		}
+		// The run is regrouping by itself when the boss path takes over, and its corpse run never finishes. The line is
+		// re-served so it stays inside the self-regroup window through the boss wait: the live run keeps reporting it.
+		selfRegroupKill(f, strictRegroupLine10)
+		prevView := f.agent.viewHook
+		f.agent.viewHook = func() {
+			if prevView != nil {
+				prevView()
+			}
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			if f.agent.viewN%5 == 0 {
+				f.agent.lines = append(f.agent.lines, queuedEvent{raw: strictRegroupLine10})
+			}
+		}
+		var regroupAt time.Time
+		prevEvents := f.agent.eventsHook
+		f.agent.eventsHook = func(served string) {
+			if prevEvents != nil {
+				prevEvents(served)
+			}
+			if regroupAt.IsZero() && served == strictRegroupLine10 {
+				regroupAt = f.clock.now()
+			}
+		}
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19 (the strict corpse-run timeout is a wipe ending): %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		if !hasNote(sum, "wipe recovery timed out") {
+			t.Fatalf("notes %q, want the recovery-timeout note (it was dropped with the unwrapped timeout)", sum.Notes)
+		}
+		if !strings.Contains(sum.EndReason, "wipe at step 10") {
+			t.Fatalf("end %q, want the wipe ending", sum.EndReason)
+		}
+		gm := f.agent.gmLines()
+		for _, line := range gm {
+			for _, prefix := range []string{".revive ", ".summon ", ".gm visible off"} {
+				if strings.HasPrefix(line, prefix) {
+					t.Fatalf("%q went out under --no-gm-revive: %q", line, gm)
+				}
+			}
+		}
+		strictStopAfterWait(t, f, regroupAt)
+	})
+}
+
+// strictStopAfterWait says the walk's own ending did not stop the run inside the corpse-run wait: w.stop stops the run
+// for every incident ending, but a --no-gm-revive wipe that is waiting TB's regroup out must not kill it first.
+func strictStopAfterWait(t *testing.T, f *fixture, regroupAt time.Time) {
+	t.Helper()
+	if regroupAt.IsZero() {
+		t.Fatal("TB's regroup line was never served: no wipe to measure from")
+	}
+	gm := f.agent.gmLines()
+	for i, line := range gm {
+		if !strings.HasPrefix(line, ".bot run stop") {
+			continue
+		}
+		if waited := f.agent.gmAt[i].Sub(regroupAt); waited < 3*f.opts.wipeRest {
+			t.Fatalf("the run was stopped %s after TB's regroup line, inside the %s corpse-run wait: stopping it kills the only recovery a strict wipe has (gm %q)",
+				waited, 3*f.opts.wipeRest, gm)
+		}
+	}
+}
+
+// TestEndWipeNoGMReviveWaitsForRunningSelfRegroup is review 3's MEDIUM: strictWipeEnding asked selfRegroupRunning
+// after handleWipe had cleared w.runLines and endWipe had stopped the run, so the strict corpse-run wait never
+// happened through endWipe. The fact is read before the clear and before stopRun: TB's own regroup is waited out,
+// and it is not killed first.
+func TestEndWipeNoGMReviveWaitsForRunningSelfRegroup(t *testing.T) {
+	f := newFixture(t)
+	strictDeadForever(f)
+	f.opts.wipeResume = 0 // endWipe's strict branch, with the regroup line still in the run's observations
+	selfRegroupKill(f, strictRegroupLine10)
+	var regroupAt time.Time
+	prevEvents := f.agent.eventsHook
+	f.agent.eventsHook = func(served string) {
+		if prevEvents != nil {
+			prevEvents(served)
+		}
+		if regroupAt.IsZero() && served == strictRegroupLine10 {
+			regroupAt = f.clock.now()
+		}
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "wipe recovery timed out") {
+		t.Fatalf("notes %q, want the corpse-run wait's timeout note: the strict ending skipped the wait it had a regroup for", sum.Notes)
+	}
+	strictStopAfterWait(t, f, regroupAt)
+}

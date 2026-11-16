@@ -1555,13 +1555,10 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				if err := w.recoverNearWipe(ctx, ps.step); err == errWipeResumeSkipped {
 					// Unknown boss state: the old ending, not a recovery, and not retried for this pause.
 					ps.skipped = true
-				} else if terr, ok := err.(*timeoutWalkStop); ok {
-					w.note("%s", terr.note)
-					return stopf(terr.code, "%s", terr.reason)
-				} else if err != errWipeRecovered {
-					return err
-				} else {
+				} else if err == errWipeRecovered {
 					ps.armed = false
+				} else {
+					return w.recoveryEnding(err)
 				}
 			case now.Sub(ps.at) >= w.opts.pausedWait:
 				return stopf(exitRaidWalkFailed, "paused: %s", ps.note)
@@ -3160,29 +3157,27 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 		runLeaderFights = w.runLeaderFightsEngagedBoss(ctx, step)
 		if !runLeaderFights {
 			w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
-			return w.endWipe(ctx, step)
+			return w.endWipe(ctx, step, selfRegroup)
 		}
 		w.note("wipe on a boss step: the run leader fights %s %s, so the wipe recovers like any other", w.engagedBossWords(), w.untilNoteWords())
 	}
 	if w.opts.wipeResume > 0 && w.wipeResumes >= w.opts.wipeResume {
 		w.note("wipe resume skipped: no recoveries left (%d/%d)", w.wipeResumes, w.opts.wipeResume)
-		return w.endWipe(ctx, step)
+		return w.endWipe(ctx, step, selfRegroup)
 	}
 	if w.wipeResumes >= w.opts.wipeResume { // --wipe-resume 0: the old ending, no note
-		return w.endWipe(ctx, step)
+		return w.endWipe(ctx, step, selfRegroup)
 	}
 	if w.opts.noGMRevive && !selfRegroup {
 		// A strict run recovers a wipe only by the run's own corpse run (the self-regroup above). Without one there is
 		// nothing to wait for: never call recoverWipe, the walk ends as endWipe ends, without its revive half.
-		return w.endWipe(ctx, step)
+		return w.endWipe(ctx, step, selfRegroup)
 	}
 	if err := w.recoverWipe(ctx, step, selfRegroup, runLeaderFights); err == errWipeResumeSkipped {
-		return w.endWipe(ctx, step)
-	} else if terr, ok := err.(*timeoutWalkStop); ok {
-		w.note("%s", terr.note)
-		return stopf(terr.code, "%s", terr.reason)
+		return w.endWipe(ctx, step, selfRegroup)
 	} else {
-		return err
+		// Including a recovered wipe (errWipeRecovered) and a recovery timeout, which ends 19 with its note.
+		return w.recoveryEnding(err)
 	}
 }
 
@@ -3251,14 +3246,20 @@ func (w *walk) bossEngagedNow() bool {
 // wipe). The dead hires still get a bare `.revive <name>` each before the exit: skipping the recipe must not leave the
 // party dead in the log and in the next launch's party view. A wipe anywhere else keeps the recipe, because the
 // autopilot re-places that copy (--reuse-instance). Under --no-gm-revive the fast branch sends no revive either.
-func (w *walk) endWipe(ctx context.Context, step int) error {
-	_ = w.stopRun(context.Background(), "")
+func (w *walk) endWipe(ctx context.Context, step int, selfRegroup bool) error {
+	fast := w.opts.wipeEndFast && raidwalk.PlaceStepAtBoss(w.rows, step)
+	// A strict walk does not stop a run that is regrouping by itself: TB's corpse run is the only recovery a
+	// --no-gm-revive wipe has, and the ending waits it out (review 3: the stop killed it before the wait could see it).
+	// The fast ending has no corpse-run wait (the next launch throws this copy away), so it stops the run as before.
+	if !(w.opts.noGMRevive && selfRegroup && !fast) {
+		_ = w.stopRun(context.Background(), "")
+	}
 	w.note("wipe at step %d", step)
 	if w.dash != nil {
 		w.saveCommanders("wipe")
 		w.saveFights()
 	}
-	if w.opts.wipeEndFast && raidwalk.PlaceStepAtBoss(w.rows, step) {
+	if fast {
 		if w.opts.noGMRevive {
 			w.note("wipe: --wipe-end fast: the autopilot takes a fresh instance next, so no reset wait and no revive recipe in this copy; --no-gm-revive: the dead hires are left dead")
 			return stopf(exitRaidWalkIncident, "wipe at step %d (no GM revive)", step)
@@ -3268,7 +3269,7 @@ func (w *walk) endWipe(ctx context.Context, step int) error {
 		return stopf(exitRaidWalkIncident, "wipe at step %d", step)
 	}
 	if w.opts.noGMRevive {
-		return w.strictWipeEnding(ctx, step)
+		return w.strictWipeEnding(ctx, step, selfRegroup)
 	}
 	if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 		return err
@@ -3278,19 +3279,19 @@ func (w *walk) endWipe(ctx context.Context, step int) error {
 
 // strictWipeEnding is --no-gm-revive's wipe ending, shared by endWipe and handleBoss (review 2: the boss path still
 // called the revive recipe). The walk sends nothing: no `.go xyz`, no `.summon`, no `.revive`. TB's own corpse-run
-// regroup is a strict run's only recovery, so when the run's status says it runs one and the walk still has a
-// recovery slot, the walk waits it out (waitCorpseRun) before it ends; otherwise the ending is immediate. Either way
-// the walk waits for the reset and ends 19 with the flag's reason, exactly as endWipe ended before this had a second
-// caller.
-func (w *walk) strictWipeEnding(ctx context.Context, step int) error {
-	if w.wipeResumes < w.opts.wipeResume && w.selfRegroupRunning(step) {
+// regroup is a strict run's only recovery, so when the run is running one (selfRegroup, read by the caller BEFORE
+// handleWipe clears the run's lines and before stopRun: review 3) the walk waits it out (waitCorpseRun) before it
+// ends; otherwise the ending is immediate. Either way the walk waits for the reset and ends 19 with the flag's reason.
+// A timed-out wait is unwrapped here (recoveryEnding), so the exit is the wipe's 19 with the note, not stopInfo's 18.
+func (w *walk) strictWipeEnding(ctx context.Context, step int, selfRegroup bool) error {
+	if selfRegroup {
 		from := w.env.now()
 		deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 		if err := w.waitCorpseRun(ctx, deadline); err != nil {
 			if timeout, ok := err.(*recoveryTimeout); ok {
-				return timeout.end(step)
+				err = timeout.end(step)
 			}
-			return err
+			return w.recoveryEnding(err)
 		}
 		w.note("wipe at step %d: --no-gm-revive: the run's corpse run brought the raid back; the walk ends here (no GM revive)", step)
 	} else {
@@ -3310,6 +3311,18 @@ func (w *walk) selfRegroupRunning(step int) bool {
 	}
 	_, ok := w.selfRegroupLine(step, w.env.now())
 	return ok
+}
+
+// recoveryEnding is how a caller that returns a recovery's error straight to the watch loop ends the walk: the
+// *timeoutWalkStop a recovery produces carries the ending (exit 19 for a wipe, the paused code for a near-wipe) and
+// the note that explains it, and stopInfo reads neither from it (it matches *walkStop only), so without this the
+// walk exited 18 and dropped the note (review 3). Every caller of a recovery that can return one goes through here.
+func (w *walk) recoveryEnding(err error) error {
+	if terr, ok := err.(*timeoutWalkStop); ok {
+		w.note("%s", terr.note)
+		return stopf(terr.code, "%s", terr.reason)
+	}
+	return err
 }
 
 // reviveFastWait is the --wipe-end fast path's bare revive window: the dead hires' `.revive` lines go out about
@@ -4868,9 +4881,17 @@ func (w *walk) runFightsBoss(ctx context.Context, entry uint32, resumePaused boo
 }
 
 // handleBoss stops the run at once and waits for the fight to end: a wipe (then the revive), a kill or a reset.
-// It never revives while a boss row has a target.
+// It never revives while a boss row has a target. Under --no-gm-revive it stops nothing when TB's own corpse-run
+// regroup is already under way, and the strict wipe ending waits that regroup out instead.
 func (w *walk) handleBoss(ctx context.Context, inc raidwalk.IncidentBossEngaged) error {
-	_ = w.stopRun(context.Background(), "")
+	// A strict walk that finds TB's own corpse-run regroup under way leaves the run alone: stopping it kills the only
+	// recovery a --no-gm-revive wipe has, and the wipe ending then waits that regroup out (review 3). The fact is read
+	// here, before the stop and while the line is still inside the self-regroup window: handleBoss's own wait takes
+	// longer than that window, so a later read would see nothing.
+	regrouping := w.opts.noGMRevive && w.selfRegroupRunning(inc.Step)
+	if !regrouping {
+		_ = w.stopRun(context.Background(), "")
+	}
 	w.note("boss %d engaged at step %d", inc.Entry, inc.Step)
 	if w.dash != nil {
 		w.saveCommanders("boss")
@@ -4912,7 +4933,7 @@ func (w *walk) handleBoss(ctx context.Context, inc raidwalk.IncidentBossEngaged)
 					w.saveCommanders("wipe")
 					w.saveFights()
 				}
-				return w.strictWipeEnding(ctx, inc.Step)
+				return w.strictWipeEnding(ctx, inc.Step, regrouping)
 			}
 			if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 				return err

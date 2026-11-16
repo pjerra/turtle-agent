@@ -84,9 +84,12 @@ What happens instead:
   polls' lines go to `run.log`. A deadline that passes ends the walk the existing recovery-timeout way (exit 19).
 - **A wipe the run does not recover by itself**: the walk stops the run, saves the commanders and the fights, waits
   for the instance to reset (the next placement must not land in a live fight) and exits 19 (`wipe at step N (no GM
-  revive)`). A boss wipe the walk owns takes the same ending (`handleBoss`: the encounter it stopped the run for), so
-  no revive recipe runs there. `--wipe-end fast` at a boss row still skips the reset wait and leaves the dead hires
-  dead.
+  revive)`). A boss wipe the walk owns takes the same ending (`handleBoss`), so no revive recipe runs there. The fact
+  that the run is regrouping by itself is read BEFORE the wipe's own run lines are cleared and before the run is
+  stopped: an ending that finds TB's corpse run under way waits it out first (a wait that times out ends 19 with the
+  recovery-timeout note) and does not stop the run until the wait is over, whatever `--wipe-resume` says — waiting is
+  not a recovery the walk performs. The walk's own exit still stops the run once it ends. `--wipe-end fast` at a boss
+  row still skips the reset wait and leaves the dead hires dead.
 - **A near-wipe**: every hire dead means no recovery (the existing paused ending); with someone alive the walk sends
   no `.revive`, leaves the dead hires to the run (living healers' resurrections or TB's own regroup), rests and
   resumes as usual. The rest never goes quiet while a hire is dead, so once it has waited its window (the same
