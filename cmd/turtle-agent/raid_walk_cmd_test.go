@@ -343,6 +343,9 @@ type walkFakeAgent struct {
 	// Review-round-2 fault hooks: bot_view failure/omission (viewFn) and combat during the
 	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
 	viewFn func(n int) (fail bool, omit string)
+	// frameAt is the frames' own `at` stamp (ViewFrame.At): the feed's completion time, which trackFrame trusts over
+	// the poll's clock. Zero leaves it out (the frame is stamped when the walk reads it).
+	frameAt time.Time
 	// viewPartyFn, when set, lists the party names frame n carries instead of the fake's own (a partial or degraded
 	// read); nil uses the fake's party.
 	viewPartyFn func(n int) []string
@@ -1457,7 +1460,10 @@ func (f *walkFakeAgent) viewPage() any {
 			party = p
 		}
 	}
-	frame := &tbm.ViewFrame{Seq: uint64(n)}
+	f.mu.Lock()
+	at := f.frameAt
+	f.mu.Unlock()
+	frame := &tbm.ViewFrame{Seq: uint64(n), At: at}
 	for i, name := range party {
 		state := "n"
 		if dead[name] {

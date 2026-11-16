@@ -3268,16 +3268,48 @@ func (w *walk) endWipe(ctx context.Context, step int) error {
 		return stopf(exitRaidWalkIncident, "wipe at step %d", step)
 	}
 	if w.opts.noGMRevive {
-		w.note("wipe at step %d: --no-gm-revive: no GM revive, the walk ends", step)
-		if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
-			return err
-		}
-		return stopf(exitRaidWalkIncident, "wipe at step %d (no GM revive)", step)
+		return w.strictWipeEnding(ctx, step)
 	}
 	if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 		return err
 	}
 	return w.revive(ctx, step)
+}
+
+// strictWipeEnding is --no-gm-revive's wipe ending, shared by endWipe and handleBoss (review 2: the boss path still
+// called the revive recipe). The walk sends nothing: no `.go xyz`, no `.summon`, no `.revive`. TB's own corpse-run
+// regroup is a strict run's only recovery, so when the run's status says it runs one and the walk still has a
+// recovery slot, the walk waits it out (waitCorpseRun) before it ends; otherwise the ending is immediate. Either way
+// the walk waits for the reset and ends 19 with the flag's reason, exactly as endWipe ended before this had a second
+// caller.
+func (w *walk) strictWipeEnding(ctx context.Context, step int) error {
+	if w.wipeResumes < w.opts.wipeResume && w.selfRegroupRunning(step) {
+		from := w.env.now()
+		deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
+		if err := w.waitCorpseRun(ctx, deadline); err != nil {
+			if timeout, ok := err.(*recoveryTimeout); ok {
+				return timeout.end(step)
+			}
+			return err
+		}
+		w.note("wipe at step %d: --no-gm-revive: the run's corpse run brought the raid back; the walk ends here (no GM revive)", step)
+	} else {
+		w.note("wipe at step %d: --no-gm-revive: no GM revive, the walk ends", step)
+	}
+	if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
+		return err
+	}
+	return stopf(exitRaidWalkIncident, "wipe at step %d (no GM revive)", step)
+}
+
+// selfRegroupRunning says the run itself is running its corpse-run regroup: its last status is running and carries
+// handleWipe's own "regrouping by itself" line for step.
+func (w *walk) selfRegroupRunning(step int) bool {
+	if !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
+		return false
+	}
+	_, ok := w.selfRegroupLine(step, w.env.now())
+	return ok
 }
 
 // reviveFastWait is the --wipe-end fast path's bare revive window: the dead hires' `.revive` lines go out about
@@ -4870,6 +4902,18 @@ func (w *walk) handleBoss(ctx context.Context, inc raidwalk.IncidentBossEngaged)
 			if !wipe && !w.allDead(now) {
 				return stopf(exitRaidWalkIncident, "boss %d engaged at step %d", inc.Entry, inc.Step)
 			}
+			if w.opts.noGMRevive {
+				// A strict walk never revives, not even on a boss wipe the walk owns (review 2, agy HIGH: this
+				// branch still called w.revive, so the revive recipe sent its `.go xyz` and then died in the w.gm
+				// guard, exit 18). The wipe takes endWipe's strict ending instead: TB's own corpse-run regroup is
+				// waited for when the run says it runs one, else the reset is waited for and the walk ends 19 with
+				// the flag's reason. Nothing of the revive recipe goes out.
+				if w.dash != nil {
+					w.saveCommanders("wipe")
+					w.saveFights()
+				}
+				return w.strictWipeEnding(ctx, inc.Step)
+			}
 			if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 				return err
 			}
@@ -5877,8 +5921,18 @@ func (w *walk) engagedBossWords() string {
 func (w *walk) restOutOfCombat(ctx context.Context, step int, d time.Duration, deadline time.Time) error {
 	seq0 := w.statusSeq
 	restFrom := w.env.now()
-	lastDead := 0
-	strictEnd := func(dead int) error {
+	lastDead, lastUnread := 0, 0
+	// strictEnd is the strict rest's ending: only a hire a FRESH row shows dead counts (review 2: stale rows ended
+	// valid runs), and the unread hires the same poll could not judge are reported apart from the dead.
+	strictEnd := func(dead, unread int) error {
+		if unread > 0 {
+			return &timeoutWalkStop{
+				code:   exitRaidWalkIncident,
+				reason: fmt.Sprintf("near-wipe at step %d: %d hire(s) still dead, %d not read (unread), no GM revive (--no-gm-revive)", step, dead, unread),
+				note: fmt.Sprintf("near-wipe rest at step %d: --no-gm-revive: %d hire(s) still dead, %d not read (unread) after %s, no GM revive: the walk ends",
+					step, dead, unread, durWords(d)),
+			}
+		}
 		return &timeoutWalkStop{
 			code:   exitRaidWalkIncident,
 			reason: fmt.Sprintf("near-wipe at step %d: %d hire(s) still dead, no GM revive (--no-gm-revive)", step, dead),
@@ -5896,7 +5950,7 @@ func (w *walk) restOutOfCombat(ctx context.Context, step int, d time.Duration, d
 		}
 		if !w.env.now().Before(deadline) {
 			if w.opts.noGMRevive && lastDead > 0 {
-				return strictEnd(lastDead)
+				return strictEnd(lastDead, lastUnread)
 			}
 			return &recoveryTimeout{dur: deadlineDuration(deadline, d), paused: false}
 		}
@@ -5917,10 +5971,10 @@ func (w *walk) restOutOfCombat(ctx context.Context, step int, d time.Duration, d
 		if w.runWentOnAfter(seq0, step) {
 			return errRunWentOn
 		}
-		quiet, dead := w.completeQuietView(ctx)
-		lastDead = dead
+		quiet, dead, unread := w.completeQuietView(ctx)
+		lastDead, lastUnread = dead, unread
 		if w.opts.noGMRevive && dead > 0 && w.env.now().Sub(restFrom) >= d {
-			return strictEnd(dead)
+			return strictEnd(dead, unread)
 		}
 		if quiet {
 			now := w.env.now()
@@ -5955,12 +6009,14 @@ func deadlineDuration(deadline time.Time, d time.Duration) time.Duration {
 // completeQuietView is one review-2 quiet poll: the bot_view call succeeded AND every roster hire
 // is present with a row <= 10 s old AND none is in combat AND none is dead. Anything else is not
 // quiet (the window restarts from zero). A second wipe during the rest still ends 19 through the
-// tracker's own wipe rule in pollOnce; the dead row here only breaks quiet. The count of the hires
-// the frame shows dead goes back with the verdict: the strict rest ends on it.
-func (w *walk) completeQuietView(ctx context.Context) (quiet bool, dead int) {
+// tracker's own wipe rule in pollOnce; the dead row here only breaks quiet. The counts of the hires
+// the frame shows dead and of the hires it could not read (absent, or stale: no botAt observation
+// within 10 s) go back with the verdict: the strict rest ends on a FRESH dead row only (review 2: a
+// stale dead row ended valid runs), and its reason line reports the two apart.
+func (w *walk) completeQuietView(ctx context.Context) (quiet bool, dead, unread int) {
 	n, frame, err := w.view(ctx, w.afterN, 2000)
 	if err != nil || frame == nil {
-		return false, 0
+		return false, 0, len(w.hireList())
 	}
 	w.afterN = n
 	now := w.env.now()
@@ -5976,6 +6032,15 @@ func (w *walk) completeQuietView(ctx context.Context) (quiet bool, dead int) {
 		p, ok := byName[name]
 		if !ok {
 			quiet = false
+			unread++
+			continue
+		}
+		// The freshness test comes before the row's own flags: a row the walk has no fresh observation of says
+		// nothing about the hire, so it can neither make the view quiet nor count as a death.
+		pos, ok := w.botAt[name]
+		if !ok || now.Sub(pos.at) > 10*time.Second {
+			quiet = false
+			unread++
 			continue
 		}
 		if p.Dead || p.State == "d" {
@@ -5983,16 +6048,11 @@ func (w *walk) completeQuietView(ctx context.Context) (quiet bool, dead int) {
 			quiet = false
 			continue
 		}
-		pos, ok := w.botAt[name]
-		if !ok || now.Sub(pos.at) > 10*time.Second {
-			quiet = false
-			continue
-		}
 		if p.InCombat() {
 			quiet = false
 		}
 	}
-	return quiet, dead
+	return quiet, dead, unread
 }
 
 // resumeRun sends `run resume` through the commander RPC and waits up to 60 s for the server to show the run
@@ -6108,23 +6168,36 @@ func (w *walk) stillDeadHires(ctx context.Context, deadline time.Time) ([]string
 	return dead, err
 }
 
-// stillDeadHiresNote is stillDeadHires with the log line's own words (the strict corpse-run wait shares the read) and
-// the uncounted hires: the party list did not have them, so the frame says nothing about them.
-func (w *walk) stillDeadHiresNote(ctx context.Context, deadline time.Time, what, action string) ([]string, int, error) {
+// readHires takes one bot_view read and splits the hires by it: dead (the party read says dead), alive, unread (the
+// read failed, carried no frame, or the party list did not have the hire). ok is false when the frame says nothing
+// about the roster at all, so the caller decides whether that is a retry (the strict corpse-run wait) or a failure
+// (the revive's own one-shot read). It does not note: a per-poll line belongs to the run log, not the summary.
+func (w *walk) readHires(ctx context.Context) (dead []string, alive, unread int, ok bool, err error) {
 	now := w.env.now()
 	n, frame, err := w.view(ctx, w.afterN, 2000)
-	if ctx.Err() != nil {
-		return nil, 0, stopf(exitRaidWalkFailed, "interrupted")
-	}
 	if err != nil || frame == nil {
-		return nil, 0, stopf(exitRaidWalkIncident, "not revived: could not read which hires are still dead after the regroup (%v)", err)
+		return nil, 0, 0, false, err
 	}
 	w.afterN = n
 	w.trackFrame(now, frame)
+	dead, alive, unread = stillDead(w.hireList(), frame.Party)
+	return dead, alive, unread, true, nil
+}
+
+// stillDeadHiresNote is stillDeadHires with the log line's own words (the strict corpse-run wait shares the read) and
+// the uncounted hires: the party list did not have them, so the frame says nothing about them. Its read is one-shot:
+// a failed or empty frame is a failure here (the revive has nothing to act on), unlike the strict still-dead wait.
+func (w *walk) stillDeadHiresNote(ctx context.Context, deadline time.Time, what, action string) ([]string, int, error) {
+	dead, alive, unread, ok, err := w.readHires(ctx)
+	if ctx.Err() != nil {
+		return nil, 0, stopf(exitRaidWalkFailed, "interrupted")
+	}
+	if !ok {
+		return nil, 0, stopf(exitRaidWalkIncident, "not revived: could not read which hires are still dead after the regroup (%v)", err)
+	}
 	if timeout := w.recoveryExpired(deadline); timeout != nil {
 		return nil, 0, timeout
 	}
-	dead, alive, unread := stillDead(w.hireList(), frame.Party)
 	msg := fmt.Sprintf("%s: %d hire(s) still dead (%s), %d alive (TB brought them back: not revived), %d not in the frame (not revived)", what, len(dead), action, alive, unread)
 	w.note("%s", msg)
 	w.logLine(w.env.now(), msg)
@@ -6138,28 +6211,43 @@ const corpseRunPoll = 5 * time.Second
 // itself (the corpse run), and this strict walk sends NOTHING (no `.go xyz`, no `.summon`, no `.revive`). It polls the
 // frames every corpseRunPoll until EVERY hire is read and none is dead, or the recovery's deadline passes, then
 // returns nil (the existing self-regroup flow goes on) or the recovery timeout the caller turns into the wipe ending.
-// A hire missing from the frame is unread, not alive (a release or a zone-in can serve an empty or partial party list),
-// so it keeps the wait going to the deadline; the timeout's note then counts the dead and the unread apart.
+// A hire missing from the frame is unread, not alive (a release or a zone-in can serve an empty or partial party
+// list). Review 2: a failed or empty read is unread too, never a verdict — only an interruption, a lost lease or the
+// deadline end the wait — the timeout's note counts the dead and the unread apart, the summary gets one note when the
+// wait starts and one when it ends, and every poll's line goes to the run log only.
 func (w *walk) waitCorpseRun(ctx context.Context, deadline time.Time) error {
+	from := w.env.now()
+	w.note("corpse run (--no-gm-revive): waiting for the run's own regroup: nothing goes out")
 	var dead, unread int
 	corpseTimeout := func(t *recoveryTimeout) error {
 		t.corpseRun, t.dead, t.unread = true, dead, unread
 		return t
 	}
 	for {
+		if w.leaseLost.Load() {
+			return stopf(exitRaidWalkFailed, "lease lost")
+		}
+		if err := ctx.Err(); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
 		if timeout := w.recoveryExpired(deadline); timeout != nil {
 			return corpseTimeout(timeout)
 		}
-		deadHires, unreadHires, err := w.stillDeadHiresNote(ctx, deadline, "corpse run (--no-gm-revive)", "left to the run")
-		if err != nil {
-			if timeout, ok := err.(*recoveryTimeout); ok {
-				return corpseTimeout(timeout)
-			}
-			return err
+		deadHires, alive, unreadHires, ok, err := w.readHires(ctx)
+		if ctx.Err() != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
 		}
-		dead, unread = len(deadHires), unreadHires
-		if dead == 0 && unread == 0 {
-			return nil
+		now := w.env.now()
+		if ok {
+			dead, unread = len(deadHires), unreadHires
+			w.logLine(now, fmt.Sprintf("corpse run (--no-gm-revive): %d dead, %d alive, %d unread", dead, alive, unread))
+			if dead == 0 && unread == 0 {
+				w.note("corpse run (--no-gm-revive): the run's corpse run brought the raid back (%d alive) after %s", alive, durWords(now.Sub(from)))
+				return nil
+			}
+		} else {
+			dead, unread = 0, len(w.hireList())
+			w.logLine(now, fmt.Sprintf("corpse run (--no-gm-revive): the read gave nothing (%v): all %d unread, polling again", err, unread))
 		}
 		if err := w.recoverySleep(ctx, corpseRunPoll, deadline); err != nil {
 			if timeout, ok := err.(*recoveryTimeout); ok {

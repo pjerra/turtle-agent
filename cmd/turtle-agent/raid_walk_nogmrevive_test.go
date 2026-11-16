@@ -11,6 +11,9 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // T45: --no-gm-revive is the owner's strict run. Walk 110 (--revive-at-raid=false --wipe-resume 3 --auto-resume 3)
@@ -502,5 +505,181 @@ func TestRaidWalkNoGMReviveNearWipeDeadLeftEndsPromptly(t *testing.T) {
 	}
 	if waited >= 3*f.opts.wipeRest {
 		t.Fatalf("the rest ended %s after the pause, want under the long %s timeout", waited, 3*f.opts.wipeRest)
+	}
+}
+
+// TestHandleBossWipeNoGMReviveSendsNoRevive is review 2's agy HIGH: handleBoss's boss-wipe reset still called
+// w.revive, so under --no-gm-revive the revive recipe sent its `.go xyz` and then died in the w.gm guard (exit 18).
+// A boss wipe the walk owns must take the wipe's strict path: nothing goes out, the reset is waited for and the walk
+// ends 19 with the no-GM reason.
+func TestHandleBossWipeNoGMReviveSendsNoRevive(t *testing.T) {
+	f := newFixture(t)
+	f.opts.noGMRevive = true
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	// The boss is engaged first (a target), then it resets: the frame row is back at 100 % with no target, and the
+	// boss path's reset branch is the one under test.
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		targeted := n < 8
+		f.agent.mu.Lock()
+		f.agent.targeted = targeted
+		f.agent.mu.Unlock()
+		if targeted {
+			return []tbm.HostileRec{{GUID: 9, Entry: 10184, HPPct: 100, Target: packet.GUID(1000)}}
+		}
+		return []tbm.HostileRec{{GUID: 9, Entry: 10184, HPPct: 100}}
+	}
+	retirePack0Patrol(f)
+	f.allDeadFromHires()
+	// The boss path's own run stop is where the boss wipe begins: every GM line after it belongs to the wipe (the
+	// placement's entrance `.go xyz` and the hire lines precede it), and none of them may be the revive recipe's.
+	stopAt := -1
+	hire := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hire != nil {
+			hire(line)
+		}
+		if stopAt < 0 && strings.HasPrefix(line, ".bot run stop") {
+			stopAt = len(f.agent.gmLines())
+		}
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	if stopAt < 0 {
+		t.Fatalf("the boss path never stopped the run: no wipe to measure from (gm %q)", gm)
+	}
+	for _, line := range gm[stopAt:] {
+		for _, prefix := range []string{".revive ", ".summon ", ".go xyz", ".gm visible off"} {
+			if strings.HasPrefix(line, prefix) {
+				t.Fatalf("%q went out under --no-gm-revive: the boss wipe must send nothing of the revive recipe: %q", line, gm)
+			}
+		}
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "no GM revive") {
+		t.Fatalf("end %q, want the strict wipe ending (notes %q)", sum.EndReason, sum.Notes)
+	}
+	if !hasNote(sum, "wipe at step 10: --no-gm-revive: no GM revive, the walk ends") {
+		t.Fatalf("notes %q, want the strict wipe note", sum.Notes)
+	}
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a strict walk recovers nothing here)", sum.WipeResumes)
+	}
+}
+
+// TestWaitCorpseRunTransientViewErrorRetries is review 2's Codex/agy MEDIUM: one failed bot_view read ended the whole
+// corpse-run wait (exit 19). A failed or empty read is unread, not a verdict: the wait polls again and finishes on
+// the clean frame that reads every hire alive.
+func TestWaitCorpseRunTransientViewErrorRetries(t *testing.T) {
+	clock := newFakeClock()
+	a := newFakeAgent(t, clock)
+	a.mu.Lock()
+	a.party = []string{"Bot01", "Bot02"}
+	a.mu.Unlock()
+	fails := 1
+	a.viewFn = func(int) (bool, string) {
+		if fails > 0 {
+			fails--
+			return true, ""
+		}
+		return false, ""
+	}
+	w := &walk{
+		env:   walkEnv{now: clock.now, sleep: clock.sleep},
+		agent: a,
+		mt:    "Bot01", ots: []string{"Bot02"},
+		botAt:    map[string]botPos{},
+		partyG:   map[uint64]bool{},
+		hostiles: map[string]hostileState{},
+		opts:     raidWalkOptions{wipeRest: 10 * time.Minute},
+	}
+	start := clock.now()
+	if err := w.waitCorpseRun(context.Background(), start.Add(60*time.Second)); err != nil {
+		t.Fatalf("waitCorpseRun returned %v, want nil: one failed read must not end the wait", err)
+	}
+	if got := clock.now().Sub(start); got < corpseRunPoll {
+		t.Fatalf("the wait finished after %s, want it to poll again after the %s poll", got, corpseRunPoll)
+	}
+}
+
+// TestWaitCorpseRunNotesOnceNotPerPoll is review 2's agy MEDIUM: the wait noted every 5 s poll into summary.notes.
+// The summary gets one note when the wait starts and one when it ends; the polls' lines are run.log's.
+func TestWaitCorpseRunNotesOnceNotPerPoll(t *testing.T) {
+	clock := newFakeClock()
+	a := newFakeAgent(t, clock)
+	a.mu.Lock()
+	a.party = []string{"Bot01"}
+	a.dead["Bot01"] = true
+	a.mu.Unlock()
+	polls := 0
+	a.viewHook = func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		polls++
+		if polls >= 6 {
+			a.dead["Bot01"] = false // the run's corpse run brings the hire back on the sixth read
+		}
+	}
+	w := &walk{
+		env:      walkEnv{now: clock.now, sleep: clock.sleep},
+		agent:    a,
+		mt:       "Bot01",
+		botAt:    map[string]botPos{},
+		partyG:   map[uint64]bool{},
+		hostiles: map[string]hostileState{},
+		opts:     raidWalkOptions{wipeRest: 10 * time.Minute},
+	}
+	start := clock.now()
+	if err := w.waitCorpseRun(context.Background(), start.Add(60*time.Second)); err != nil {
+		t.Fatalf("waitCorpseRun returned %v, want nil", err)
+	}
+	if polls < 6 {
+		t.Fatalf("the wait read %d frames, want at least 6", polls)
+	}
+	w.outMu.Lock()
+	notes := append([]string(nil), w.notes...)
+	w.outMu.Unlock()
+	if len(notes) != 2 {
+		t.Fatalf("%d notes after a 6-poll wait, want 2 (start and end): %q", len(notes), notes)
+	}
+	if !strings.Contains(notes[0], "corpse run (--no-gm-revive)") || !strings.Contains(notes[1], "brought the raid back") {
+		t.Fatalf("notes %q, want the wait's start and end", notes)
+	}
+}
+
+// TestNearWipeStaleDeadRowNotCounted is review 2's Codex MEDIUM: completeQuietView counted a party row dead without
+// checking the botAt observation's age, so a stale frame ended a valid run (exit 19). A dead row needs a fresh
+// observation (10 s, the quiet rule's own freshness); a stale one is unread, and the fresh control row still counts.
+func TestNearWipeStaleDeadRowNotCounted(t *testing.T) {
+	clock := newFakeClock()
+	a := newFakeAgent(t, clock)
+	a.mu.Lock()
+	a.party = []string{"Bot01"}
+	a.dead["Bot01"] = true
+	a.frameAt = clock.now().Add(-11 * time.Second) // the frame's own stamp: older than the 10 s freshness
+	a.mu.Unlock()
+	plan := &dungeon.Plan{Map: 249}
+	w := &walk{
+		env:      walkEnv{now: clock.now, sleep: clock.sleep},
+		agent:    a,
+		plan:     plan,
+		tracker:  raidwalk.NewTracker(plan, []string{"Bot01"}),
+		mt:       "Bot01",
+		botAt:    map[string]botPos{},
+		partyG:   map[uint64]bool{},
+		hostiles: map[string]hostileState{},
+		opts:     raidWalkOptions{wipeRest: 10 * time.Minute},
+	}
+	quiet, dead, unread := w.completeQuietView(context.Background())
+	if dead != 0 || unread != 1 || quiet {
+		t.Fatalf("completeQuietView = quiet %v dead %d unread %d, want false, 0 and 1: an 11 s old dead row is unread, not a death", quiet, dead, unread)
+	}
+	a.mu.Lock()
+	a.frameAt = clock.now()
+	a.mu.Unlock()
+	quiet, dead, unread = w.completeQuietView(context.Background())
+	if dead != 1 || unread != 0 || quiet {
+		t.Fatalf("completeQuietView = quiet %v dead %d unread %d, want false, 1 and 0: a fresh dead row is a death", quiet, dead, unread)
 	}
 }

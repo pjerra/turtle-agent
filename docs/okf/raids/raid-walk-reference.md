@@ -62,10 +62,11 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 
 ### Strict runs
 
-`--no-gm-revive` is the walk the owner's strict runs ask for: no GM help after a wipe, whatever the log says. The five
+`--no-gm-revive` is the walk the owner's strict runs ask for: no GM help after a wipe, whatever the log says. The six
 `.revive` call sites the walk had — the wipe recipe (`reviveHires`, reached from `endWipe`, `recoverWipe` and a
-near-wipe with every hire dead), the near-wipe revive of the dead hires, the `--wipe-end fast` bare revive, the
-placement revive and any future `w.gm(".revive ...")` — are all off, and `w.gm` fails closed on a `.revive` line
+near-wipe with every hire dead), the boss-wipe ending in `handleBoss` (through `revive`, a boss reset the walk waited
+out), the near-wipe revive of the dead hires, the `--wipe-end fast` bare revive, the placement revive and any future
+`w.gm(".revive ...")` — are all off, and `w.gm` fails closed on a `.revive` line
 (exit 18) so a missed path is a refusal, never a silent GM assist. `--practice` is refused with the flag (exit 2): a
 practice cycle's sustain revives the dead hires through `gm_revive`, and strict and practice are opposites; the practice
 RPC refuses `gm_revive` too, so a practice loop that started anyway sends none. The `--revive-at-raid` summons go with
@@ -77,17 +78,24 @@ What happens instead:
   sends nothing (no `.go xyz`, no `.summon`) and polls the frames every 5 s until every hire is READ and none is dead,
   or the recovery's deadline passes; then the existing self-regroup flow goes on and the walk counts the wipe-resume. A
   hire missing from the frame is unread, not alive (a release or a zone-in can serve an empty or partial party list),
-  so it keeps the wait going to the deadline; the timeout's note then counts the dead and the unread apart. A deadline
-  that passes ends the walk the existing recovery-timeout way (exit 19).
+  so it keeps the wait going to the deadline; the timeout's note then counts the dead and the unread apart. A failed or
+  empty `bot_view` read is unread too, never a failure: only an interruption, a lost lease or the deadline end the
+  wait. The summary gets one note when the wait starts and one when it ends (with the dead and unread counts); the 5 s
+  polls' lines go to `run.log`. A deadline that passes ends the walk the existing recovery-timeout way (exit 19).
 - **A wipe the run does not recover by itself**: the walk stops the run, saves the commanders and the fights, waits
   for the instance to reset (the next placement must not land in a live fight) and exits 19 (`wipe at step N (no GM
-  revive)`). `--wipe-end fast` at a boss row still skips the reset wait and leaves the dead hires dead.
+  revive)`). A boss wipe the walk owns takes the same ending (`handleBoss`: the encounter it stopped the run for), so
+  no revive recipe runs there. `--wipe-end fast` at a boss row still skips the reset wait and leaves the dead hires
+  dead.
 - **A near-wipe**: every hire dead means no recovery (the existing paused ending); with someone alive the walk sends
   no `.revive`, leaves the dead hires to the run (living healers' resurrections or TB's own regroup), rests and
   resumes as usual. The rest never goes quiet while a hire is dead, so once it has waited its window (the same
   `--wipe-rest` it waits for quiet) with a hire still dead, the walk ends at once with exit 19 and the reason
   `near-wipe at step N: K hire(s) still dead, no GM revive (--no-gm-revive)`: a strict run does not go on with dead
-  hires and sends no GM help. A window that ends with every hire read alive goes on to the resume as before.
+  hires and sends no GM help. A hire counts as dead only with a fresh observation (a `bot_at` row at most 10 s old, the
+  same freshness the quiet rule uses): a stale or missing row is unread, and the reason then reports the dead and the
+  unread apart. With no fresh death the walk waits out the recovery's deadline instead of ending on a stale row. A
+  window that ends with every hire read alive goes on to the resume as before.
 
 The summary carries `no_gm_revive: true`; `--dry-run` prints the strict line. The placement's implied
 `--no-place-revive` keeps its fast fail: half or more of the hires dead is still exit 29, `party dead`.
