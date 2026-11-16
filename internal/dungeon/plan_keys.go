@@ -47,6 +47,9 @@ func (p *Plan) KeyGaps(from int) []KeyGap {
 	for li, l := range p.Legs {
 		if l.Optional != nil && l.Optional.Item != 0 {
 			made[l.Optional.Item] = true
+			for _, n := range l.Optional.Also {
+				made[n.Item] = true
+			}
 		}
 		check := func(path string, st Step) {
 			var needs []ItemRef

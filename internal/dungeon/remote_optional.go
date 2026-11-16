@@ -32,28 +32,57 @@ func (d *RemoteDriver) optionalHolders() []string {
 	return names
 }
 
-// optionalLegCheck says whether the optional leg i has its item: holder is the bot that carries it, else why is the skip text. A failed read is
-// an error.
+// optionalLegCheck says whether the optional leg i has every item it needs: holder is the bot that carries them all,
+// else why is the skip text, naming the first missing need with the held and wanted counts. A failed read is an
+// error. Every item must be in the same holder's bags, because the core consumes the reagents from the caster's bags.
 func (d *RemoteDriver) optionalLegCheck(ctx context.Context, i int) (holder, why string, err error) {
 	o := d.plan.Legs[i].Optional
 	if o == nil {
 		return "", "", nil
 	}
-	item := o.Ref()
+	needs := o.Needs()
 	names := d.optionalHolders()
 	if len(names) == 0 {
-		return "", "", fmt.Errorf("leg %d (%s): optional, but there is no bot whose bags could hold %s", i, d.plan.Legs[i].Name, item)
+		return "", "", fmt.Errorf("leg %d (%s): optional, but there is no bot whose bags could hold %s", i, d.plan.Legs[i].Name, o.Ref())
+	}
+	if len(needs) == 1 {
+		// Legacy shape: one item, presence only, all holders named. Today's behaviour exactly when Also is absent.
+		for _, n := range names {
+			inv, err := d.carrierInv(ctx, n)
+			if err != nil {
+				return "", "", fmt.Errorf("leg %d (%s) needs %s: %w", i, d.plan.Legs[i].Name, o.Ref(), err)
+			}
+			if inv.Count(needs[0].Item) > 0 {
+				return n, "", nil
+			}
+		}
+		return "", fmt.Sprintf("no %s in the bags of %s (an optional leg: it runs only when the lead bot or the carrier carries the item; give_items puts it there for a test)", o.Ref(), strings.Join(names, " or ")), nil
 	}
 	for _, n := range names {
 		inv, err := d.carrierInv(ctx, n)
 		if err != nil {
-			return "", "", fmt.Errorf("leg %d (%s) needs %s: %w", i, d.plan.Legs[i].Name, item, err)
+			return "", "", fmt.Errorf("leg %d (%s) needs %s: %w", i, d.plan.Legs[i].Name, o.Ref(), err)
 		}
-		if inv.Count(item.Entry) > 0 {
+		missing := ""
+		for _, nd := range needs {
+			if have := inv.Count(nd.Item); have < nd.Count {
+				if nd.Count == 1 {
+					missing = fmt.Sprintf("no %s in the bags of %s", nd.Bare(), n)
+				} else {
+					missing = fmt.Sprintf("no %s in the bags of %s (has %d)", nd.Bare(), n, have)
+				}
+				break
+			}
+		}
+		if missing == "" {
 			return n, "", nil
 		}
+		// The first holder read decides the skip text: it names what a holder's bags lack, with held and wanted counts.
+		if why == "" {
+			why = missing
+		}
 	}
-	return "", fmt.Sprintf("no %s in the bags of %s (an optional leg: it runs only when the lead bot or the carrier carries the item; give_items puts it there for a test)", item, strings.Join(names, " or ")), nil
+	return "", why + " (an optional leg: it runs only when the lead bot or the carrier carries the item; give_items puts it there for a test)", nil
 }
 
 // skipOptionalLeg is called at an optional leg's start. It reports whether the leg was skipped: its result is "skipped: <why>", the stepper goes

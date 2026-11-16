@@ -87,8 +87,15 @@ func (e *prepEnv) giveName(g GiveItem) string {
 	}
 	if e.plan != nil {
 		for _, l := range e.plan.Legs {
-			if l.Optional != nil && l.Optional.Item == g.Item && l.Optional.Name != "" {
-				return l.Optional.Name
+			if l.Optional != nil {
+				if l.Optional.Item == g.Item && l.Optional.Name != "" {
+					return l.Optional.Name
+				}
+				for _, n := range l.Optional.Also {
+					if n.Item == g.Item && n.Name != "" {
+						return n.Name
+					}
+				}
 			}
 			for _, st := range append(slices.Clone(l.Steps), l.AfterBoss...) {
 				if u := st.UseObject; u != nil && u.RequiresItem != nil && u.RequiresItem.Entry == g.Item && u.RequiresItem.Name != "" {

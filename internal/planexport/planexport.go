@@ -502,6 +502,36 @@ func (b *builder) move(p dungeon.Point, direct bool, comment string) {
 	b.last, b.haveLast = p, true
 }
 
+func optionalNeedList(o *dungeon.OptionalLeg) string {
+	parts := make([]string, 0, len(o.Needs()))
+	for _, n := range o.Needs() {
+		parts = append(parts, n.Bare())
+	}
+	return strings.Join(parts, " and ")
+}
+
+// optionalGiveList is the GM setup line's item list: "Mudskunk Lure (19974) and 5x Zulian Mudskunk (19975)". The count
+// form matches the driver's skip text ("no 5x ... (has 2)").
+func optionalGiveList(o *dungeon.OptionalLeg) string {
+	return optionalNeedList(o)
+}
+
+// optionalGiveLines is the GM command list: "GM .additem 19974; .additem 19975 5, with the bot selected".
+func optionalGiveLines(o *dungeon.OptionalLeg) string {
+	parts := make([]string, 0, len(o.Needs()))
+	for i, n := range o.Needs() {
+		line := fmt.Sprintf(".additem %d", n.Item)
+		if n.Count > 1 {
+			line += fmt.Sprintf(" %d", n.Count)
+		}
+		if i == 0 {
+			line = "GM " + line
+		}
+		parts = append(parts, line)
+	}
+	return strings.Join(parts, "; ")
+}
+
 func (b *builder) leg(li int) error {
 	l := b.plan.Legs[li]
 	if slices.Contains(b.opt.SkipLegs, l.Name) {
@@ -515,12 +545,20 @@ func (b *builder) leg(li int) error {
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): skip_export (an opt-in wing): left out of the export; pass --with-legs %s to include it", li, l.Name, l.Name))
 		return nil
 	} else if l.Optional != nil && slices.Contains(b.opt.WithOptional, l.Name) {
-		item := l.Optional.Ref()
-		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional, in the rows by --with-optional: give %s to the lead bot before .bot run start (a GM .additem %d with the bot selected); the run leader has no GM step and pauses at the leg's use_on when no party bot carries it", li, l.Name, item, l.Optional.Item))
+		if len(l.Optional.Also) == 0 {
+			item := l.Optional.Ref()
+			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional, in the rows by --with-optional: give %s to the lead bot before .bot run start (a GM .additem %d with the bot selected); the run leader has no GM step and pauses at the leg's use_on when no party bot carries it", li, l.Name, item, l.Optional.Item))
+		} else {
+			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional, in the rows by --with-optional: give %s to the lead bot before .bot run start (%s, with the bot selected); the run leader has no GM step and pauses at the leg's use_on when no party bot carries it", li, l.Name, optionalGiveList(l.Optional), optionalGiveLines(l.Optional)))
+		}
 	} else if l.Optional != nil {
 		// The run leader's bots carry no such item and its rows have no way to give one (give_items is the agent's GM setup), so the leg would
 		// end the run at its first use of the object: the leg is left out and the later legs close up.
-		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
+		if len(l.Optional.Also) == 0 {
+			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, l.Optional.Ref()))
+		} else {
+			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional (needs %s, which the run leader's bots do not carry): left out of the export", li, l.Name, optionalNeedList(l.Optional)))
+		}
 		return nil
 	}
 	b.leg_, b.seq, b.haveLast, b.skippedLoot = li, 0, false, 0
