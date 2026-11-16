@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 )
 
@@ -3924,4 +3927,83 @@ func TestAutoPracticeNeverEngagedRelaunches(t *testing.T) {
 		t.Fatalf("the event does not name the never-engaged relaunch:\n%s", f.events())
 	}
 	finishAttempt(t, s)
+}
+
+// anyOfZGMigration writes the Zul'Gurub rows, with the optional Edge of Madness any_of leg, as a world migration the
+// autopilot's autoReadRows reads (plan name zul_gurub).
+func anyOfZGMigration(t *testing.T, path string) {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := planexport.Build(p, planexport.Options{Source: "test", WithOptional: []string{"edge_of_madness"}, BossAnyOf: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(planexport.WriteSQL([]planexport.Rows{res.Rows})), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAutopilotReloadResolvesAnyOfGoal: targets.txt edited at runtime to boss:<a non-canonical any_of alternative>
+// must be resolved by the re-read itself (before the queued state is adopted and launched), or its Alts stay unset
+// and GoalBossDead misses the canonical entry the summary reports (15082). The pending state is inspected directly:
+// a launch resolves the goal too, which would hide whether the re-read did.
+func TestAutopilotReloadResolvesAnyOfGoal(t *testing.T) {
+	f := newAutoFixture(t)
+	sql := filepath.Join(f.dir, "zg-anyof.sql")
+	anyOfZGMigration(t, sql)
+	f.target("a srv 1 zg-a boss:15082 -- zul_gurub --sql " + sql)
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	// The line is edited to the row's alternative, not its canonical entry.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a boss:15084 -- zul_gurub --sql "+sql+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.reloadTargets()
+	s.statesMu.Lock()
+	var got raidwalk.AutoGoal
+	for _, p := range s.pending {
+		if p.id == "a" {
+			got = p.goals[p.current].target.Goal
+		}
+	}
+	s.statesMu.Unlock()
+	if got.Boss != 15084 || !slices.Equal(got.Alts, []uint32{15082, 15083, 15084, 15085}) {
+		t.Fatalf("the re-read queued goal boss:%d with Alts %v, want boss:15084 with the row's alternatives [15082 15083 15084 15085]\n%s", got.Boss, got.Alts, f.events())
+	}
+}
+
+// TestAutopilotUnresolvedAnyOfGoalRefused: a goal known to name an any_of alternative (its previous resolve put the
+// row's canonical entry first in Alts) cannot be resolved from rows that are gone. The launch resolver must refuse
+// the id with a clear ESCALATE line instead of launching with Alts unset, which would never meet the canonical kill.
+func TestAutopilotUnresolvedAnyOfGoalRefused(t *testing.T) {
+	f := newAutoFixture(t)
+	sql := filepath.Join(f.dir, "zg-anyof.sql")
+	anyOfZGMigration(t, sql)
+	f.target("a srv 1 zg-a boss:15084 -- zul_gurub --sql " + sql)
+	s := f.supervisor()
+	st := f.stateByID(s, "a")
+	if st == nil {
+		t.Fatal("no state for a")
+	}
+	st.mu.Lock()
+	alts := slices.Clone(st.goals[st.current].target.Goal.Alts)
+	st.mu.Unlock()
+	if !slices.Equal(alts, []uint32{15082, 15083, 15084, 15085}) {
+		t.Fatalf("startup goal Alts = %v, want the row's alternatives [15082 15083 15084 15085]", alts)
+	}
+	if err := os.Remove(sql); err != nil {
+		t.Fatal(err)
+	}
+	if s.resolveLaunchGoal(st) {
+		t.Fatal("the goal resolved from a migration that is gone")
+	}
+	events := f.events()
+	if !strings.Contains(events, "ESCALATE") || !strings.Contains(events, "any_of alternative") {
+		t.Fatalf("events lack the refusal naming the unresolved any_of alternative:\n%s", events)
+	}
 }

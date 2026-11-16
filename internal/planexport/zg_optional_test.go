@@ -67,7 +67,7 @@ func TestZulGurubEdgeOfMadnessLeg(t *testing.T) {
 		t.Fatalf("boss = %+v, want 15082 with any_of [15082 15083 15084 15085] at (-11901.3, -1906.52, 65.36)", leg.Boss)
 	}
 
-	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
+	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}, BossAnyOf: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestZulGurubEdgeOfMadnessLeg(t *testing.T) {
 // which is wrong once the 14-day rotation turns over.
 func TestZulGurubEdgeOfMadnessBossAnyOf(t *testing.T) {
 	p := loadZGPlan(t)
-	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
+	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}, BossAnyOf: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,12 +131,12 @@ func TestZulGurubEdgeOfMadnessBossAnyOf(t *testing.T) {
 	}
 }
 
-// TestBossAnyOfExportWarning: an any_of boss row is always exported with the warning that it needs TortoiseBots
-// kPlanFlagBossAnyOf, because an older module would wait for all of the row's entries. The default export (no
-// --with-optional) has neither the row nor the warning.
+// TestBossAnyOfExportWarning: an any_of boss row exported with the explicit --boss-anyof opt-in also carries the warning
+// that it needs TortoiseBots kPlanFlagBossAnyOf, because an older module would wait for all of the row's entries. The
+// default export (no --with-optional) has neither the row nor the warning.
 func TestBossAnyOfExportWarning(t *testing.T) {
 	p := loadZGPlan(t)
-	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
+	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}, BossAnyOf: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,6 +218,37 @@ func TestZulGurubGahzrankaLeg(t *testing.T) {
 	}
 	if !gotUseItem || !gotBoss {
 		t.Fatalf("exported gahzranka rows: gotUseItem=%v gotBoss=%v", gotUseItem, gotBoss)
+	}
+}
+
+// TestPlanexportAnyOfRowNeedsFlag: a boss row of alternatives is written ONLY with the explicit --boss-anyof opt-in.
+// An older TortoiseBots module reads the row's entries as kill-first adds and waits for all of them, so an export
+// without the flag refuses the plan instead of writing a row an old run leader would misrun. With the flag the row
+// carries FlagBossAnyOf and the row's canonical entry.
+func TestPlanexportAnyOfRowNeedsFlag(t *testing.T) {
+	p := loadZGPlan(t)
+	_, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
+	if err == nil {
+		t.Fatal("an any_of boss row was exported without --boss-anyof")
+	}
+	for _, want := range []string{"--boss-anyof", "kPlanFlagBossAnyOf"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not name %q", err, want)
+		}
+	}
+	res, err := Build(p, Options{Source: "test", WithOptional: []string{"edge_of_madness"}, BossAnyOf: true})
+	if err != nil {
+		t.Fatalf("the opt-in export was refused: %v", err)
+	}
+	var boss *StepRow
+	for i := range res.Rows.Steps {
+		if RowBossIs(res.Rows.Steps[i], 15084) {
+			boss = &res.Rows.Steps[i]
+			break
+		}
+	}
+	if boss == nil || boss.Entry != 15082 || boss.Flags&FlagBossAnyOf == 0 || !slices.Equal(boss.Entries, []uint32{15082, 15083, 15084, 15085}) {
+		t.Fatalf("opt-in boss row = %+v, want entry 15082 with FlagBossAnyOf and entries [15082 15083 15084 15085]", boss)
 	}
 }
 

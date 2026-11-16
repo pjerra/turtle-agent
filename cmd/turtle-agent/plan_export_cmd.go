@@ -19,7 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--boss-anyof] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -45,6 +45,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	skipLegs := fs.String("skip-legs", "", "leg names (comma list) left out of the rows, each with a warning; the later legs close up. An unknown name is refused")
 	withOptional := fs.String("with-optional", "", "optional leg names (comma list) written into the rows anyway (Zul'Farrak's gahzrilla), each with a warning: the item the leg needs is the operator's to give to the lead bot before .bot run start (a GM .additem); a name that is no optional leg is refused")
 	withLegs := fs.String("with-legs", "", "skip_export leg names (comma list) written into the rows anyway (Zul'Farrak's farraki_arena, zeljeb), each with a warning; a name that is no skip_export leg is refused")
+	bossAnyOf := fs.Bool("boss-anyof", false, "write a boss row whose entries are any_of alternatives (Zul'Gurub's Edge of Madness) with kPlanFlagBossAnyOf (65536); REQUIRES a TortoiseBots build that knows the flag, since an older module reads the entries as kill-first adds and waits for all of them. Without it such a plan is refused, not warned")
 	force := fs.Bool("force", false, "let --out replace an existing file (never edit a migration that is applied)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -108,7 +109,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 		return fail("%s exists: a migration that is applied is never edited; export to a new name, or pass --force", target)
 	}
 	var planner *navmesh.Planner
-	opt := planexport.Options{DropCompanionsLoot: *dropLoot, CarrierChests: *carrierChests, GMCrossDirect: *gmCrossDirect, ApproachHops: *approach}
+	opt := planexport.Options{DropCompanionsLoot: *dropLoot, CarrierChests: *carrierChests, GMCrossDirect: *gmCrossDirect, ApproachHops: *approach, BossAnyOf: *bossAnyOf}
 	for _, n := range strings.Split(*skipLegs, ",") {
 		if n = strings.TrimSpace(n); n != "" {
 			opt.SkipLegs = append(opt.SkipLegs, n)

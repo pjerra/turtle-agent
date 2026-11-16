@@ -3824,10 +3824,16 @@ func (w *walk) resetBossForms() {
 func (w *walk) bossKillSummaryFor(t *bossStepTrack) raidwalk.BossKillSummary {
 	phase, phaseEntry := w.bossFormsForTrack(t)
 	active := t.active
-	if active == 0 && phaseEntry != t.entry && w.bossCanonicalEntry(0, phaseEntry) == t.entry {
+	if active == 0 {
 		// The frames showed the row's guid as an any_of alternative and no latch named it: the active entry is the
-		// form it reads (a phase entry, which maps to itself above, is no alternative and stays out).
-		active = phaseEntry
+		// alternative the form chain STARTED from. Reading only the last form lost it when the active alternative
+		// morphed into a phase entry (forms [15084, 99999]: 99999 maps to itself, not to the row's 15082).
+		for _, form := range t.forms {
+			if form != t.entry && w.bossCanonicalEntry(0, form) == t.entry {
+				active = form
+				break
+			}
+		}
 	}
 	k := raidwalk.BossKillSummary{
 		Entry: t.entry, ActiveEntry: active, Step: t.step, Engaged: t.engaged,

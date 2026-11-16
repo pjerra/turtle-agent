@@ -68,6 +68,43 @@ func TestTrackFrameAnyOfAlternativeStoresCanonical(t *testing.T) {
 	}
 }
 
+// TestBossKillSummaryActiveEntryThroughPhase: the row's guid was seen as the active any_of alternative 15084 and then
+// morphed into a phase entry 99999 with no tracker latch. The summary's active_entry is the alternative the form chain
+// STARTED from: reading only the last form (99999 maps to itself, not to the row's 15082) dropped it.
+func TestBossKillSummaryActiveEntryThroughPhase(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := planexport.Build(p, planexport.Options{Source: "test", WithOptional: []string{"edge_of_madness"}, BossAnyOf: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := 0
+	for i, s := range res.Rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == 15082 {
+			step = i + 1
+		}
+	}
+	if step == 0 {
+		t.Fatalf("no boss row 15082 in the export: %+v", res.Rows.Steps)
+	}
+	w := &walk{
+		rows:       res.Rows,
+		bossTracks: map[bossKey]*bossStepTrack{},
+		bossGUIDs:  map[string]uint32{},
+		bossForms:  map[string][]uint32{},
+	}
+	g := packet.GUID(0xF13000390700C09E).String()
+	w.bossGUIDs[g] = 15082
+	w.bossForms[g] = []uint32{15084, 99999}
+	tk := w.bossTrackAt(step, 15082)
+	tk.guid = g
+	if k := w.bossKillSummaryFor(tk); k.ActiveEntry != 15084 {
+		t.Fatalf("summary active_entry = %d (phase %d entry %d), want the chain's first alternative 15084", k.ActiveEntry, k.Phase, k.PhaseEntry)
+	}
+}
+
 // TestFinishAnyOfTrackUsesCanonicalEntry: the tracker's one-shot latch reports the entry it saw engaged, which for an
 // any_of row is the active alternative (15084). finish's block creates the track from it (finish, via bossStepOf and
 // bossTrackAt), so the summary must say boss 15082 — the row's canonical entry, the one the statuses and the
@@ -78,7 +115,7 @@ func TestFinishAnyOfTrackUsesCanonicalEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	// edge_of_madness is an optional leg: the default export leaves it out, so the rows are built with it in.
-	res, err := planexport.Build(p, planexport.Options{Source: "test", WithOptional: []string{"edge_of_madness"}})
+	res, err := planexport.Build(p, planexport.Options{Source: "test", WithOptional: []string{"edge_of_madness"}, BossAnyOf: true})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -452,9 +452,12 @@ func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 		if targets[i].Goal.Kind != "boss" {
 			continue
 		}
-		if rows, ok := autoReadRows(targets[i]); ok {
-			targets[i].Goal = raidwalk.ResolveAutoGoalBoss(rows, targets[i].Goal)
+		rows, ok := autoReadRows(targets[i])
+		goal, why := autoResolveGoal(rows, ok, targets[i].Goal)
+		if why != "" {
+			return nil, fmt.Errorf("id %s: %s", targets[i].ID, why)
 		}
+		targets[i].Goal = goal
 	}
 	return targets, nil
 }
@@ -644,6 +647,74 @@ func (s *autoSupervisor) targetRows(t raidwalk.AutoTarget) (planexport.Rows, boo
 	s.rowsCache[key] = autoRows{rows: rows, ok: ok}
 	s.rowsMu.Unlock()
 	return rows, ok
+}
+
+// autoResolveGoal resolves a boss goal against the rows the walk places against (ResolveAutoGoalBoss: a goal may name
+// ANY unit of a row whose entries are any_of alternatives) and refuses one it can no longer resolve when the goal is
+// KNOWN to name an alternative: a previous resolve named the row and the goal's entry is not its canonical id (the
+// first Alt). Such a goal is met only through its Alts, because the summary reports the row's canonical entry, so a
+// launch with them unset would miss the kill and relaunch a dead boss. why is the refusal line, "" when the goal is
+// fine (a goal that never resolved stays as it came: a plain boss entry needs no rows).
+func autoResolveGoal(rows planexport.Rows, haveRows bool, g raidwalk.AutoGoal) (raidwalk.AutoGoal, string) {
+	if g.Kind != "boss" || g.Boss == 0 {
+		return g, ""
+	}
+	wasAlt := len(g.Alts) > 0 && g.Boss != g.Alts[0]
+	next := g
+	if haveRows {
+		next = raidwalk.ResolveAutoGoalBoss(rows, g)
+	}
+	if !wasAlt {
+		return next, ""
+	}
+	why := fmt.Sprintf("boss goal %s names a non-canonical any_of alternative (the row's canonical entry is %d)", g.String(), g.Alts[0])
+	switch {
+	case !haveRows:
+		return next, why + ": the plan's rows cannot be read, so its canonical entry (and the kill summary reports under it) cannot be resolved; refusing the goal rather than launching it with no alternatives"
+	case len(next.Alts) == 0 && !autoBossRowEntry(rows, g.Boss):
+		return next, why + ": the current rows no longer list it, so a kill of the row's canonical entry could never meet it; refusing the goal"
+	}
+	return next, ""
+}
+
+// autoBossRowEntry says a boss row of the rows has entry as its canonical entry: a plain boss row, whose own entry is
+// the id its kill is reported under, needs no alternatives.
+func autoBossRowEntry(rows planexport.Rows, entry uint32) bool {
+	for _, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == entry {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveLaunchGoal refreshes the current goal's any_of alternatives from the rows THIS launch will place against (a
+// migration redeployed since the last resolve changes them) and reports whether the launch may go on. A goal known to
+// name an alternative that the current rows no longer resolve refuses the id (fail closed, with the reason in
+// EVENTS.txt) instead of launching with Alts unset. It runs outside the id's mutex: parsing a migration must not hold
+// up a YIELD's stop.
+func (s *autoSupervisor) resolveLaunchGoal(st *autoState) bool {
+	st.mu.Lock()
+	var t raidwalk.AutoTarget
+	if st.current < len(st.goals) {
+		t = st.goals[st.current].target
+	}
+	st.mu.Unlock()
+	if t.ID == "" || t.Goal.Kind != "boss" {
+		return true
+	}
+	rows, ok := s.targetRows(t)
+	goal, why := autoResolveGoal(rows, ok, t.Goal)
+	if why != "" {
+		s.refuse(st, why)
+		return false
+	}
+	st.mu.Lock()
+	if st.current < len(st.goals) && st.goals[st.current].target.Goal.String() == t.Goal.String() {
+		st.goals[st.current].target.Goal = goal
+	}
+	st.mu.Unlock()
+	return true
 }
 
 // preReadRows reads one id's rows before its launch, outside the id's state mutex: an id added or changed by a
@@ -1163,6 +1234,23 @@ func (s *autoSupervisor) reloadTargets() {
 		skip[is.ID] = true
 		warn = append(warn, fmt.Sprintf("id %s: %v", is.ID, is.Err))
 	}
+	// Every boss goal is resolved again from the rows these lines will place against: a line edited to a boss:<ENTRY>
+	// the deployed row lists as an any_of alternative must carry the row's alternatives, or a kill reported under the
+	// row's canonical entry would never meet it. (A goal already known to be an alternative fails closed at launch,
+	// where its previous resolution is known; see autoResolveGoal.)
+	for i := range targets {
+		if targets[i].Goal.Kind != "boss" {
+			continue
+		}
+		rows, ok := s.targetRows(targets[i])
+		goal, why := autoResolveGoal(rows, ok, targets[i].Goal)
+		if why != "" {
+			skip[targets[i].ID] = true
+			warn = append(warn, fmt.Sprintf("id %s: %s", targets[i].ID, why))
+			continue
+		}
+		targets[i].Goal = goal
+	}
 	if key := strings.Join(warn, "\n"); key != s.targetsWarn {
 		s.targetsWarn = key
 		for _, w := range warn {
@@ -1552,7 +1640,11 @@ func (s *autoSupervisor) tickState(st *autoState) {
 			s.deadGoal(st)
 		case due:
 			s.preReadRows(st)
-			s.launch(st)
+			// The rows a launch places against decide the goal's any_of alternatives; refresh them here so a
+			// migration redeployed under a running target cannot leave the goal blind to the row's canonical kill.
+			if s.resolveLaunchGoal(st) {
+				s.launch(st)
+			}
 		}
 		return
 	}

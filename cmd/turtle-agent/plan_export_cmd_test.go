@@ -225,6 +225,39 @@ func TestPlanExportWithOptional(t *testing.T) {
 	}
 }
 
+// TestPlanExportBossAnyOfFlag: --boss-anyof is the only way an any_of boss row reaches a migration. Without it the
+// export of Zul'Gurub's optional Edge of Madness leg is refused (an older module would read the entries as kill-first
+// adds and wait for all four bosses), and nothing is written; with it the row carries kPlanFlagBossAnyOf and every
+// alternative.
+func TestPlanExportBossAnyOfFlag(t *testing.T) {
+	dir := t.TempDir()
+	before, _ := os.ReadDir(dir)
+	code, _, errs := runExport("--dir", "../../dungeons", "--stamp", "20261116190000", "--out", dir, "--with-optional", "edge_of_madness", "zul_gurub")
+	if code == exitOK || !strings.Contains(errs, "--boss-anyof") {
+		t.Fatalf("an any_of boss row without --boss-anyof: exit %d, stderr %q", code, errs)
+	}
+	if after, _ := os.ReadDir(dir); len(after) != len(before) {
+		t.Fatal("a file was written for a refused export")
+	}
+	code, _, errs = runExport("--dir", "../../dungeons", "--stamp", "20261116190001", "--out", dir, "--with-optional", "edge_of_madness", "--boss-anyof", "zul_gurub")
+	if code != exitOK {
+		t.Fatalf("exit %d with --boss-anyof: %s", code, errs)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261116190001_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(data)
+	for _, want := range []string{"'boss', 15082", "65536", "15083", "15084", "15085"} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("the migration lacks %q", want)
+		}
+	}
+	if !strings.Contains(errs, "kPlanFlagBossAnyOf (65536)") {
+		t.Fatalf("stderr %q, want the module requirement named", errs)
+	}
+}
+
 // --with-legs writes named skip_export legs into the rows (the shipped Zul'Farrak plan's farraki_arena and zeljeb), and a name that is no
 // skip_export leg is refused before anything is written.
 func TestPlanExportWithLegs(t *testing.T) {

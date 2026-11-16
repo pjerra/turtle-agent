@@ -21,7 +21,7 @@ status: draft
 
 ## plan-export
 
-Usage: `turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)`[^plan-export]. Put flags before the plan names: this command uses plain flag parsing, which stops at the first plan name. On/off flags (every `false` default above) take `=` when you give a value (`--allow-draft=true`); a bare `--allow-draft` turns the flag on.
+Usage: `turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--boss-anyof] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)`[^plan-export]. Put flags before the plan names: this command uses plain flag parsing, which stops at the first plan name. On/off flags (every `false` default above) take `=` when you give a value (`--allow-draft=true`); a bare `--allow-draft` turns the flag on.
 
 | Flag | Default | What it does |
 | --- | --- | --- |
@@ -40,9 +40,10 @@ Usage: `turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-compan
 | `--skip-legs` | _(empty)_ | Leg names (comma list) left out of the rows. Example: `--skip-legs farraki_arena,zeljeb`. |
 | `--with-optional` | _(empty)_ | Optional leg names written into the rows anyway. Example: `--with-optional gahzrilla`. |
 | `--with-legs` | _(empty)_ | `skip_export` leg names written into the rows anyway. |
+| `--boss-anyof` | `false` | Write a boss row whose entries are `any_of` alternatives (`Zul'Gurub`'s Edge of Madness) with `kPlanFlagBossAnyOf` (65536). **Requires a TortoiseBots build that knows the flag**: an older module reads the entries as kill-first adds and waits for all of them. Without it a plan with such a row is refused. |
 | `--force` | `false` | Let `--out` replace an existing file (never edit an applied migration). |
 
-Exits: 0 exported (a `CUT:` line on stdout still means legs were cut — read why); 2 usage. A draft without `--allow-draft`, an unknown leg name in `--skip-legs`/`--with-optional`/`--with-legs`, `--all-live` with named plans, or a `companions_loot: false` leg without `--drop-companions-loot` refuses the plan. `--carrier-chests` without `--drop-companions-loot` is a usage error. Under `--all-live` a plan with a `companions_loot: false` leg is skipped with a note instead of failing the export.
+Exits: 0 exported (a `CUT:` line on stdout still means legs were cut — read why); 2 usage. A draft without `--allow-draft`, an unknown leg name in `--skip-legs`/`--with-optional`/`--with-legs`, `--all-live` with named plans, a `companions_loot: false` leg without `--drop-companions-loot`, or a boss row whose entries are `any_of` alternatives without `--boss-anyof` refuses the plan. `--carrier-chests` without `--drop-companions-loot` is a usage error. Under `--all-live` a plan with a `companions_loot: false` leg is skipped with a note instead of failing the export.
 
 ## plan-diff
 

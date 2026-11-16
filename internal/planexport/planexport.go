@@ -286,6 +286,12 @@ type Options struct {
 	// Zul'Farrak's farraki_arena and zeljeb (Turtle-custom wings, mapped offline and never fought live; the default export leaves
 	// them out so its leg numbers stay today's). A name that is no skip_export leg of the plan is an error.
 	WithLegs []string
+	// BossAnyOf writes a boss row whose entries are alternatives (the plan's boss.any_of: the one boss of several an event
+	// makes active, Zul'Gurub's Edge of Madness) with FlagBossAnyOf and the alternatives in Entries. The row means that ONE
+	// boss only to a TortoiseBots build with kPlanFlagBossAnyOf (65536); an older module reads Entries as kill-first adds and
+	// waits for all of them, so the export refuses such a plan without this option (fail closed) instead of writing a row an
+	// older run leader would misrun.
+	BossAnyOf bool
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
@@ -805,6 +811,9 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 	if len(bs.AnyOf) > 0 {
 		// The one boss of several the event makes active: Entries are the alternatives (not kill-first adds), so the row
 		// carries FlagBossAnyOf and a module that does not know it must not load the row. Entry stays the canonical id.
+		if !b.opt.BossAnyOf {
+			return fmt.Errorf("boss %d: the row lists any_of alternatives %v, which only a TortoiseBots build with kPlanFlagBossAnyOf = 65536 reads as one boss (an older module reads them as kill-first adds and waits for all of them): export with --boss-anyof to write the row", bs.Entry, bs.AnyOf)
+		}
 		flags |= FlagBossAnyOf
 		ids := make([]string, 0, len(bs.AnyOf))
 		for _, e := range bs.Units() {

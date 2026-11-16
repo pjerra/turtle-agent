@@ -103,8 +103,11 @@ spending its tries; `--no-place-revive` turns the revive off and keeps the fast 
 A plan boss may list `any_of`: the entries that can be that row's boss, of which the instance's event makes exactly one
 active (Zul'Gurub's Edge of Madness lists 15082/15083/15084/15085 on one row). `any_of` is a run-leader and raid-walk
 field only: the row's canonical `entry` names it for goals and the dashboard, raid-walk treats a kill of any of them as
-that boss, and the agent's own leader driver keeps reading `entry` alone. The exported row carries TortoiseBots'
-`kPlanFlagBossAnyOf` (65536), which an older run leader must not load (it would wait for every alternative).
+that boss, and the agent's own leader driver keeps reading `entry` alone. `plan-export` writes such a row only with the
+explicit `--boss-anyof` flag, and that flag requires a TortoiseBots build with `kPlanFlagBossAnyOf` (65536): that build
+reads the row's entries as one boss of several, while an older run leader would read them as kill-first adds and wait for
+every alternative. Without the flag the export refuses the plan, so a migration never carries a row an old run leader
+would misrun.
 
 Log a character in and keep it online with the RPC server running:
 
