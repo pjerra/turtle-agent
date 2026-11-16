@@ -508,6 +508,21 @@ func TestTargetsPairForm(t *testing.T) {
 	}
 }
 
+// A bare --no-gm-revive in a targets.txt line or a cmd-*.txt command is a switch (T45): it must not be read as a flag
+// that needs a value, which refused the whole line.
+func TestTargetsFileNoGMReviveSwitch(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644, "zg1 m910q 1 zg1-a boss:14515 -- zul_gurub --sql /x.sql --no-gm-revive\n")
+	writeFile(t, filepath.Join(dir, "cmd-a.txt"), 0o644, "turtle-agent raid-walk zul_gurub --server m910q --slot 2 --sql /x.sql --no-gm-revive\n")
+	ts, errs := readTargets(dir, "turtle-agent")
+	if len(errs) != 0 {
+		t.Fatalf("errors: %+v", errs)
+	}
+	if len(ts) != 2 {
+		t.Fatalf("%d targets, want 2", len(ts))
+	}
+}
+
 func TestTargetsFile(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644, `# id server slot holder goal -- args
