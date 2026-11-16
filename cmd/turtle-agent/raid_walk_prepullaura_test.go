@@ -3753,3 +3753,41 @@ func TestPrepullMissTally(t *testing.T) {
 		t.Fatalf("suffix %q, want %q", got, want)
 	}
 }
+
+// A bot can carry only one Well Fed aura: the core's spell_group 1001 holds 18192, 18194, 22730, 24799, 25661 and
+// others (tw_world_spell_group.sql), so a second one of them is refused or replaces the first. No list of a
+// tb-prepull-auras preset may name two of that group: the walk would send the second and read it back missing on every
+// bot, and a per-bot tolerance would hide it. The group is hard-coded (18192 and 22730 are the two the a4-1 walk was
+// short of; 18194, 24799 and 25661 are the other members the presets name).
+func TestPrepullPresetListsOneFoodAura(t *testing.T) {
+	food := []uint32{18192, 18194, 22730, 24799, 25661}
+	files, err := filepath.Glob("../../dungeons/prepull/*.json")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("the prepull presets: %v (%d files)", err, len(files))
+	}
+	for _, name := range files {
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var doc struct {
+			Roles map[string]struct {
+				IDs []uint32 `json:"ids"`
+			} `json:"roles"`
+		}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for role, r := range doc.Roles {
+			got := make([]uint32, 0, len(r.IDs))
+			for _, id := range r.IDs {
+				if slices.Contains(food, id) {
+					got = append(got, id)
+				}
+			}
+			if len(got) > 1 {
+				t.Fatalf("%s: role %q names %v: a bot can carry only one food aura (spell_group 1001)", name, role, got)
+			}
+		}
+	}
+}
