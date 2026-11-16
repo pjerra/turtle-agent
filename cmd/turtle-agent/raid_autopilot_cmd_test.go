@@ -681,6 +681,45 @@ func TestAutoRestartFromTheBossResumesAtTheGoalStart(t *testing.T) {
 	}
 }
 
+// Walk 112: the goal's own start was itself the boss row (step 397; walk 112's Hakkar leg died on step 708, its own
+// start). The wipe at the boss resumed at the goal's start verbatim, and raid-walk refused it with exit 2 ("step 708
+// is a boss row; place at a move row before it"). A goal start that is itself a boss row steps back to the move row
+// before it, on every relaunch.
+func TestAutoRestartGoalStartOnABossRowStepsBack(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from step 397")
+	f.attempt("a-1", 18, 397, "paused: 15 dead: 21")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if !strings.Contains(args[1], "--from step 396 --place") {
+		t.Fatalf("the restart did not step back from the boss-row goal start 397: %s", args[1])
+	}
+	if !strings.Contains(f.events(), `resuming from the goal's start "step 397" (as "step 396"`) {
+		t.Fatalf("no stepped-back goal-start resume event:\n%s", f.events())
+	}
+}
+
+// The --boss-wipe-fresh twin: a goal start that is itself a boss row relaunches fresh from the move row before it,
+// never from the boss row and never into the old copy.
+func TestBossWipeFreshGoalStartOnABossRowStepsBack(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from step 397 --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if !strings.Contains(args[1], "--from step 396 --place") || strings.Contains(args[1], "--reuse-instance") {
+		t.Fatalf("the boss-wipe-fresh restart did not start fresh from the move row 396: %s\n%s", args[1], f.events())
+	}
+}
+
 func TestAutoRestartFromATrashStepKeepsTheReachedStep(t *testing.T) {
 	f := newAutoFixture(t)
 	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from step 390")

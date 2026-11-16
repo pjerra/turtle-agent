@@ -1927,8 +1927,15 @@ func (s *autoSupervisor) launch(st *autoState) {
 		if goalFrom := s.autoGoalResumeStart(g.target, step); step > 0 && goalFrom != "" {
 			// A wipe at the goal's boss (or on its approach rows) resumes at the goal's own start: the row before
 			// the boss row stands inside his reach and the placement pulls him (walk 46 Jin'do).
-			resumeFrom = fmt.Sprintf("step %d is the boss or its approach: resuming from the goal's start %q", step, goalFrom)
 			from = goalFrom
+			if adj := s.autoResumeStart(g.target, from); adj != from {
+				// The goal's own start is itself a row raid-walk refuses as a start (walk 112: a goal starting on
+				// Hakkar's boss row 708): step back to the move row before it, on every relaunch.
+				resumeFrom = fmt.Sprintf("step %d is the boss or its approach: resuming from the goal's start %q (as %q, the move row before it)", step, goalFrom, adj)
+				from = adj
+			} else {
+				resumeFrom = fmt.Sprintf("step %d is the boss or its approach: resuming from the goal's start %q", step, goalFrom)
+			}
 		} else if adjusted := s.autoResumeStart(g.target, from); adjusted != from {
 			resumeFrom = fmt.Sprintf("%q is not a place start: resuming from %q", from, adjusted)
 			from = adjusted
