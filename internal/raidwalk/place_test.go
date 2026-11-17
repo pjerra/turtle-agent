@@ -692,7 +692,9 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // second stair point). T29 unchanged (the Jin'do hall's rows change kind and stand, not count). T34 +1 (the Mandokir
 // boss row gains the arena-floor stand -12188 -1956 130.6; the exporter's own cut loses a row, which this plain Build
 // does not add). T35 unchanged (the merged step-36 bat pull and formation 49189's own fallback row net zero against
-// dev's 414).
+// dev's 414). Walk 116's step-581 fix (2026-11-17) +4: leg 7's plateau pack (15043 x4 at -11723 -1734.6) is a stand
+// pull from its rim stand (-11742.4 -1735.9 17.53) with four approach rows up the west rim the raid walked, so the
+// one plain `path` row before its pull is gone and the four authored approach rows are in.
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -703,8 +705,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 420 {
-		t.Fatalf("the fixture has %d steps, want 420", len(rows.Steps))
+	if len(rows.Steps) != 424 {
+		t.Fatalf("the fixture has %d steps, want 424", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {

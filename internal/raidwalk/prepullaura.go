@@ -361,9 +361,49 @@ var prepullCrossableKinds = map[string]bool{
 	planexport.KindGossip:       true,
 }
 
+// PrepullWakesBossKind is the trigger kind PrepullFirePoint returns for a pull row whose comment says its kill starts
+// the boss's encounter (plan-export writes a wakes_boss group as "pull group N; wakes boss <entry>").
+const PrepullWakesBossKind = "wakes_boss"
+
+// prepullWakesBossComment reports whether a pull row's comment carries "wakes boss <entry>" for this boss.
+func prepullWakesBossComment(comment string, entry uint32) bool {
+	want := "wakes boss " + strconv.Itoa(int(entry))
+	for _, part := range strings.Split(comment, ";") {
+		if strings.TrimSpace(part) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// prepullWakesBossStep is the EARLIEST pull row of the boss's own leg whose comment wakes this boss entry (a plan's
+// wakes_boss), 0 when there is none. The earliest is the one whose kill starts the encounter, so a plan that marks two
+// pulls of one leg (the plan format allows it) must be prepared before the first, not the nearest to the boss row. A
+// step < 2 or one whose row before it belongs to another leg is not usable: the fire would stand on the previous
+// leg's last row, so the search moves on to the next marked pull (and the boss row's own step when none is usable).
+func prepullWakesBossStep(rows planexport.Rows, bossIndex int, entry uint32) int {
+	leg := rows.Steps[bossIndex].Leg
+	for i := range bossIndex {
+		s := rows.Steps[i]
+		if s.Leg != leg {
+			continue
+		}
+		if s.Kind != planexport.KindPull || !prepullWakesBossComment(s.Comment, entry) {
+			continue
+		}
+		if step := i + 1; step >= 2 && rows.Steps[step-2].Leg == leg {
+			return step
+		}
+	}
+	return 0
+}
+
 // PrepullFirePoint is the step whose own status fires a boss row's pre-pull preparation: the step whose NEXT row the
 // gate stands before. It is bossStep itself by default (the run stands on step bossStep-1, or on the boss row when it
-// passed that step too fast). When the boss row is reached through a trigger (a use_object's open/open_proof row or a
+// passed that step too fast). When the leg has a pull row whose comment says its kill wakes this boss (a plan's
+// wakes_boss: Zul'Gurub's Vilebranch Speaker 11391 starts Bloodlord Mandokir's encounter the moment it dies), the fire
+// moves in front of the row before the EARLIEST such pull: the party fights the boss's own fight there, so the
+// preparation has to be on it. Otherwise, when the boss row is reached through a trigger (a use_object's open/open_proof row or a
 // gossip row) and only that trigger, waits and moves stand between it and the boss row, the fire moves back to the
 // trigger: fireStep is the trigger row, triggerStep is the same step and triggerKind is the trigger's kind, so the
 // caller fires on the row before the trigger. A trigger that is the leg's first row does not move the fire (the fire
@@ -377,6 +417,9 @@ func PrepullFirePoint(rows planexport.Rows, bossStep int) (fireStep, triggerStep
 	boss := rows.Steps[bossStep-1]
 	if boss.Kind != planexport.KindBoss {
 		return bossStep, 0, ""
+	}
+	if step := prepullWakesBossStep(rows, bossStep-1, boss.Entry); step != 0 {
+		return step, step, PrepullWakesBossKind
 	}
 	for i := bossStep - 2; i >= 0; i-- {
 		s := rows.Steps[i]
