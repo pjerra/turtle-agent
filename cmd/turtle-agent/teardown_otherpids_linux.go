@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/privfile"
-	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/privfile"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
 )
 
 // teardownOtherPIDs signals stray uid-owned pids from this dir's *.pid files.

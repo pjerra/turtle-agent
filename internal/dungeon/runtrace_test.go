@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
-	"github.com/pjerra/turtle-agent/internal/trace"
-	"github.com/pjerra/turtle-agent/internal/tracerun"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/tracerun"
 )
 
 func evNames(f *trace.File) map[string]int {

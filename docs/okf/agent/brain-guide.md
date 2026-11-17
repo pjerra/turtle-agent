@@ -2,17 +2,17 @@
 type: Guide
 title: Brain and follow
 description: Start the fighting brain, follow a lead bot across a plan, and stop both.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
 tags: [agent, brain, follow, combat]
 sources:
   - id: brain-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
     title: brain_start, brain_stop, brain_status
   - id: follow-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/follow_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/follow_methods.go
     title: follow_start, follow_stop, follow_status
   - id: controller-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/controller.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/controller.go
     title: Brain controller and status
 generated:
   by: muse-spark-1.3/omp

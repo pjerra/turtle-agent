@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // suiteSum is a minimal summary of one walk: a single step carrying RunS, then the splits the metrics read.

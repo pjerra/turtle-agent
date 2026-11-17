@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Ritual steps in remote mode (TortoiseBots `cmd ritual`, player-controls.md section 1a). A summoning ritual object (game object type 18:

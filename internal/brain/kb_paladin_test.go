@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 // The knowledge base paladin rotations (tools/kbrotgen): retribution replaces paladin_retribution, protection plays on

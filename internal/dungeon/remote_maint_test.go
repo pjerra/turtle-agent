@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/trace"
-	"github.com/pjerra/turtle-agent/internal/tracerun"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/tracerun"
 )
 
 // maintPlan is n legs, each a walk of 60 yd; leg 3 (when n > 3) also has a pull.

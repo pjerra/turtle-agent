@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 const raidWalkReportUsage = `usage: turtle-agent raid-walk report <dir> [--spell ID[,ID]...] [--window 5s] [--clock-offset 1h]

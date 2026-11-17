@@ -2,17 +2,17 @@
 type: Overview
 title: The agent and its RPC
 description: What one turtle-agent process is, how its parts fit, and where each thing is documented.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
 tags: [agent, session, rpc, brain]
 sources:
   - id: methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
     title: Core RPC methods (status, chat, movement, combat)
   - id: brain-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/engine.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/engine.go
     title: The brain's trigger-action engine
   - id: session-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
     title: Session lifecycle and world state
 generated:
   by: muse-spark-1.3/omp

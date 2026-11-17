@@ -2,14 +2,14 @@
 type: Guide
 title: Run a fleet
 description: Log many characters in at once with one supervised command.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
 tags: [dungeon, fleet, guide]
 sources:
   - id: fleet
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
     title: The fleet supervisor
   - id: fleet-budget
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fleet_budget.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fleet_budget.go
     title: The shared login budget
 generated:
   by: muse-spark-1.3/omp

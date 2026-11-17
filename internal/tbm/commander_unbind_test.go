@@ -3,7 +3,7 @@ package tbm
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 func TestUnbindAckDropsTheHeldFrame(t *testing.T) {

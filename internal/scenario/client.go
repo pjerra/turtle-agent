@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 // maxReply caps one RPC reply at 4 MiB.

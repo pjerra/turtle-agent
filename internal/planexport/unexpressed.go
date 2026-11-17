@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // The plan attributes the run leader's rows cannot carry: each one the plan sets is a warning (TortoiseBots #984: nothing is dropped

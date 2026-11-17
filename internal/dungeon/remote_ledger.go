@@ -3,8 +3,8 @@ package dungeon
 import (
 	"slices"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The kill ledger: a run-wide record of every hostile the party fought, whichever pull it came to. A pull's fight tracks the pulled

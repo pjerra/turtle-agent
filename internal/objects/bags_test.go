@@ -3,7 +3,7 @@ package objects
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func TestBagsListsEveryBag(t *testing.T) {

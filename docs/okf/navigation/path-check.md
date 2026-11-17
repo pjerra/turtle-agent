@@ -2,14 +2,14 @@
 type: Guide
 title: Replay one hop with path-check
 description: Rerun one walk step offline against the navmesh with both path queries.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/path_check_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/path_check_cmd.go
 tags: [navigation, navmesh, debugging]
 sources:
   - id: path-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/path_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/path_check_cmd.go
     title: The path-check command
   - id: serverpath
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/serverpath.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/serverpath.go
     title: The server's own path query
 generated:
   by: muse-spark-1.3/omp

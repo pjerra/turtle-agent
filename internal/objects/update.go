@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // BlockType is ObjectUpdateType (UpdateData.h:32-40).

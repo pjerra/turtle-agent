@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The selection log ties the server's echo of the selection (UNIT_FIELD_TARGET of the player's own object) to the CMSG_SET_SELECTION packets

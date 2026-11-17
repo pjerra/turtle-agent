@@ -2,15 +2,15 @@
 type: Tutorial
 title: Check your first rotation
 description: List, show and check a rotation file, then A/B it against another with the pull test.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/ROTATIONS.md
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/ROTATIONS.md
 tags: [combat, rotation, tutorial]
 sources:
   - id: rotations-doc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/ROTATIONS.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/ROTATIONS.md
   - id: rotation-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/rotation_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/rotation_cmd.go
   - id: pulltest-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:35:00+01:00

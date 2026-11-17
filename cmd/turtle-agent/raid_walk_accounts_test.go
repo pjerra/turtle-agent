@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 func TestParsePInfoLine(t *testing.T) {

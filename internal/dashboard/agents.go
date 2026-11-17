@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/netutil"
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/netutil"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 // Agent is one running turtle-agent the dashboard watches.

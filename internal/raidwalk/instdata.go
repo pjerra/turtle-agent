@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // GMInstanceSpec is one --gm-instance-data value: the leg that fires it and

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The raid hire flow: `prepare.party "hire"` on a raid plan (step 2 of the

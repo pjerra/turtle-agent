@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // The knowledge-base rotations of the mage, the warlock and the hunter (tasks K2a-K2d, this file's mage specs): each recipe's

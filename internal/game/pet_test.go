@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/game/gametest"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game/gametest"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Pet packet layouts, byte for byte, as the core reads and writes them (tortoise-wow 5d79486; cites in internal/game/pet.go).

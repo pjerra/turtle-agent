@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/minimap"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/minimap"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // TwoFloorDesc is the <desc> of an overlay on a map whose minimaps folder has a second floor picture

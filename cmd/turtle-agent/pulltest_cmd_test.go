@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 func writePulltest(t *testing.T, dir, name string, mod func(*dungeon.PulltestReport)) string {

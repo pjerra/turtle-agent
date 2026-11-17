@@ -2,13 +2,13 @@
 type: Reference
 title: login
 description: Every login flag with its default, an example, and the login exit codes.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
 tags: [getting-started, reference, login, flags]
 sources:
   - id: login
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
   - id: main
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/main.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/main.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

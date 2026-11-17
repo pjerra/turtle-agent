@@ -21,8 +21,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // WorldBuild is the only build the world server accepts (game/Database/DBCStores.cpp:121-129).

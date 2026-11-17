@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
 )
 
 // The parsers against packets the real server sent (realpackets_test.go).

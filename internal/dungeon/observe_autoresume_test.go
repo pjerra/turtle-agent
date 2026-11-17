@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 const didNotHoldNote = "3 dead: regroup (cmd revive party), then .bot run resume (2 regroups by itself at this step did not hold)"

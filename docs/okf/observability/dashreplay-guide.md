@@ -2,15 +2,15 @@
 type: Guide
 title: Replay a recording into a test daemon
 description: Drive the TortoiseBots observability dashboard from a replay file with no server running.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashreplay_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashreplay_cmd.go
 tags: [dashreplay, dashboard]
 sources:
   - id: dashreplay-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashreplay_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashreplay_cmd.go
   - id: dashreplay-send
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dashreplay/send.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dashreplay/send.go
   - id: dashreplay-format
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dashreplay/format.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dashreplay/format.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:40:00+01:00

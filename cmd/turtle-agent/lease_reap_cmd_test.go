@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
 )
 
 // deadProcessPID runs a short command and returns the pid it had, now reaped.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // bigPack runs one pull group of n mobs (entries 299, then 300 for the rest) with the cc bot given.

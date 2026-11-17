@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // ChatType is ChatMsg (SharedDefines.h:1358-1455).

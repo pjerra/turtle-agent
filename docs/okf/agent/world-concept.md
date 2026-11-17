@@ -2,17 +2,17 @@
 type: Concept
 title: World state
 description: What status, units, party and the event log tell you about the character and its surroundings.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
 tags: [agent, status, units, party, events]
 sources:
   - id: session-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
     title: StatusInfo and session state
   - id: objects-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/objects/store.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/objects/store.go
     title: Unit, aura, cast, item and game-object store
   - id: events-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/events/log.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/events/log.go
     title: Event kinds and the polling log
 generated:
   by: muse-spark-1.3/omp

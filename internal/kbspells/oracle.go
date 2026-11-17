@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // SpecOracle is one spec of a class: the spell lists the oracle judges.

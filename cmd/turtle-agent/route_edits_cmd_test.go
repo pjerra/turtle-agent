@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/routeedit"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/routeedit"
 )
 
 const editsPlan = `{"version":1,"name":"edit1","map":209,"entrance":{"x":0,"y":0,"z":5},

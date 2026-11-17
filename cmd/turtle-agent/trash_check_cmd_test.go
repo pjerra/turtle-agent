@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/trashcheck"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/trashcheck"
 )
 
 const trashPlan = `{"version":1,"name":"tc","map":70,"entrance":{"x":1,"y":2,"z":3},"level_band":[40,45],

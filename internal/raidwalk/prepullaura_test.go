@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // A --prepull-aura value is "role=<role>:<ids>": spell ids and buff preset names, with "world" the world-raid preset.
@@ -130,6 +132,51 @@ func TestClassName(t *testing.T) {
 	} {
 		if got := ClassName(class); got != want {
 			t.Errorf("class %d: %q, want %q", class, got, want)
+		}
+	}
+}
+
+// The sample tb-prepull-auras files (dungeons/prepull/zg-preraid.json and
+// dungeons/prepull/onyxia-preraid.json): one non-empty id list per role in PrepullRoles order, every id > 0. The
+// read fails when the file is missing, so deleting one breaks this test.
+func TestPrepullAuraSampleFiles(t *testing.T) {
+	for _, sample := range []struct {
+		path    string
+		tankLen int
+		allLen  int
+	}{
+		{"../../dungeons/prepull/zg-preraid.json", 5, 7},
+		{"../../dungeons/prepull/onyxia-preraid.json", 5, 8},
+	} {
+		raw, err := os.ReadFile(sample.path)
+		if err != nil {
+			t.Fatalf("%s: %v", sample.path, err)
+		}
+		list, err := ParsePrepullAuraFile(sample.path, raw)
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		if len(list) != len(PrepullRoles) {
+			t.Fatalf("%s: %d roles, want %d: %+v", sample.path, len(list), len(PrepullRoles), list)
+		}
+		for i, role := range PrepullRoles {
+			if list[i].Role != role {
+				t.Fatalf("%s: role %d is %q, want %q (PrepullRoles order)", sample.path, i, list[i].Role, role)
+			}
+			if len(PrepullIDs(list[i].Buffs)) == 0 {
+				t.Fatalf("%s: role %q names no id", sample.path, role)
+			}
+			for _, id := range PrepullIDs(list[i].Buffs) {
+				if id == 0 {
+					t.Fatalf("%s: role %q names spell id 0", sample.path, role)
+				}
+			}
+		}
+		if got := PrepullIDs(list[0].Buffs); len(got) != sample.tankLen || got[0] != 17626 || got[4] != 25661 {
+			t.Fatalf("%s: tank ids %v", sample.path, got)
+		}
+		if got := PrepullIDs(list[len(list)-1].Buffs); len(got) != sample.allLen || got[0] != 22888 || !slices.Contains(got, 23768) {
+			t.Fatalf("%s: all ids %v", sample.path, got)
 		}
 	}
 }
@@ -309,5 +356,59 @@ func TestBotStateAuraRoleUnclassed(t *testing.T) {
 	}
 	if got, _ := BotStateAuraRoleUnclassed("protection"); got != PrepullTank {
 		t.Errorf("protection with a split table gave %q, want %q", got, PrepullTank)
+	}
+}
+
+// prepullKindRows is a one-leg plan of the given row kinds (1-based step == index+1).
+func prepullKindRows(kinds ...string) planexport.Rows {
+	rows := planexport.Rows{}
+	for _, k := range kinds {
+		rows.Steps = append(rows.Steps, planexport.StepRow{Plan: "p", Leg: 1, Kind: k, Entry: 1})
+	}
+	return rows
+}
+
+// Walk 104: the ZG gong (use_object 180526, an open row) summoned Arlokk and engaged the raid on the spot, so her
+// boss row found the party already fighting and the prepull fire sent nothing (exit 18, "combat started"). The fire
+// stands in front of the trigger when only the trigger, waits and the approach's moves stand between it and the boss
+// row; a pull, another kind of row, another leg's rows or a trigger that is the leg's first row keep the boss row's
+// own step (nothing about a plan this rule does not fit changes).
+func TestPrepullFirePointBeforeASummoningTrigger(t *testing.T) {
+	move, open, proof, gossip := planexport.KindMove, planexport.KindOpen, planexport.KindOpenProof, planexport.KindGossip
+	for _, tc := range []struct {
+		name  string
+		kinds []string
+		boss  int
+		fire  int
+		trig  int
+		kind  string
+	}{
+		// Walk 104's own shape, narrowed to the leg's tail: the gong, her arena's approach move, her boss row.
+		{"open then the approach move", []string{move, move, open, move, planexport.KindBoss}, 5, 3, 3, open},
+		{"open_proof then the approach", []string{move, proof, move, planexport.KindBoss}, 4, 2, 2, proof},
+		{"gossip then a wait", []string{move, move, gossip, planexport.KindWaitObject, planexport.KindBoss}, 5, 3, 3, gossip},
+		{"the nearest trigger wins", []string{move, gossip, move, open, planexport.KindBoss}, 5, 4, 4, open},
+		// A plain boss row keeps its own fire point.
+		{"no trigger", []string{move, move, move, planexport.KindBoss}, 4, 4, 0, ""},
+		// A pull between the trigger and the boss row means the party fights a pack there: the fire stays on the boss row.
+		{"a pull after the trigger", []string{move, open, planexport.KindPull, move, planexport.KindBoss}, 5, 5, 0, ""},
+		{"a loot after the trigger", []string{move, open, planexport.KindLoot, planexport.KindBoss}, 4, 4, 0, ""},
+		{"a use_item after the trigger", []string{move, open, planexport.KindUseItem, planexport.KindBoss}, 4, 4, 0, ""},
+		// The trigger is the leg's first row: the fire would stand on the previous leg's last row.
+		{"the trigger opens the leg", []string{open, move, planexport.KindBoss}, 3, 3, 0, ""},
+	} {
+		rows := prepullKindRows(tc.kinds...)
+		fire, trig, kind := PrepullFirePoint(rows, tc.boss)
+		if fire != tc.fire || trig != tc.trig || kind != tc.kind {
+			t.Errorf("%s: fire %d trigger %d kind %q, want %d %d %q", tc.name, fire, trig, kind, tc.fire, tc.trig, tc.kind)
+		}
+	}
+	// A step that is not a boss row, and a step outside the rows, have no fire point.
+	rows := prepullKindRows(move, open, planexport.KindBoss)
+	if fire, trig, kind := PrepullFirePoint(rows, 2); fire != 2 || trig != 0 || kind != "" {
+		t.Errorf("a move row: fire %d trigger %d kind %q", fire, trig, kind)
+	}
+	if fire, trig, kind := PrepullFirePoint(rows, 9); fire != 9 || trig != 0 || kind != "" {
+		t.Errorf("out of range: fire %d trigger %d kind %q", fire, trig, kind)
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // The steps the server refused on Ragefire Chasm (map 389, rfc-live-1d) were 3.1 to 5.5 yd under the mesh floor; the floor the agent's

@@ -2,13 +2,13 @@
 type: Reference
 title: Rotation file format
 description: Every field of a version-1 rotation file, what it does, and an example.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/ROTATIONS.md
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/ROTATIONS.md
 tags: [combat, rotation, reference]
 sources:
   - id: rotations-doc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/ROTATIONS.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/ROTATIONS.md
   - id: rotation-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/rotation.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/rotation.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:58:00+01:00

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/objects/objtest"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/objects/objtest"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 const wolf = packet.GUID(0xF13000012B000001)

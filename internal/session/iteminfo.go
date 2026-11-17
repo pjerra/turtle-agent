@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 // Item prototypes by entry, from CMSG_ITEM_QUERY_SINGLE, as a client asks for the tooltip of an item it does not know (ItemHandler.cpp:336).

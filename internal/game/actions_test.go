@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 const wolfGUID = packet.GUID(0xF13000012B000001)

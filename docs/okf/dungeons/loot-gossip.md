@@ -2,20 +2,20 @@
 type: Concept
 title: Loot and gossip
 description: Who loots what in each mode, and who talks to dungeon NPCs.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/remote_objects.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/remote_objects.go
 tags: [dungeon, loot, gossip, concept]
 sources:
   - id: remote-objects
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/remote_objects.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/remote_objects.go
     title: Commander-mode object steps
   - id: lootuse
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/lootuse.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/lootuse.go
     title: Group-mode loot
   - id: remote-gossip
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/remote_gossip.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/remote_gossip.go
     title: Commander-mode gossip steps
   - id: commander-hands
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/commander_hands.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/commander_hands.go
     title: Your character's hands in a commander run
 generated:
   by: muse-spark-1.3/omp

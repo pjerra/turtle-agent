@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 func writePlanDiffFixture(t *testing.T, dir, name, sql string) string {

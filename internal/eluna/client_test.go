@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // fakeLog is an in-memory events.Log: the client's Read/Wait/Last over lines the test appends.

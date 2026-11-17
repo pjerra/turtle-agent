@@ -2,15 +2,15 @@
 type: Troubleshooting
 title: Plan troubleshooting
 description: Real error messages from the plan tools, what they mean, and the fix.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
 tags: [plans, troubleshooting]
 sources:
   - id: plan-check
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
   - id: plan-export
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
   - id: plan-scout
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T22:00:00+01:00

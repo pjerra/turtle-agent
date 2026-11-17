@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The `cmd enter` entry (remote_cmdenter.go) against a fake commander whose bots start outside the plan's map: a player's account, a plan

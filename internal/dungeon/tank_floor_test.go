@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The plan's floor is set at the band's middle level; the check scales it to the hired tank's own level with the test runs' curve (#266).

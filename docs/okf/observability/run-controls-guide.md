@@ -2,13 +2,13 @@
 type: Guide
 title: Control a run from the dashboard
 description: Pause, resume, skip or stop a run with control tokens, and read the control log.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
 tags: [dashboard, controls]
 sources:
   - id: dashboard-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
   - id: dashboard-control
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dashboard/control.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dashboard/control.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:39:00+01:00

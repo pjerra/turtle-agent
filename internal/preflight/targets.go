@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
 )
 
 // target is one raid-walk invocation of the walk directory, already split for the multi-slot form: one slot, one

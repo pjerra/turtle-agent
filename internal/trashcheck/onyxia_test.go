@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/worldspawn"
 )
 
 // The real Onyxia data: the deployed 130000 rows and C0's map 249 export. The four patrolling warders walk loops the route

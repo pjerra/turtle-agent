@@ -2,11 +2,11 @@
 type: Concept
 title: Draft, mapped, live-checked
 description: The three plan statuses and the mapping walk that moves a plan between them.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/PLANS.md
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/PLANS.md
 tags: [plans, lifecycle]
 sources:
   - id: plans-doc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/PLANS.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/PLANS.md
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

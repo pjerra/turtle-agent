@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
 )
 
 type teardownCLIFakeProbe struct {

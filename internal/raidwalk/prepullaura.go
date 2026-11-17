@@ -22,7 +22,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // The role words --prepull-aura takes: the aura role a bot plays, or "all" for every living member.
@@ -329,4 +330,70 @@ func PrepullIDs(list []dungeon.Buff) []uint32 {
 		out[i] = b.ID
 	}
 	return out
+}
+
+// prepullTrigger says a row kind starts an object's or an NPC's script, which can summon a boss and engage the raid on
+// the spot: the rows a plan's use_object step exports (an open, or an open_proof when the object's effect is proven by
+// a creature), and a gossip row. Walk 104 (ZG's Arlokk): the gong 180526's open row summoned her into combat, so her
+// boss row found the raid already fighting (exit 18).
+func prepullTrigger(kind string) bool {
+	switch kind {
+	case planexport.KindOpen, planexport.KindOpenProof, planexport.KindGossip:
+		return true
+	}
+	return false
+}
+
+// prepullCrossableKinds are the plan row kinds a summoned boss's own row may stand behind its trigger with: a wait,
+// the moves of the approach to its arena, and the trigger rows themselves (a trigger row is a trigger, not something
+// to cross). A pull row is NOT among them: the party fights a pack there, and a fire there is not the last thing
+// before the summon. Neither is any other row (a loot, a rest, a hold, a ritual, a use_item, a second boss row): none
+// of them is the approach to the summon, so the fire stays on the boss row's own step. A move to a new pack is covered
+// by the pull rule: a plan's pack is pulled by its pull row, which ends the search before any such move.
+var prepullCrossableKinds = map[string]bool{
+	planexport.KindMove:         true,
+	planexport.KindMoveDirect:   true,
+	planexport.KindMoveHopExact: true,
+	planexport.KindWaitObject:   true,
+	planexport.KindWaitClear:    true,
+	planexport.KindOpen:         true,
+	planexport.KindOpenProof:    true,
+	planexport.KindGossip:       true,
+}
+
+// PrepullFirePoint is the step whose own status fires a boss row's pre-pull preparation: the step whose NEXT row the
+// gate stands before. It is bossStep itself by default (the run stands on step bossStep-1, or on the boss row when it
+// passed that step too fast). When the boss row is reached through a trigger (a use_object's open/open_proof row or a
+// gossip row) and only that trigger, waits and moves stand between it and the boss row, the fire moves back to the
+// trigger: fireStep is the trigger row, triggerStep is the same step and triggerKind is the trigger's kind, so the
+// caller fires on the row before the trigger. A trigger that is the leg's first row does not move the fire (the fire
+// would stand on the previous leg's last row), and neither does a row the fire cannot cross (see prepullCrossableKinds):
+// both keep the boss row's own fire point, so a plan this rule does not fit behaves exactly as before. A step that is
+// not a boss row has no fire point (bossStep back, no trigger).
+func PrepullFirePoint(rows planexport.Rows, bossStep int) (fireStep, triggerStep int, triggerKind string) {
+	if bossStep < 1 || bossStep > len(rows.Steps) {
+		return bossStep, 0, ""
+	}
+	boss := rows.Steps[bossStep-1]
+	if boss.Kind != planexport.KindBoss {
+		return bossStep, 0, ""
+	}
+	for i := bossStep - 2; i >= 0; i-- {
+		s := rows.Steps[i]
+		if s.Leg != boss.Leg {
+			break
+		}
+		if !prepullCrossableKinds[s.Kind] {
+			break
+		}
+		if !prepullTrigger(s.Kind) {
+			continue
+		}
+		step := i + 1
+		if step < 2 || rows.Steps[step-2].Leg != boss.Leg {
+			return bossStep, 0, ""
+		}
+		return step, step, s.Kind
+	}
+	return bossStep, 0, ""
 }

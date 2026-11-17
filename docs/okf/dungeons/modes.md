@@ -2,14 +2,14 @@
 type: Concept
 title: Run modes
 description: "Commander, leader, and observe modes: who acts, what each allows, and how results differ."
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
 tags: [dungeon, modes, concept]
 sources:
   - id: dungeon-modes
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
     title: Run modes and leader brain presets
   - id: dungeon-remote
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
     title: Commander-mode checks and remote start
 generated:
   by: muse-spark-1.3/omp

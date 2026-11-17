@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
-	"github.com/pjerra/turtle-agent/internal/worldconn/worldtest"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn/worldtest"
 )
 
 var key40 = bytes.Repeat([]byte{0x11, 0x22, 0x33, 0x44}, 10)

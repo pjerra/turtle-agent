@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/privfile"
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/privfile"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
 )
 
 // exitTeardownFailed is the exit code of a teardown with a failed step (14).

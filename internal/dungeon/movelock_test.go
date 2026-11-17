@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // Every call that moves the leader runs under one hold of the brain's move lock, and no hold stands while the Driver does anything else.

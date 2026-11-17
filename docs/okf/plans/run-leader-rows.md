@@ -2,11 +2,11 @@
 type: Concept
 title: From plan to run leader rows
 description: What the exporter writes into the run leader tables and which steps it cannot carry.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/planexport/planexport.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/planexport/planexport.go
 tags: [plans, export]
 sources:
   - id: planexport
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/planexport/planexport.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/planexport/planexport.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/aggroest"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
+	"github.com/TortoiseBots/turtle-agent/internal/aggroest"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/worldspawn"
 )
 
 // The Arlokk terrace rows (leg 4, pulls 20-26 after the 2026-11-05 re-route) are per formation, in the loop's walking
@@ -89,7 +89,7 @@ var pullSizeKnownCounts = map[string]int{
 	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 120, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
 	"maraudon_orange": 57, "maraudon_purple": 64, "blackrock_depths": 228, "scholomance": 163, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts. Route order 2026-11-14 (issue #1542): 106 packs instead of 141, so 11 fewer pulls stand over the ceiling (the five ledge packs of round 3 add two).
 	"razorfen_kraul": 84, "dire_maul_north": 58, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
-	"blackfathom_deeps": 58, "gnomeregan": 88, "lower_blackrock_spire": 106, "stormwind_vault": 55,
+	"blackfathom_deeps": 58, "gnomeregan": 36, "lower_blackrock_spire": 106, "stormwind_vault": 55, // gnomeregan 88 -> 36 (route order fix 2026-11-12): 79 packs instead of 168, so 52 fewer pulls stand over the ceiling. The round-2 re-add went back to 37 and is gone (issue #1542 round 3, 2026-11-13): the lower-deck 6212/6232 pack is no pull of this leg (its only walk is the 265 yd lower-deck loop across the packs the short route drops), so 36 stands.
 	"frostmane_hollow": 47, "dire_maul_east": 50, "dire_maul_west": 58, "razorfen_downs": 60, "sunken_temple": 65,
 	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 44, "scarlet_library": 42, "shadowfang_keep": 71,
 	"stormwind_stockade": 34, "stratholme_live": 51, "stratholme_undead": 74,

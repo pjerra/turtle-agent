@@ -2,14 +2,14 @@
 type: Guide
 title: Play in the party
 description: Run in leader mode, where your own character leads the party and fights with the bot brain.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
 tags: [dungeon, leader, brain, guide]
 sources:
   - id: dungeon-modes
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
     title: Run modes and leader brain presets
   - id: dungeon-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
     title: dungeon_run RPC, validation, and run lifecycle
 generated:
   by: muse-spark-1.3/omp

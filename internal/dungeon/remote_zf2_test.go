@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // ZF-2 run 3i and ZF-1 run 5 (2026-10-14): the live fixes of the Zul'Farrak road. A party named by lead_bot/bots (no prepare hire) had no cc

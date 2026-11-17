@@ -2,11 +2,11 @@
 type: Guide
 title: Scout a plan before a run
 description: Run the offline plan scout pass and read its report and fix file.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
 tags: [plans, scout]
 sources:
   - id: plan-scout
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:50:00+01:00

@@ -2,17 +2,17 @@
 type: Guide
 title: Find a group
 description: Queue for dungeons through Turtle's group finder with the lfg calls.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
 tags: [dungeon, lft, guide]
 sources:
   - id: lfg-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
     title: The lfg RPC methods
   - id: lft-msg
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/lft/msg.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/lft/msg.go
     title: LFT message texts and parsing
   - id: lft-state
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/lft/state.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/lft/state.go
     title: LFT folded state
 generated:
   by: muse-spark-1.3/omp

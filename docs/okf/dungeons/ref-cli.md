@@ -2,23 +2,23 @@
 type: Reference
 title: Dungeon shell commands
 description: fleet, pulltest, fight-score, and tune-diff with every flag and default.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
 tags: [dungeon, reference, cli]
 sources:
   - id: fleet
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
     title: The fleet supervisor
   - id: pulltest-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
     title: The pulltest shell command
   - id: fight-score
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fight_score_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fight_score_cmd.go
     title: The fight-score shell command
   - id: tune-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
     title: tune-diff
   - id: plan-check
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
     title: The plan-check shell command
 generated:
   by: muse-spark-1.3/omp

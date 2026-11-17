@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
 )
 
 // exitSlotRefused is the exit code of a lease/setup refusal (exit 15).

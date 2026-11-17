@@ -3,7 +3,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Flight masters: asking for a flight and the server's answer. Enum names cite

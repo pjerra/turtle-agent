@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
 )
 
 // The spells below, with their template numbers (internal/spells/meta_test.go):

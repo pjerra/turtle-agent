@@ -1,8 +1,8 @@
 package gametest
 
 import (
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // PetBar is the action bar a fresh pet has (CharmInfo::InitPetActionBar, Objects/Unit.cpp:8943-8956) with the given spells on

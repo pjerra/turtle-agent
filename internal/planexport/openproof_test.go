@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 const proofLeg = `{"version":1,"name":"Proof_Temple","status":"live-checked (test)","map":109,"entrance":{"x":0,"y":0,"z":0},"legs":[

@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/privfile"
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/privfile"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 // slotClient calls one slot agent's JSON-RPC like `rpc` does: slot.json

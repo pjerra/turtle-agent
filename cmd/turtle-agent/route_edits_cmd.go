@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dashboard"
-	"github.com/pjerra/turtle-agent/internal/routeedit"
+	"github.com/TortoiseBots/turtle-agent/internal/dashboard"
+	"github.com/TortoiseBots/turtle-agent/internal/routeedit"
 )
 
 const routeEditsUsage = `usage:

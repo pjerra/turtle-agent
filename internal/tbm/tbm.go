@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // Prefix is the addon message prefix both sides use (BotAddonAdapter.cpp:18, Constants.lua:276).

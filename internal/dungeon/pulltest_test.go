@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tracerun"
+	"github.com/TortoiseBots/turtle-agent/internal/tracerun"
 )
 
 // The pull-test scenario (pulltest.go) against the fake commander of start_test.go.

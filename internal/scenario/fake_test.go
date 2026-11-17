@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // fakeCaller is the scripted agent: a scripted status, an event list served

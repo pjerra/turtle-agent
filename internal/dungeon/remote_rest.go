@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Drink refills at a rest gate (remote mode). The preflight sends `.bot maintenance <bot>` once, and TortoiseBots buys only 6-7 drinks

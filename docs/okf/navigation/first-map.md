@@ -2,14 +2,14 @@
 type: Tutorial
 title: Draw your first run map
 description: Turn a recorded capture into a top-down SVG map of the run.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
 tags: [navigation, map, tutorial]
 sources:
   - id: map-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
     title: The map command
   - id: mapview-scene
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/mapview/scene.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/mapview/scene.go
     title: Map scenes, floors and backgrounds
 generated:
   by: muse-spark-1.3/omp
