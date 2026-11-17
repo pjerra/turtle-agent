@@ -983,6 +983,44 @@ func TestAutoMaxAttemptsAdoptedWaitSpendsNoBudget(t *testing.T) {
 	}
 }
 
+// Round 3: without --max-attempts the attempt number only names launches, so a wait refunds nothing: the run after a
+// hire-pool or instance-cap wait is attempt 2, the numbering existing ids had before the flag existed.
+func TestAutoWaitWithoutMaxAttemptsKeepsTheAttemptNumbering(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	for _, c := range []struct {
+		name string
+		exit int
+		end  string
+	}{
+		{"hire-pool", 5, "hire: no mercenary of that kind is available right now"},
+		{"instance-cap", exitRaidWalkInstanceCap, capEnd},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+			f.attempt("a-1", c.exit, 0, c.end)
+			f.attempt("a-2", 18, 51, "paused: 15 dead: 21")
+			s := f.supervisor()
+			tickUntil(t, s, "the wait's launch", func() bool { return len(f.args()) >= 1 })
+			finishAttempt(t, s)
+			if !strings.Contains(f.events(), "-wait: ") {
+				t.Fatalf("the launch did not end in a wait:\n%s", f.events())
+			}
+			tickUntil(t, s, "the launch after the wait", func() bool { return len(f.args()) >= 2 })
+			if !strings.Contains(f.events(), "a launch: attempt 2 ") {
+				t.Fatalf("the wait renumbered the next launch (want attempt 2, the pre-flag numbering):\n%s", f.events())
+			}
+			st := s.states[0]
+			st.mu.Lock()
+			attempt := st.goals[0].attempt
+			st.mu.Unlock()
+			if attempt != 2 {
+				t.Fatalf("attempt = %d, want 2 (no budget means the wait refunds nothing):\n%s", attempt, f.events())
+			}
+		})
+	}
+}
+
 // Exit 29 on a same-instance (--reuse-instance) placement: the autopilot retries ONCE in a fresh instance (no
 // --reuse-instance, same --from) and logs it; a second exit 29 stops the id with an ESCALATE line (walk 40: 45 ids
 // stopped on the first one and a person re-added each).
@@ -2858,6 +2896,31 @@ func TestAutoEditedGoalsRunDespiteADoneCheckpoint(t *testing.T) {
 	}
 	if !strings.Contains(f.events(), "the goal lines changed since the checkpoint; its progress is not restored") {
 		t.Fatalf("the start did not say the checkpoint was stale:\n%s", f.events())
+	}
+}
+
+// Round 3: the option fields of the fingerprint (--max-attempts, --boss-wipe-max, --boss-wipe-fresh) are appended only
+// when set, so a goal line without them hashes exactly as it did before these options existed: a supervisor upgraded
+// mid-run keeps its checkpoint (the saved progress) instead of reading every id's lines as changed.
+func TestAutoTargetFingerprintKeepsPreMaxAttemptsLines(t *testing.T) {
+	fingerprint := func(line string) string {
+		t.Helper()
+		f := newAutoFixture(t)
+		f.target(line)
+		targets, err := readAutoTargets(f.walk)
+		if err != nil || len(targets) != 1 {
+			t.Fatalf("readAutoTargets(%q) = %v, %d targets", line, err, len(targets))
+		}
+		return autoTargetFingerprint(&autoState{goals: []autoGoalState{{target: targets[0]}}})
+	}
+	// The base code's format is `"%q %q %q %q %q %q"` (id, server, slot, holder, goal, start), then ` %q` per
+	// raid-walk arg, then a newline; its sha256 for `a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql` is:
+	const preMaxAttempts = "0d78fca842aacd861a917158155cea969668f8ddd4339f25c977885c57f482c0"
+	if got := fingerprint("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql"); got != preMaxAttempts {
+		t.Fatalf("fingerprint = %s, want the pre-change %s: an existing checkpoint would drop its saved progress", got, preMaxAttempts)
+	}
+	if got := fingerprint("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --max-attempts 1"); got == preMaxAttempts {
+		t.Fatal("a --max-attempts line hashes like the option-less one, so an offline edit of the budget is invisible")
 	}
 }
 

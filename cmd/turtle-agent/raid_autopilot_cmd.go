@@ -470,17 +470,28 @@ func groupAutoTargets(targets []raidwalk.AutoTarget) []*autoState {
 }
 
 // autoTargetFingerprint is the sha256 of a state's ordered, normalised goal lines: id, server, slot, holder, goal,
-// start, the attempt and wipe budgets and the raid-walk args, one line per goal (the line numbers of targets.txt
-// are not part of it). The checkpoint stores it per id, so a start can tell whether a saved goal and step belongs
-// to the lines targets.txt holds now: a person may edit the goals under a crashed supervisor, and a checkpoint
+// start, the raid-walk args, and the goal's options when they are set, one line per goal (the line numbers of
+// targets.txt are not part of it). The checkpoint stores it per id, so a start can tell whether a saved goal and step
+// belongs to the lines targets.txt holds now: a person may edit the goals under a crashed supervisor, and a checkpoint
 // written for the old lines must not mark the new ones done or place them from an old step. The budgets ride along
 // because they are taken out of Args (--max-attempts and --boss-wipe-max) or are a bare flag (--boss-wipe-fresh)
 // and would otherwise be invisible here: an offline --max-attempts edit must drop the stale stopped budget state.
+// Each option is appended only when it is set, so a line without options hashes exactly as it did before these
+// options existed and the checkpoint of an upgraded supervisor keeps its saved progress.
 func autoTargetFingerprint(st *autoState) string {
 	var b strings.Builder
 	for _, g := range st.goals {
 		t := g.target
-		fmt.Fprintf(&b, "%q %q %q %q %q %q max-attempts=%d boss-wipe-max=%d boss-wipe-fresh=%v", t.ID, t.Server, t.Slot, t.Holder, t.Goal.String(), t.Start, t.MaxAttempts, t.BossWipeMax, t.BossWipeFresh)
+		fmt.Fprintf(&b, "%q %q %q %q %q %q", t.ID, t.Server, t.Slot, t.Holder, t.Goal.String(), t.Start)
+		if t.MaxAttempts > 0 {
+			fmt.Fprintf(&b, " max-attempts=%d", t.MaxAttempts)
+		}
+		if t.BossWipeMax > 0 {
+			fmt.Fprintf(&b, " boss-wipe-max=%d", t.BossWipeMax)
+		}
+		if t.BossWipeFresh {
+			b.WriteString(" boss-wipe-fresh=true")
+		}
 		for _, a := range t.Args {
 			fmt.Fprintf(&b, " %q", a)
 		}
@@ -1621,9 +1632,10 @@ func (s *autoSupervisor) startFinish(st *autoState) {
 
 // refundAttempt rolls back the attempt a run's launch claimed when the run ends in a wait: a wait is no attempt (the
 // run never placed). Only a claimed run refunds, so an adopted checkpoint with no restored attempt cannot drive the
-// counter below zero and no run can refund another run's attempt.
+// counter below zero and no run can refund another run's attempt. Only a goal with --max-attempts refunds at all: an
+// id without the budget uses the number to name its launches, and a wait must not renumber the runs after it.
 func refundAttempt(g *autoGoalState, r *autoRun) {
-	if r.claimed && g.attempt > 0 {
+	if g.target.MaxAttempts > 0 && r.claimed && g.attempt > 0 {
 		g.attempt--
 	}
 }
