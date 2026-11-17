@@ -157,6 +157,11 @@ type autoRun struct {
 	cmd     *exec.Cmd
 	pidN    int
 	adopted bool
+	// claimed says this run's attempt is counted in the goal's attempt number: launch sets it when the child
+	// started, and an adopted run restores it from the checkpoint that carried the saved run's claim (the launch
+	// claimed the budget before the checkpoint could name the run). Only a claimed run refunds its attempt when it
+	// ends in a wait, so an adopted wait spends no budget and no rollback can take another run's attempt.
+	claimed bool
 	started time.Time
 	exited  bool
 	// exitedAt is when the autopilot saw the exit (the summary may still be being written).
@@ -1614,6 +1619,15 @@ func (s *autoSupervisor) startFinish(st *autoState) {
 	}()
 }
 
+// refundAttempt rolls back the attempt a run's launch claimed when the run ends in a wait: a wait is no attempt (the
+// run never placed). Only a claimed run refunds, so an adopted checkpoint with no restored attempt cannot drive the
+// counter below zero and no run can refund another run's attempt.
+func refundAttempt(g *autoGoalState, r *autoRun) {
+	if r.claimed && g.attempt > 0 {
+		g.attempt--
+	}
+}
+
 // finish applies a decided finish: the walk is stopped, the slot is torn down and verified, and only then is the run
 // cleared and the action (advance, stop or restart) taken. A teardown that does not verify keeps the run and the
 // pending decision: the next tick retries it, and the third failure escalates and leaves the slot alone.
@@ -1664,17 +1678,13 @@ func (s *autoSupervisor) finish(st *autoState) {
 	switch d.Action {
 	case raidwalk.AutoHirePoolWait:
 		g.hireWaits++
-		// A decided wait is no attempt (the run never placed): the launch's earlier claim of the budget is rolled
-		// back, so waits do not consume it. An adopted run claimed nothing (the launch did not start it), so the
-		// rollback cannot drive the counter below zero.
-		if !r.adopted && g.attempt > 0 {
-			g.attempt--
-		}
+		// A decided wait is no attempt (the run never placed): the launch's claim of the budget is rolled back, so
+		// waits do not consume it. The claim is the run's own: an adopted run restores it from the checkpoint, so a
+		// wait that follows a supervisor restart spends no budget either.
+		refundAttempt(g, r)
 	case raidwalk.AutoCapWait:
 		// Waiting for an instance place is no attempt: neither a failure nor progress, as the hire-pool wait.
-		if !r.adopted && g.attempt > 0 {
-			g.attempt--
-		}
+		refundAttempt(g, r)
 	default:
 		g.hireWaits = 0
 		if lastStep > prevBest {
@@ -2008,6 +2018,7 @@ func (s *autoSupervisor) launch(st *autoState) {
 	// failure keeps today's retry/escalation path and never spends the budget; a decided wait also never spent one.
 	g.attempt++
 	attempt := g.attempt
+	run.claimed = true
 	st.run = run
 	st.lastOut = out
 	st.launchFails = 0
@@ -2927,9 +2938,12 @@ func (s *autoSupervisor) reconcileSlot(st *autoState, sv *autoSavedID) {
 	}
 	if live && (holder == t.Holder || holder == "") && sv != nil {
 		st.mu.Lock()
+		// The restored attempt number was checkpointed together with this run: the launch that started it claimed
+		// the budget before the checkpoint named the pid, so the claim is this run's own.
 		r := &autoRun{
 			seq: st.seq, out: out, slot: t.Slot, reuse: reuse, goal: t.Goal, pidN: pid, adopted: true,
 			started: time.Now(), lastProgress: time.Now(), lastStep: sv.LastStep,
+			claimed: sv.Attempt > 0,
 		}
 		st.run = r
 		st.last = nil

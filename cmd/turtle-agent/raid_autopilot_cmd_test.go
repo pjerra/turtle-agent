@@ -883,6 +883,106 @@ func TestAutoMaxAttemptsIgnoresALaunchFailure(t *testing.T) {
 	}
 }
 
+// A wait that ends an adopted run is no attempt either: the checkpoint restored the launch's claim (Attempt 1) together
+// with the adopted pid, and the wait rolls that claim back, so a supervisor restart in the middle of a wait-prone run
+// does not eat one attempt of --max-attempts (round 2: both reviewers found the adopted wait left the claim counted).
+// With a budget of 2 the id therefore runs two real attempts, not one.
+func TestAutoMaxAttemptsAdoptedWaitSpendsNoBudget(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	for _, c := range []struct {
+		name  string
+		exit  int
+		end   string
+		event string
+	}{
+		{"hire-pool", 5, "hire: no mercenary of that kind is available right now", "a hire-pool-wait: "},
+		{"instance-cap", exitRaidWalkInstanceCap, capEnd, "a instance-cap-wait: "},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --max-attempts 2")
+			f.lease("zg-a", "held")
+			// A live walk in a-1 that the checkpoint says already claimed attempt 1, as a crashed supervisor left it.
+			out := filepath.Join(f.walk, "a-1")
+			os.MkdirAll(filepath.Join(out, "slot"), 0o700)
+			os.WriteFile(filepath.Join(out, "slot", "slot.json"), []byte(fmt.Sprintf(`{"server":"srv","slot":"1","holder":"zg-a","slots_path":%q}`, f.slotsPath)), 0o600)
+			os.WriteFile(filepath.Join(out, "run.log"), []byte("19:46:05.696 TBM:RUN|zul_gurub|running|51/761|jeklik|boss|begin|fighting\n"), 0o600)
+			os.WriteFile(filepath.Join(out, "summary.json"), []byte(fmt.Sprintf(`{"exit_code":%d,"steps_reached":0,"steps_total":761,"end_reason":%q}`, c.exit, c.end)), 0o600)
+			live := exec.Command("sleep", "30")
+			live.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := live.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = live.Process.Kill(); _ = live.Wait() }()
+			os.WriteFile(filepath.Join(out, "walk.pid"), []byte(strconv.Itoa(live.Process.Pid)+"\n"), 0o600)
+			saved := autoSavedState{Format: autoStateFormat, Version: autoStateVersion, IDs: []autoSavedID{{
+				ID: "a", Goal: 0, LastStep: 51, Reuse: true, Attempt: 1, ChildPID: live.Process.Pid, OutDir: out,
+			}}}
+			raw, _ := json.Marshal(saved)
+			if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			s := f.supervisor()
+			st := s.states[0]
+			st.mu.Lock()
+			adopted := st.run != nil && st.run.adopted && st.run.pidN == live.Process.Pid
+			attempt := st.goals[0].attempt
+			st.mu.Unlock()
+			if !adopted || attempt != 1 {
+				t.Fatalf("the live walk was not adopted with its claimed attempt (adopted %v, attempt %d):\n%s", adopted, attempt, f.events())
+			}
+			// The walk ends in the wait (its own teardown released the lease).
+			_ = live.Process.Kill()
+			_ = live.Wait()
+			f.lease("", "")
+			finishAttempt(t, s)
+			st.mu.Lock()
+			attempt = st.goals[0].attempt
+			done, esc := st.done, st.escalated
+			st.mu.Unlock()
+			if done || esc {
+				t.Fatalf("the adopted wait ended the id: done=%v escalated=%v:\n%s", done, esc, f.events())
+			}
+			if attempt != 0 {
+				t.Fatalf("attempt = %d after the adopted wait, want 0 (a wait is no attempt):\n%s", attempt, f.events())
+			}
+			if !strings.Contains(f.events(), c.event) {
+				t.Fatalf("no %s event:\n%s", strings.TrimSpace(c.event), f.events())
+			}
+			// The budget is whole: the next launch is attempt 1 of 2, and the id runs a second real attempt after it.
+			f.attempt("a-2", 18, 51, "paused: 15 dead: 21")
+			tickUntil(t, s, "the launch after the wait", func() bool { return len(f.args()) >= 1 })
+			if args := f.args(); !strings.Contains(args[0], "a-2") || !strings.Contains(f.events(), "a launch: attempt 1 ") {
+				t.Fatalf("the launch after the wait is not attempt 1:\n%s", f.events())
+			}
+			finishAttemptN(t, s, 2)
+			if done, esc := runState(st); done || esc {
+				t.Fatalf("attempt 1 of 2 stopped the id:\n%s", f.events())
+			}
+			f.attempt("a-3", 18, 51, "paused: 15 dead: 21")
+			tickUntil(t, s, "attempt 2 of the budget", func() bool { return len(f.args()) >= 2 })
+			if !strings.Contains(f.events(), "a launch: attempt 2 ") {
+				t.Fatalf("the second real attempt is not attempt 2:\n%s", f.events())
+			}
+			finishAttemptN(t, s, 3)
+			st.mu.Lock()
+			attempt = st.goals[0].attempt
+			done, esc, stopped := st.done, st.escalated, st.stopped
+			st.mu.Unlock()
+			if !done || esc || !stopped {
+				t.Fatalf("attempt 2 of 2 did not stop the id cleanly: done=%v escalated=%v stopped=%v:\n%s", done, esc, stopped, f.events())
+			}
+			if attempt != 2 {
+				t.Fatalf("attempt = %d, want 2:\n%s", attempt, f.events())
+			}
+			if strings.Contains(f.events(), "attempt 3") {
+				t.Fatalf("a third launch after the spent budget:\n%s", f.events())
+			}
+		})
+	}
+}
+
 // Exit 29 on a same-instance (--reuse-instance) placement: the autopilot retries ONCE in a fresh instance (no
 // --reuse-instance, same --from) and logs it; a second exit 29 stops the id with an ESCALATE line (walk 40: 45 ids
 // stopped on the first one and a person re-added each).
