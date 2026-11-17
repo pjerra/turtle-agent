@@ -45,10 +45,15 @@ type prepullAgent struct {
 	selfCombat bool
 
 	// arenaCombat names the units the fresh `q units` read of a boss arena finds in combat, arenaCBUnknown names the
-	// units it lists without a `cb` field (a degraded reply), arenaTrunc makes that reply truncated, and arenaErr
-	// makes the `tt` call fail (the toolkit's refusal).
+	// units it lists without a `cb` field (a degraded reply), arenaCalm names the units it finds alive and out of
+	// combat, arenaDead the corpses it lists (the boss's own entry), arenaOther units of another entry in combat (the
+	// trash pack a waking pull is fighting in front of the boss), arenaTrunc makes that reply truncated, and
+	// arenaErr makes the `tt` call fail (the toolkit's refusal).
 	arenaCombat    []string
 	arenaCBUnknown []string
+	arenaCalm      []string
+	arenaDead      []string
+	arenaOther     []string
 	arenaTrunc     bool
 	arenaErr       error
 	ttCmds         []string
@@ -354,6 +359,15 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		for i, name := range a.arenaCBUnknown {
 			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x300+i), "n": name, "e": 14834})
 		}
+		for i, name := range a.arenaCalm {
+			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x400+i), "n": name, "e": 14834, "cb": false})
+		}
+		for i, name := range a.arenaDead {
+			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x500+i), "n": name, "e": 14834, "cb": false, "dead": true})
+		}
+		for i, name := range a.arenaOther {
+			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x600+i), "n": name, "e": 11353, "cb": true})
+		}
 		v = ttReplyOf(a.t, map[string]any{"units": units, "n": len(units), "trunc": a.arenaTrunc})
 	case "commander":
 		var p struct {
@@ -484,6 +498,15 @@ func prepullRows(bossAt ...int) planexport.Rows {
 		}
 		rows.Steps = append(rows.Steps, planexport.StepRow{Kind: kind, Entry: 14834, Leg: 1, X: 100, Y: 200, Z: 10})
 	}
+	return rows
+}
+
+// prepullWakesRows is prepullRows(5) with row 2 marked as the pull whose kill wakes boss row 5 (a plan's wakes_boss):
+// the wakes fire stands before row 2, and every status at or after it up to the boss row is due.
+func prepullWakesRows() planexport.Rows {
+	rows := prepullRows(5)
+	rows.Steps[1] = planexport.StepRow{Kind: planexport.KindPull, Entry: 11353, Leg: 1, X: 100, Y: 200, Z: 10,
+		Comment: "pull group 17; wakes boss 14834"}
 	return rows
 }
 
@@ -833,6 +856,129 @@ func TestPrepullAuraBossRowMissingCombatStateFails(t *testing.T) {
 	}
 	if w.prepullAuraSent[5] {
 		t.Fatal("the row was recorded as done")
+	}
+}
+
+// A status on the row before the waking pull fires even when the same event page already carries the pull line: that
+// line is the very pull the fire must beat, so laterPullLine is no block for a wakes-boss fire.
+func TestPrepullAuraWakesBossFiresBeforeThePullDespiteALaterPullLine(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 1
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.rows = prepullWakesRows()
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 1, Kind: planexport.KindMove, Phase: "walk", Note: "walking"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, true)
+	if err != nil || !fired {
+		t.Fatalf("row before the waking pull: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the row before the waking pull sent nothing")
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the boss row the waking pull wakes was not recorded as done")
+	}
+}
+
+// Walk 116 st16a: the run jumped from step 416 to the waking pull row 418 (row 417 never got a status), so the fire
+// is due on the pull row's own status — the first status at or after the row before the pull. It fires once (the
+// page's later pull line is no block), pauses and resumes, and a repeat of the same status fires nothing.
+func TestPrepullAuraWakesBossOvershootFiresOnce(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 2 // the pause confirms the run already stands on the waking pull row
+	a.arenaCalm = []string{"Mandokir"}
+	// The trash pack the waking pull is fighting in front of the boss is in combat in his arena: the verdict judges
+	// the BOSS's own unit, so this is no block.
+	a.arenaOther = []string{"Vilebranch Speaker"}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.rows = prepullWakesRows()
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindPull, Phase: "pull", Note: "pulling 11353"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, true)
+	if err != nil || !fired {
+		t.Fatalf("overshot waking pull: fired %v err %v", fired, err)
+	}
+	sent := len(a.sent)
+	if sent == 0 {
+		t.Fatal("the overshot waking pull sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the boss row the waking pull wakes was not recorded as done")
+	}
+	// The fresh arena decides before the pause and again after it: the boss is alive and out of combat in both reads.
+	if len(a.ttCmds) != 2 {
+		t.Fatalf("arena reads %v", a.ttCmds)
+	}
+	fired, err = w.prepullAuraSendPending(context.Background(), st, true)
+	if err != nil || fired {
+		t.Fatalf("a repeat of the same status: fired %v err %v", fired, err)
+	}
+	if a.pauses != 1 || len(a.sent) != sent {
+		t.Fatalf("a repeat paused %d time(s) and sent %d more", a.pauses, len(a.sent)-sent)
+	}
+}
+
+// The run already stands at the waking pull with the boss engaged: the encounter started without the preparation, so
+// the walk fails closed with no aura sent and no pause.
+func TestPrepullAuraWakesBossEngagedFailsClosed(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 2
+	a.arenaCombat = []string{"Mandokir"}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.rows = prepullWakesRows()
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindPull, Phase: "pull", Note: "pulling 11353"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	code, reason := stopInfo(err)
+	if fired || code != exitRaidWalkFailed || !strings.Contains(reason, "boss row 5") || !strings.Contains(reason, "engaged") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("the engaged waking pull sent %v / paused %v", a.sent, a.verbs)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the engaged row was recorded as done")
+	}
+}
+
+// The boss died in the pull that woke him (walks 113 and 116 killed Mandokir in the 418 fight): the run is past the
+// waking pull and the arena read lists his corpse, so the row is done with no fire, no pause and no failure, and the
+// boss row's own later status is no failure either. The walk's own record of the kill is the other dead evidence and
+// needs no arena read at all.
+func TestPrepullAuraWakesBossDeadSkipsTheRow(t *testing.T) {
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindPull, Phase: "pull", Note: "pulling 11353"}
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	for _, tc := range []struct {
+		name     string
+		setup    func(*prepullAgent, *walk)
+		wantRead int
+	}{
+		{"corpse in the arena read", func(a *prepullAgent, _ *walk) { a.arenaDead = []string{"Mandokir"} }, 1},
+		{"the walk's boss record holds the kill", func(_ *prepullAgent, w *walk) {
+			w.bossTracks = map[bossKey]*bossStepTrack{{step: 5}: {entry: 14834, step: 5, killed: true}}
+		}, 0},
+	} {
+		a := newPrepullAgent(t)
+		a.statusStep = 2
+		w := newPrepullWalk(t, a, "role=all:22888")
+		w.rows = prepullWakesRows()
+		tc.setup(a, w)
+		fired, err := w.prepullAuraSendPending(context.Background(), st, true)
+		if err != nil || fired {
+			t.Fatalf("%s: fired %v err %v", tc.name, fired, err)
+		}
+		if len(a.sent) != 0 || len(a.verbs) != 0 {
+			t.Fatalf("%s: the dead row sent %v / paused %v", tc.name, a.sent, a.verbs)
+		}
+		if !w.prepullAuraDead[5] {
+			t.Fatalf("%s: the row was not recorded as dead", tc.name)
+		}
+		if len(a.ttCmds) != tc.wantRead {
+			t.Fatalf("%s: arena reads %v (want %d)", tc.name, a.ttCmds, tc.wantRead)
+		}
+		if fired, err := w.prepullAuraSendPending(context.Background(), boss, false); err != nil || fired {
+			t.Fatalf("%s: the boss row's later status fired %v err %v", tc.name, fired, err)
+		}
 	}
 }
 
@@ -3091,6 +3237,30 @@ func TestPrepullAuraTopupDoesNotDoubleSendAtTheBossRow(t *testing.T) {
 	}
 	if !w.prepullAuraSent[5] {
 		t.Fatal("the boss row was not recorded as prepared by the fire")
+	}
+}
+
+// The waking pull row itself, reported before the pull's phase (the run jumped over the row before it): the boss fire
+// owns that row too, so the top-up stays out and the fire's full lists go out once.
+func TestPrepullAuraTopupDoesNotTakeTheWakingPullRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 2
+	a.arenaCalm = []string{"Mandokir"}
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	w.rows = prepullWakesRows()
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindPull, Phase: "walk", Note: "walking to the pull"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("the waking pull row: fired %v err %v", fired, err)
+	}
+	if lines := prepullNotes(w, "topup"); len(lines) != 0 {
+		t.Fatalf("the top-up ran on a waking pull row the fire owns: %q", lines)
+	}
+	if len(a.sent) != 12 {
+		t.Fatalf("%d line(s) at the waking pull row, want the fire's 12 once each: %v", len(a.sent), a.sent)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the boss row the waking pull wakes was not recorded as prepared by the fire")
 	}
 }
 
