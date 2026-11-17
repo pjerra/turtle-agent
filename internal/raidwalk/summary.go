@@ -50,10 +50,12 @@ type Summary struct {
 	SpecFailed []SpecFailure `json:"spec_failed,omitempty"`
 	// The --revive-at-raid counts (omitted when the walk never needed it): hires summoned back to the revive point,
 	// hires two summons did not bring within 10 yd, and hires still out of range or in combat when a resume went out.
-	ReviveBrought      int          `json:"revive_brought,omitempty"`
-	ReviveUnreached    int          `json:"revive_unreached,omitempty"`
-	ReviveGatherMissed int          `json:"revive_gather_missed,omitempty"`
-	BossEngaged        *BossSummary `json:"boss_engaged"`
+	ReviveBrought      int `json:"revive_brought,omitempty"`
+	ReviveUnreached    int `json:"revive_unreached,omitempty"`
+	ReviveGatherMissed int `json:"revive_gather_missed,omitempty"`
+	// NoGMRevive says the walk ran --no-gm-revive (a strict run: no `.revive` was sent).
+	NoGMRevive  bool         `json:"no_gm_revive,omitempty"`
+	BossEngaged *BossSummary `json:"boss_engaged"`
 	// BossKill is the `boss_kill` object of a walk whose frames engaged a boss (spec 6, D5): the run leader's own
 	// kill report, the phase the boss unit was seen with and the evidence. Absent when no boss was engaged. It is the
 	// LAST engaged boss's record; BossKills lists one record per boss step the run's statuses showed.
@@ -406,17 +408,19 @@ type SummaryMeta struct {
 	GMInstanceDataUnsent                               int
 	SpecFailed                                         []SpecFailure
 	ReviveBrought, ReviveUnreached, ReviveGatherMissed int
-	Layout                                             LayoutSummary
-	Started                                            time.Time
-	Ended                                              time.Time
-	EndReason                                          string
-	Fights                                             []FightSummary
-	Decisions                                          *DecisionsSummary
-	Injections                                         []InjectSummary
-	InjectedDeaths                                     int
-	Incidents                                          []InjectIncident
-	Dashboard                                          string
-	Teardown                                           TeardownSummary
+	// NoGMRevive says the walk ran --no-gm-revive (a strict run: no `.revive` was sent).
+	NoGMRevive     bool
+	Layout         LayoutSummary
+	Started        time.Time
+	Ended          time.Time
+	EndReason      string
+	Fights         []FightSummary
+	Decisions      *DecisionsSummary
+	Injections     []InjectSummary
+	InjectedDeaths int
+	Incidents      []InjectIncident
+	Dashboard      string
+	Teardown       TeardownSummary
 	// Place is the --place walk's place object (nil without --place).
 	Place *PlaceSummary
 	// Practice is the --practice run's record (nil without --practice). It makes the walk ASSISTED and replaces the
@@ -486,6 +490,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		GMInstanceDataUnsent: m.GMInstanceDataUnsent,
 		SpecFailed:           m.SpecFailed,
 		ReviveBrought:        m.ReviveBrought, ReviveUnreached: m.ReviveUnreached, ReviveGatherMissed: m.ReviveGatherMissed,
+		NoGMRevive:   m.NoGMRevive,
 		StepTimeline: []StepSummary{},
 		Legs:         []LegSummary{},
 		Wipes:        []int{},

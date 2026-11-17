@@ -120,6 +120,15 @@ or unknown after that ends the walk at once with exit 29 (`place: party dead ...
 spending its tries; `--no-place-revive` turns the revive off and keeps the fast fail. See
 [the raid-walk reference](docs/okf/raids/raid-walk-reference.md).
 
+`--no-gm-revive` is the strict run: it never sends `.revive` (nor the revive recipe's `.go xyz`/`.summon`) and implies
+`--no-place-revive`; a wipe recovers only by the run's own corpse run (a self-regroup), which must read every hire alive
+before the walk goes on, else the walk ends with exit 19. A near-wipe rests and resumes with the dead hires left to the
+run; a hire still dead when the rest has waited its window ends the walk at once (exit 19, `near-wipe at step N: K
+hire(s) still dead, no GM revive`). `--practice` cannot be combined with it: a practice cycle revives its hires through
+`gm_revive`, and strict and practice are opposites. Any missed revive path fails the walk (exit 18) instead of sending.
+`w.gm` refuses a `.revive` line under the flag and the practice RPC refuses `gm_revive`; the summary carries
+`no_gm_revive`. See [the raid-walk reference](docs/okf/raids/raid-walk-reference.md).
+
 Log a character in and keep it online with the RPC server running:
 
 ```sh

@@ -1355,6 +1355,11 @@ func (w *walk) practiceGMRespawn(ctx context.Context, guid packet.GUID) error {
 }
 
 func (w *walk) practiceGMRevive(ctx context.Context, name string) error {
+	// Defence in depth: parseRaidWalkArgs refuses --practice with --no-gm-revive, and this refuses the RPC too, so a
+	// strict run can never revive through the practice sustain whatever starts it.
+	if w.opts.noGMRevive {
+		return stopf(exitRaidWalkFailed, "practice: gm_revive refused under --no-gm-revive (%s)", name)
+	}
 	return w.practiceGM(ctx, "gm_revive", map[string]any{"name": name})
 }
 

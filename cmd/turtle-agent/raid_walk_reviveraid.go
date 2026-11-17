@@ -165,6 +165,10 @@ func (w *walk) reviveSummonList(names []string, p dungeon.Point, since time.Time
 // and counted. The summons never end the walk: the gather wait that follows decides what the resume does about a
 // hire that is still away.
 func (w *walk) reviveBringBack(ctx context.Context, p dungeon.Point, deadline time.Time) error {
+	if w.opts.noGMRevive {
+		// A strict run never summons: there is no GM revive for the bring-back to follow.
+		return nil
+	}
 	since := w.env.now()
 	names := w.hireList()
 	if err := w.reviveAwaitAlive(ctx, names, since, deadline); err != nil {
@@ -339,7 +343,7 @@ func (w *walk) reviveRaidAnchor(revived map[string]bool, now time.Time) (string,
 // map, or not shown alive by a frame since the revive) is brought to it. The commander first `.appear`s at the anchor, so the `.summon`s land at the raid and not at
 // the GM's last spot (walk 22 F4, walk 29 S5). It records the anchor's position as the point the resume gate measures.
 func (w *walk) reviveBringBackNear(ctx context.Context, dead []string, deadline time.Time) error {
-	if !w.opts.reviveAtRaid || len(dead) == 0 {
+	if !w.opts.reviveAtRaid || len(dead) == 0 || w.opts.noGMRevive {
 		return nil
 	}
 	since := w.env.now()
