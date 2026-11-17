@@ -387,6 +387,19 @@ func TestPrepullFirePointBeforeAWakesBossPull(t *testing.T) {
 	if fire, trig, kind := PrepullFirePoint(rows, 6); fire != 2 || trig != 2 || kind != PrepullWakesBossKind {
 		t.Errorf("wakes-boss pull: fire %d trigger %d kind %q, want 2 2 %q", fire, trig, kind, PrepullWakesBossKind)
 	}
+	// A plan that marks two pulls of the leg: the EARLIEST is the one whose kill wakes the boss, so its row before it
+	// is the fire point (scanning backwards picked the nearest to the boss row).
+	twoWakes := planexport.Rows{Steps: []planexport.StepRow{
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindPull, "pull group 17; wakes boss 11382", 11353),
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindPull, "pull group 18; wakes boss 11382", 11356),
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindBoss, "boss", 11382),
+	}}
+	if fire, trig, kind := PrepullFirePoint(twoWakes, 6); fire != 2 || trig != 2 || kind != PrepullWakesBossKind {
+		t.Errorf("two waking pulls: fire %d trigger %d kind %q, want 2 2 %q", fire, trig, kind, PrepullWakesBossKind)
+	}
 	// A marker for another entry is not this boss's.
 	rows.Steps[1].Comment = "pull group 17; wakes boss 99999"
 	if fire, trig, kind := PrepullFirePoint(rows, 6); fire != 6 || trig != 0 || kind != "" {
