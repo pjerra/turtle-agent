@@ -1557,13 +1557,13 @@ func (w *walk) prepullAuraHold(ctx context.Context, bossRow, fireRow int, pause,
 	if w.plan != nil && run.Plan != "" && run.Plan != w.plan.Name {
 		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run is %s, not %s, no auras were sent", step, run.Plan, w.plan.Name)
 	}
-	last := fireRow
-	if wakes {
-		last = bossRow
-	}
-	if run.Step < fireRow-1 || run.Step > last {
+	if run.Step < fireRow-1 {
 		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, before the step before it (step %d), no auras were sent",
 			step, run.Step, fireRow-1)
+	}
+	if wakes && run.Step > bossRow {
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the boss row (step %d), no auras were sent",
+			step, run.Step, bossRow)
 	}
 	if run.Step >= fireRow {
 		if wakes {
