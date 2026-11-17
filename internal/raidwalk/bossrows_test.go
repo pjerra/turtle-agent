@@ -10,6 +10,18 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
+// allRunLegs is a run of every leg of a plan these tests build: no leg is optional or skip_export, so every leg is in
+// the run. A walk's own run legs come from its rows (PlanRunLegs).
+func allRunLegs(p *dungeon.Plan) RunLegs {
+	run := RunLegs{}
+	if p != nil {
+		for i := range p.Legs {
+			run[i] = true
+		}
+	}
+	return run
+}
+
 func TestBossRowsCounts(t *testing.T) {
 	plan := &dungeon.Plan{Legs: []dungeon.Leg{
 		// 10 is also pulled as trash (ambiguous); 50 never is (an encounter unit like Stalagg).
@@ -22,7 +34,7 @@ func TestBossRowsCounts(t *testing.T) {
 		{Name: "c", Boss: &dungeon.Boss{Entry: 3, First: []uint32{30}}},
 		{Name: "d", Boss: &dungeon.Boss{Entry: 4, Position: dungeon.Point{X: -500, Y: -500}, Hold: &dungeon.Hold{Entries: []uint32{40}}}},
 	}}
-	b := NewBossRows(plan)
+	b := NewBossRows(plan, allRunLegs(plan))
 	if got, want := b.Ambiguous(), []uint32{10, 30}; !slices.Equal(got, want) {
 		t.Fatalf("ambiguous %v, want %v (1 is a boss entry, 50 never in a pull group)", got, want)
 	}
@@ -51,7 +63,7 @@ func TestBossRowsCounts(t *testing.T) {
 			t.Errorf("%s: Counts(%d, %v, %v) = %v, want %v", tc.name, tc.entry, tc.x, tc.y, got, tc.want)
 		}
 	}
-	if got := NewBossRows(nil).Counts(1, 0, 0); got {
+	if got := NewBossRows(nil, nil).Counts(1, 0, 0); got {
 		t.Error("a nil plan has no boss rows")
 	}
 	for entry, want := range map[uint32]string{
@@ -75,7 +87,7 @@ func TestBossRowsAnyOfEntriesAreCore(t *testing.T) {
 		Name: "edge_of_madness",
 		Boss: &dungeon.Boss{Entry: 15082, AnyOf: []uint32{15082, 15083, 15084, 15085}},
 	}}}
-	b := NewBossRows(plan)
+	b := NewBossRows(plan, allRunLegs(plan))
 	for _, e := range []uint32{15082, 15083, 15084, 15085} {
 		if !b.Owns(e) {
 			t.Errorf("Owns(%d) = false, want true: it is the row's entry or one of its any_of alternatives", e)
@@ -111,7 +123,7 @@ func TestBossRowsAmbiguousRealPlans(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := NewBossRows(p).Ambiguous(); !slices.Equal(got, tc.want) {
+		if got := NewBossRows(p, allRunLegs(p)).Ambiguous(); !slices.Equal(got, tc.want) {
 			t.Errorf("%s ambiguous %v, want %v", tc.plan, got, tc.want)
 		}
 	}
@@ -119,7 +131,7 @@ func TestBossRowsAmbiguousRealPlans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := NewBossRows(p)
+	b := NewBossRows(p, allRunLegs(p))
 	for _, e := range []uint32{14509, 15068} {
 		if !b.Counts(e, 0, 0) || b.Words(e) != fmt.Sprintf("boss %d", e) {
 			t.Errorf("Thekal phase entry %d: Counts %v Words %q, want a core boss row", e, b.Counts(e, 0, 0), b.Words(e))
@@ -135,7 +147,12 @@ func TestInjectAddPackNeverPicksFarEncounterUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := NewInjector(nil, RosterNames{MT: "Mt"}, planexport.Rows{}, p)
+	// The run's legs: the boss rule reads only the legs the rows carry.
+	rows := planexport.Rows{}
+	for i, l := range p.Legs {
+		rows.Legs = append(rows.Legs, planexport.LegRow{Leg: i, Name: l.Name})
+	}
+	in := NewInjector(nil, RosterNames{MT: "Mt"}, rows, p)
 	thadd := dungeon.Point{X: 3518, Y: -2925.7, Z: 291.7}
 	lead := dungeon.Point{X: thadd.X + 70 - 40, Y: thadd.Y, Z: thadd.Z}
 	at := dungeon.Point{X: thadd.X + 70, Y: thadd.Y, Z: thadd.Z}

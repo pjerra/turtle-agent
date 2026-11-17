@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/mapview"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
 // FirstAddBossRadius is how near (yards, 2D) the plan position of a boss that lists it as a `first` add a frame row
@@ -32,6 +32,24 @@ import (
 // The nearest 11361 trash pull group in zul_gurub.json stands 56.5 yd from Thekal's position (on his own leg).
 const FirstAddBossRadius = 40
 
+// RunLegs is the plan legs a run walks, by plan leg index. A plan JSON still names the optional and skip_export legs
+// that a default export leaves out, so the rules built from the plan (NewBossRows, PlanHomeSpawns) read only the legs
+// the run's rows carry: a leg that is not in the run owns no boss and stands no spawn. A nil RunLegs runs no leg.
+type RunLegs map[int]bool
+
+// PlanRunLegs is the legs of the run whose rows are rows: every plan leg the rows carry (Rows.LegMap), so an optional
+// or skip_export leg a default export left out is not in the run and its boss is no boss row.
+func PlanRunLegs(plan *dungeon.Plan, rows planexport.Rows) RunLegs {
+	out := RunLegs{}
+	if plan == nil {
+		return out
+	}
+	for li := range rows.LegMap(plan) {
+		out[li] = true
+	}
+	return out
+}
+
 // firstOf is one boss that lists an entry as a first add.
 type firstOf struct {
 	leg    string
@@ -54,17 +72,20 @@ type BossRows struct {
 	ambiguous map[uint32]bool
 }
 
-// NewBossRows builds the rule from the plan (nil: no entry is a boss row).
-func NewBossRows(plan *dungeon.Plan) *BossRows {
+// NewBossRows builds the rule from the plan's run legs (nil plan or run: no entry is a boss row). A leg the run does
+// not walk is no boss row whatever the plan JSON says: a default walk of Zul'Gurub never reads 15082-15085 (the
+// optional edge_of_madness and gahzranka legs were not exported, so the run has them neither).
+func NewBossRows(plan *dungeon.Plan, run RunLegs) *BossRows {
 	b := &BossRows{set: map[uint32]bool{}, core: map[uint32]bool{}, own: map[uint32]bool{}, first: map[uint32][]firstOf{}, ambiguous: map[uint32]bool{}}
 	if plan == nil {
 		return b
 	}
-	for _, e := range mapview.BossEntries(plan) {
-		b.set[e] = true
-	}
 	trash := map[uint32]bool{}
-	for _, leg := range plan.Legs {
+	for li := range plan.Legs {
+		if !run[li] {
+			continue
+		}
+		leg := &plan.Legs[li]
 		for _, g := range leg.PullGroups {
 			for _, e := range g.Entries {
 				trash[e] = true
@@ -72,6 +93,16 @@ func NewBossRows(plan *dungeon.Plan) *BossRows {
 		}
 		if leg.Boss == nil {
 			continue
+		}
+		b.set[leg.Boss.Entry] = true
+		for _, e := range leg.Boss.AnyOf {
+			b.set[e] = true
+		}
+		for _, e := range leg.Boss.First {
+			b.set[e] = true
+		}
+		for _, e := range leg.Boss.PhaseEntries {
+			b.set[e] = true
 		}
 		b.core[leg.Boss.Entry] = true
 		b.own[leg.Boss.Entry] = true

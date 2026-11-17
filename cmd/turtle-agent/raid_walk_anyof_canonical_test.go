@@ -10,7 +10,6 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -38,7 +37,7 @@ func TestTrackFrameAnyOfAlternativeStoresCanonical(t *testing.T) {
 		plan:          p,
 		env:           walkEnv{now: func() time.Time { return now }},
 		mt:            "tank",
-		bossRule:      raidwalk.NewBossRows(p),
+		bossRule:      allLegsBossRule(p),
 		bossRows:      map[uint32]hostileState{},
 		hostiles:      map[string]hostileState{},
 		partyG:        map[uint64]bool{},

@@ -130,7 +130,7 @@ func newUnfreezeScene(t *testing.T, wait time.Duration) *unfreezeScene {
 		hires: map[string]bool{"Tank": true, "Priest": true, "Rogue": true, "Mage": true}, mt: "Tank", ots: []string{"Priest"}, rest: []string{"Rogue", "Mage"},
 		botAt: map[string]botPos{}, hostiles: map[string]hostileState{}, bossRows: map[uint32]hostileState{}, partyG: map[uint64]bool{}, logF: lf,
 		place: &raidwalk.PlacePlan{Point: dungeon.Point{X: unfreezePoint[0], Y: unfreezePoint[1], Z: 79}}}
-	w.tracker = raidwalk.NewTracker(plan, w.hireList())
+	w.tracker = raidwalk.NewTracker(plan, allPlanRunLegs(plan), w.hireList())
 	sc := &unfreezeScene{t: t, w: w, f: f, log: logPath, wait: wait, summoned: map[string]bool{}}
 	f.agent.mu.Lock()
 	f.agent.party = []string{"Tank", "Priest", "Rogue", "Mage"}

@@ -79,15 +79,21 @@ type QuietHomeSpawn struct {
 // QuietHomeSpawns is the plan spawn list the idle exemption reads: nil (no data) exempts nothing.
 type QuietHomeSpawns []QuietHomeSpawn
 
-// PlanHomeSpawns is the idle exemption's home list for a plan: every pull group position (entries paired with the
-// positions they stand at, or with every position when fewer positions than entries), the boss at its position, and
-// the left-alone spawns at theirs. A group with a Patrol block marks every spawn it yields as a patrol one.
-func PlanHomeSpawns(plan *dungeon.Plan) QuietHomeSpawns {
+// PlanHomeSpawns is the idle exemption's home list for the plan's run legs (see RunLegs): every pull group position
+// (entries paired with the positions they stand at, or with every position when fewer positions than entries), the
+// boss at its position, and the left-alone spawns at theirs. A group with a Patrol block marks every spawn it yields
+// as a patrol one. A leg the run does not walk stands no spawn: a default Zul'Gurub walk does not list the optional
+// edge_of_madness and gahzranka bosses (15082-15085, 15114) as home.
+func PlanHomeSpawns(plan *dungeon.Plan, run RunLegs) QuietHomeSpawns {
 	if plan == nil {
 		return nil
 	}
 	var out QuietHomeSpawns
-	for _, l := range plan.Legs {
+	for li := range plan.Legs {
+		if !run[li] {
+			continue
+		}
+		l := &plan.Legs[li]
 		for _, g := range l.PullGroups {
 			pos := g.Positions
 			for i, e := range g.Entries {

@@ -13,7 +13,8 @@ import (
 
 func newOnyTracker(t *testing.T) *Tracker {
 	t.Helper()
-	return NewTracker(loadRaidPlan(t, "onyxias_lair"), botNames(39))
+	p := loadRaidPlan(t, "onyxias_lair")
+	return NewTracker(p, allRunLegs(p), botNames(39))
 }
 
 func botNames(n int) []string {
@@ -271,7 +272,8 @@ func TestTrackerWipeFromDashboardSnapshot(t *testing.T) {
 	for i := range names {
 		dash[i] = DashBot{Name: names[i], Alive: i != 7}
 	}
-	tr := NewTracker(loadRaidPlan(t, "onyxias_lair"), names)
+	p := loadRaidPlan(t, "onyxias_lair")
+	tr := NewTracker(p, allRunLegs(p), names)
 	tr.Feed(t0, runLine("onyxias_lair", tbm.RunRunning, 12, 29, "onyxia", "move", "walk", "walking"))
 	tr.Snapshot(t0, dash)
 	if w := wipeFrom(tr.Events()); w != nil {
@@ -289,7 +291,7 @@ func TestTrackerWipeFromDashboardSnapshot(t *testing.T) {
 // A plan without a boss still tracks: the Tracker must not need one to report a stall or a wipe.
 func TestTrackerWithoutBossEntries(t *testing.T) {
 	p := &dungeon.Plan{Name: "empty_raid", Kind: dungeon.KindRaid}
-	tr := NewTracker(p, nil)
+	tr := NewTracker(p, allRunLegs(p), nil)
 	tr.Feed(time.Now(), runLine("empty_raid", tbm.RunRunning, 1, 3, "leg", "move", "walk", "walking"))
 	if got := tr.End().Kind; got != EndRunning {
 		t.Fatalf("end before any done = %q", got)
@@ -300,7 +302,8 @@ func TestTrackerWithoutBossEntries(t *testing.T) {
 // cannot look like the whole party.
 func TestTrackerInfersTheHireCountFromThePlan(t *testing.T) {
 	t0 := time.Date(2026, 10, 28, 20, 0, 0, 0, time.UTC)
-	tr := NewTracker(loadRaidPlan(t, "onyxias_lair"), nil)
+	p := loadRaidPlan(t, "onyxias_lair")
+	tr := NewTracker(p, allRunLegs(p), nil)
 	tr.Feed(t0, runLine("onyxias_lair", tbm.RunRunning, 7, 29, "onyxia", "pull", "pull", "pulling"))
 	tr.Frame(t0, tbm.ViewFrame{Party: party(20, true), Truncated: true})
 	if w := wipeFrom(tr.Events()); w != nil {
@@ -315,7 +318,7 @@ func TestTrackerInfersTheHireCountFromThePlan(t *testing.T) {
 	for i := range dash {
 		dash[i] = DashBot{Name: fmt.Sprintf("Bot%02d", i)}
 	}
-	tr = NewTracker(loadRaidPlan(t, "onyxias_lair"), nil)
+	tr = NewTracker(p, allRunLegs(p), nil)
 	tr.Feed(t0, runLine("onyxias_lair", tbm.RunRunning, 8, 29, "onyxia", "pull", "pull", "pulling"))
 	tr.Snapshot(t0, dash)
 	if w := wipeFrom(tr.Events()); w == nil || w.Step != 8 {

@@ -610,7 +610,7 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	if err := w.gearRaid(ctx, line, w.roster.Tier); err != nil {
 		return err
 	}
-	w.tracker = raidwalk.NewTracker(w.plan, w.hireList())
+	w.tracker = raidwalk.NewTracker(w.plan, w.runLegs, w.hireList())
 	return nil
 }
 
@@ -3807,11 +3807,14 @@ func (w *walk) resetBossForms() {
 	for g, entry := range w.bossGUIDs {
 		// The identity form is the row's canonical entry, but for an any_of row the unit that stays active across the
 		// wipe is the alternative: resetting to the canonical id would make the retry's first sighting read as one
-		// entry change (phase 2) when the boss never changed entry.
+		// entry change (phase 2) when the boss never changed entry. The identity is the FIRST alternative of the form
+		// chain, as bossKillSummaryFor reads the active entry: the last form may already be a phase entry (forms
+		// [15084, 99999]: 99999 maps to itself, not to the row's 15082).
 		first := entry
-		if forms := w.bossForms[g]; len(forms) > 0 {
-			if last := forms[len(forms)-1]; last != entry && w.bossCanonicalEntry(0, last) == entry {
-				first = last
+		for _, form := range w.bossForms[g] {
+			if form != entry && w.bossCanonicalEntry(0, form) == entry {
+				first = form
+				break
 			}
 		}
 		w.bossForms[g] = []uint32{first}
@@ -6193,7 +6196,7 @@ func newQuietState() *quietState {
 // tests; then nothing is exempt (fail closed).
 func (w *walk) newQuietStateFor() *quietState {
 	st := newQuietState()
-	st.homes = raidwalk.PlanHomeSpawns(w.plan)
+	st.homes = raidwalk.PlanHomeSpawns(w.plan, w.runLegs)
 	st.patrols = raidwalk.PlanQuietPatrols(w.plan)
 	return st
 }

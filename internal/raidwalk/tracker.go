@@ -157,9 +157,10 @@ type Tracker struct {
 	end     End
 }
 
-// NewTracker builds a tracker for the plan; hires are the names the walk hired. With no names the wipe rule takes the
-// plan's raid size - 1 as the hire count and waits until that many bots have been seen.
-func NewTracker(plan *dungeon.Plan, hires []string) *Tracker {
+// NewTracker builds a tracker for the plan's run legs (raidwalk.RunLegs: the legs the run's rows carry); hires are the
+// names the walk hired. With no names the wipe rule takes the plan's raid size - 1 as the hire count and waits until
+// that many bots have been seen.
+func NewTracker(plan *dungeon.Plan, run RunLegs, hires []string) *Tracker {
 	t := &Tracker{
 		guidName:    map[packet.GUID]string{},
 		state:       map[string]botState{},
@@ -168,7 +169,7 @@ func NewTracker(plan *dungeon.Plan, hires []string) *Tracker {
 		deathByStep: map[int]int{},
 		deathByBot:  map[string]int{},
 	}
-	t.bossRows = NewBossRows(plan)
+	t.bossRows = NewBossRows(plan, run)
 	if len(hires) > 0 {
 		t.hires = make(map[string]bool, len(hires))
 		for _, name := range hires {

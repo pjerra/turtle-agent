@@ -640,7 +640,7 @@ func TestFightRecordKillAtWalkStartNeedsNoLiveSighting(t *testing.T) {
 			w.hostiles = map[string]hostileState{}
 			w.botAt = map[string]botPos{}
 			w.partyG = map[uint64]bool{}
-			w.bossRule = raidwalk.NewBossRows(p)
+			w.bossRule = allLegsBossRule(p)
 			w.bossAttemptAt = map[uint32]time.Time{}
 			w.bossRows = map[uint32]hostileState{}
 			if tc.alive {
@@ -725,7 +725,7 @@ func fightCreditWalk(t *testing.T, goal, startStep int, now time.Time) (*walk, *
 	w.hostiles = map[string]hostileState{}
 	w.botAt = map[string]botPos{}
 	w.partyG = map[uint64]bool{}
-	w.bossRule = raidwalk.NewBossRows(p)
+	w.bossRule = allLegsBossRule(p)
 	w.bossAttemptAt = map[uint32]time.Time{}
 	w.bossRows = map[uint32]hostileState{}
 	w.seenFights = map[string]bool{}

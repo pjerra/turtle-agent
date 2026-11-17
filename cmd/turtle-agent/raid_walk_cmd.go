@@ -1003,6 +1003,10 @@ type walk struct {
 	viewAt    time.Time
 
 	bossSet map[uint32]bool
+	// runLegs are the plan legs the run walks (raidwalk.PlanRunLegs from the rows): a plan JSON still names
+	// optional and skip_export legs a default export left out, and the rules built from the plan (bossRule,
+	// PlanHomeSpawns) must not read them (Zul'Gurub's edge_of_madness 15082-15085 and gahzranka 15114).
+	runLegs raidwalk.RunLegs
 	// bossRule decides which frame rows are boss evidence (raidwalk.BossRows: a `first`-only entry counts within
 	// raidwalk.FirstAddBossRadius of its boss's plan position; walk 19 test2 s4: trash Zulian Tigers 11361 on
 	// Venoxis's leg latched bossLatchAt and blocked the wipe recovery).
@@ -1460,8 +1464,6 @@ func (w *walk) validate() error {
 			}
 		}
 	}
-	w.bossRule = raidwalk.NewBossRows(p)
-
 	if w.opts.sql != "" {
 		rows, notes, err := readRaidMigration(slots.ExpandTilde(w.opts.sql), w.plan.Name)
 		if err != nil {
@@ -1479,6 +1481,10 @@ func (w *walk) validate() error {
 		w.rows = res.Rows
 		w.note("step points from the plan JSON, not the deployed rows")
 	}
+	// The run's legs come from the rows: a plan JSON still names optional and skip_export legs a default export left
+	// out, and the boss rule and the home spawns must read only the legs the run walks.
+	w.runLegs = raidwalk.PlanRunLegs(p, w.rows)
+	w.bossRule = raidwalk.NewBossRows(p, w.runLegs)
 	w.stepFirst = firstStepPoint(w.rows)
 	// The step the run starts at: with --place the staged start (spec 4.2), else the --from step. It is what
 	// `--until boss-done` is resolved from (spec 5.2). A plain --from (no --place, no boss-done) is NOT resolved

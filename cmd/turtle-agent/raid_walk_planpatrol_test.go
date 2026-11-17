@@ -178,7 +178,7 @@ func TestPlanPatrolBoundLiveMemberBlocks(t *testing.T) {
 func TestTrackFrameBindsPatrolMembersByFirstSighting(t *testing.T) {
 	now := newFakeClock().now()
 	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{}, bossSet: map[uint32]bool{10184: true},
-		bossRule: raidwalk.NewBossRows(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 10184}}}}),
+		bossRule: allLegsBossRule(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 10184}}}}),
 		bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
 	w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: 9, Entry: 51344, X: 500, HPPct: 100}}})
 	w.trackFrame(now.Add(time.Second), &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: 9, Entry: 51344, X: 10, HPPct: 0}}})

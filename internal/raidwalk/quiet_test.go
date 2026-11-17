@@ -102,7 +102,7 @@ func TestQuietHomeSpawnsMarksPatrolGroups(t *testing.T) {
 		Boss:  &dungeon.Boss{Entry: 11, Position: dungeon.Point{X: 36}},
 		Leave: []dungeon.Leave{{Entry: 12, Spawn: 77, At: dungeon.Point{X: 38}}},
 	}}}
-	homes := PlanHomeSpawns(plan)
+	homes := PlanHomeSpawns(plan, allRunLegs(plan))
 	byEntry := map[uint32]QuietHomeSpawn{}
 	for _, h := range homes {
 		byEntry[h.Entry] = h

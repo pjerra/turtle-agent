@@ -431,7 +431,7 @@ type pendingInject struct {
 
 // NewInjector builds the injector of one walk (spec 1.5).
 func NewInjector(specs []InjectSpec, names RosterNames, rows planexport.Rows, plan *dungeon.Plan) *Injector {
-	in := &Injector{names: names, hires: map[string]bool{}, bossRows: NewBossRows(plan)}
+	in := &Injector{names: names, hires: map[string]bool{}, bossRows: NewBossRows(plan, PlanRunLegs(plan, rows))}
 	for _, n := range append(append(append([]string{names.MT}, names.OT...), names.Rest...), names.Tanks...) {
 		if n != "" {
 			in.hires[n] = true

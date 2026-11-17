@@ -2547,7 +2547,7 @@ func TestPlaceBehindTrash(t *testing.T) {
 			Behind: []raidwalk.BehindRow{{Step: 90, X: 0, Y: 0, Z: 0, Radius: 10, Entries: []uint32{7, 8}}},
 			Ahead:  []raidwalk.AheadCircle{{Step: 200, X: 100, Y: 0, Z: 0, Radius: 5, Entries: []uint32{9}}},
 		},
-		bossRule: raidwalk.NewBossRows(plan),
+		bossRule: allLegsBossRule(plan),
 	}
 	hom := func(entry uint32, home [3]float32) ttUnit {
 		return ttUnit{Entry: entry, X: 0, Y: 0, Home: home, HomeOK: true}

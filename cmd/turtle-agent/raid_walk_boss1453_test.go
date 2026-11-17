@@ -451,6 +451,48 @@ func TestBossFormsResetOnWipe(t *testing.T) {
 	}
 }
 
+// TestBossFormsResetKeepsTheActiveAnyOfAlternative: a wipe that lands after the active any_of alternative morphed
+// into a phase entry (Edge of Madness form chain [15084, 99999]) resets the guid's identity to that FIRST alternative,
+// as bossKillSummaryFor reads the active entry — not to the last form (99999 maps to itself) and not to the row's
+// canonical 15082. The retry's first sighting of 15084 is therefore no entry change: phase 1, not 2.
+func TestBossFormsResetKeepsTheActiveAnyOfAlternative(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := (&walk{plan: p}).bossCanonicalEntry(0, 15084); got != 15082 {
+		t.Fatalf("bossCanonicalEntry(15084) = %d, want the row's 15082: the test needs the plan", got)
+	}
+	w := bossSummaryWalk(t)
+	w.plan = p
+	w.bossRule = allLegsBossRule(p)
+	w.hostiles = map[string]hostileState{}
+	w.bossRows = map[uint32]hostileState{}
+	w.bossAdds = map[uint32]bool{}
+	w.bossAttemptAt = map[uint32]time.Time{}
+	w.partyG = map[uint64]bool{}
+	w.botAt = map[string]botPos{}
+	now := time.Now()
+	// The wiped attempt: the event made 15084 active, then it morphed into the phase entry 99999.
+	w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: zgWalk25BossGUID, Entry: 15084, HPPct: 40}}})
+	w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: zgWalk25BossGUID, Entry: 99999, HPPct: 40}}})
+	g := zgWalk25BossGUID.String()
+	if forms := w.bossForms[g]; len(forms) != 2 || forms[0] != 15084 || forms[1] != 99999 {
+		t.Fatalf("forms before the reset %v, want [15084 99999]", forms)
+	}
+	w.resetBossForms()
+	if forms := w.bossForms[g]; len(forms) != 1 || forms[0] != 15084 {
+		t.Fatalf("forms after reset %v, want [15084]: the chain's first alternative is the identity", forms)
+	}
+	// The retry's first frame reads the alternative the unit still is: trackFrame appends only a change.
+	w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: zgWalk25BossGUID, Entry: 15084, HPPct: 40}}})
+	tk := w.bossTrackAt(127, 15082)
+	k := w.bossKillSummaryFor(tk)
+	if k.Phase != 1 || k.PhaseEntry != 15084 {
+		t.Fatalf("retry phase %d entry %d, want 1 15084: the first sighting after the reset is no entry change", k.Phase, k.PhaseEntry)
+	}
+}
+
 // TestBossKillSameStepNonBossStatus is #1453 round 4 (a): the boss step reports a boss status, then the SAME step
 // reports another kind (the run left the boss track on the step it stood on). The leaving status must be read like
 // the first status after the step: either the stored note or its own `boss down` note is the kill. The early return
@@ -791,7 +833,7 @@ func TestBossKillTrackerFallbackInFinish(t *testing.T) {
 	w.stdout = io.Discard
 	w.started = time.Now()
 	w.ended = w.started
-	w.tracker = raidwalk.NewTracker(p, nil)
+	w.tracker = raidwalk.NewTracker(p, allPlanRunLegs(p), nil)
 	w.tracker.Frame(w.started, tbm.ViewFrame{
 		Party:    []tbm.PartyRec{{GUID: 1000, Name: "Tank"}},
 		Hostiles: []tbm.HostileRec{{GUID: zgWalk25BossGUID, Entry: 14517, HPPct: 90, Target: 1000}},

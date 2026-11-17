@@ -4146,7 +4146,7 @@ func TestRaidWalkWipeBossFrameDeadNoAttemptNoKill(t *testing.T) {
 	plan := &dungeon.Plan{Map: 230, Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}}
 	w := &walk{
 		plan:          plan,
-		bossRule:      raidwalk.NewBossRows(plan),
+		bossRule:      allLegsBossRule(plan),
 		bossRows:      map[uint32]hostileState{},
 		hostiles:      map[string]hostileState{},
 		bossSet:       map[uint32]bool{12118: true},
@@ -7426,7 +7426,7 @@ func TestRaidWalkPollOnceReopensBossWindowAfterStepDecrease(t *testing.T) {
 	w := &walk{
 		plan:    plan,
 		rows:    rows,
-		tracker: raidwalk.NewTracker(plan, nil),
+		tracker: raidwalk.NewTracker(plan, allPlanRunLegs(plan), nil),
 		agent:   &pollPageStub{pages: [][]string{{fight}, {back}, {fight}}},
 		env:     walkEnv{now: func() time.Time { return clock }},
 	}
@@ -7482,7 +7482,7 @@ func TestRaidWalkTeardownReasonNamesTheFailingStep(t *testing.T) {
 func TestTrackFrameKeepsPositionsAndKinds(t *testing.T) {
 	now := newFakeClock().now()
 	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{}, bossSet: map[uint32]bool{10184: true},
-		bossRule: raidwalk.NewBossRows(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 10184}}}}),
+		bossRule: allLegsBossRule(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 10184}}}}),
 		bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
 	frame := &tbm.ViewFrame{
 		Party: []tbm.PartyRec{
@@ -9356,7 +9356,7 @@ func bossFrameWalk(t *testing.T) *walk {
 		hostiles:      map[string]hostileState{},
 		botAt:         map[string]botPos{},
 		bossRows:      map[uint32]hostileState{},
-		bossRule:      raidwalk.NewBossRows(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}}),
+		bossRule:      allLegsBossRule(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}}),
 		bossAttemptAt: map[uint32]time.Time{},
 	}
 	setBossCorpseMaps(w)

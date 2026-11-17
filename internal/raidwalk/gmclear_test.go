@@ -356,7 +356,7 @@ func TestSummaryMarksAssisted(t *testing.T) {
 
 // The legs the tool killed in carry the assisted mark in summary.legs; the others do not.
 func TestSummaryMarksAssistedLegs(t *testing.T) {
-	tr := NewTracker(nil, nil)
+	tr := NewTracker(nil, nil, nil)
 	now := time.Now()
 	tr.Feed(now, tbm.RunStatus{Plan: "aq20", State: tbm.RunRunning, Step: 1, Steps: 4, Leg: "first", Kind: "move"})
 	tr.Feed(now.Add(10*time.Second), tbm.RunStatus{Plan: "aq20", State: tbm.RunRunning, Step: 2, Steps: 4, Leg: "Second", Kind: "pull"})

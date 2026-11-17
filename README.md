@@ -109,6 +109,12 @@ reads the row's entries as one boss of several, while an older run leader would 
 every alternative. Without the flag the export refuses the plan, so a migration never carries a row an old run leader
 would misrun.
 
+A `boss:<ENTRY>` goal (the autopilot's `boss:15084` on the Edge of Madness row) is resolved from the target's `--sql`
+rows, and it is met only through the row's alternatives, because `summary.json` reports the kill under the row's
+canonical `entry`. Without `--sql`, or with rows that no longer carry the row, the autopilot refuses a goal known to name
+an alternative rather than relaunch a dead boss. A goal that names the canonical `15082` needs no rows to resolve: it is
+the entry the kill is reported under.
+
 Log a character in and keep it online with the RPC server running:
 
 ```sh

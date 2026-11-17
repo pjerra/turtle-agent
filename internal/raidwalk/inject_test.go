@@ -548,7 +548,12 @@ func TestRunawayPassOnF4Note(t *testing.T) {
 // addPackPlan names a boss entry for add-pack's filter.
 func addPackPlan() *dungeon.Plan {
 	return &dungeon.Plan{Name: "onyxias_lair", Kind: dungeon.KindRaid, Map: 249,
-		Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 500}}}}
+		Legs: []dungeon.Leg{{Name: "lair", Boss: &dungeon.Boss{Entry: 500}}}}
+}
+
+// addPackRows carries addPackPlan's one leg: the injector's boss rule reads only the legs of the run's rows.
+func addPackRows() planexport.Rows {
+	return planexport.Rows{Legs: []planexport.LegRow{{Leg: 0, Name: "lair"}}}
 }
 
 func addPackObs(now time.Time, hostiles []HostileObs) InjectObs {
@@ -602,7 +607,7 @@ func TestAddPackChoosesIdleHostile(t *testing.T) {
 	}
 	for _, d := range distractors {
 		t.Run(d.name, func(t *testing.T) {
-			in := NewInjector(mustInjects(t, "add-pack"), injectNames(), planexport.Rows{}, addPackPlan())
+			in := NewInjector(mustInjects(t, "add-pack"), injectNames(), addPackRows(), addPackPlan())
 			in.Tick(addPackObs(base, []HostileObs{partyHostile(), d.h}))
 			if acts := in.Tick(addPackObs(base.Add(3*time.Second), []HostileObs{partyHostile(), d.h})); len(acts) != 0 {
 				t.Fatalf("add-pack fired with only the %s hostile to pick: %+v", d.name, acts)
@@ -610,7 +615,7 @@ func TestAddPackChoosesIdleHostile(t *testing.T) {
 		})
 	}
 
-	in := NewInjector(mustInjects(t, "add-pack"), injectNames(), planexport.Rows{}, addPackPlan())
+	in := NewInjector(mustInjects(t, "add-pack"), injectNames(), addPackRows(), addPackPlan())
 	in.Tick(addPackObs(base, hostiles))
 	acts := in.Tick(addPackObs(base.Add(3*time.Second), hostiles))
 	if len(acts) != 1 || acts[0].Kind != ActOrder {
@@ -642,7 +647,7 @@ func TestAddPackVerdicts(t *testing.T) {
 		return base.Add(3 * time.Second)
 	}
 	newInj := func() *Injector {
-		return NewInjector(mustInjects(t, "add-pack"), injectNames(), planexport.Rows{}, addPackPlan())
+		return NewInjector(mustInjects(t, "add-pack"), injectNames(), addPackRows(), addPackPlan())
 	}
 
 	t.Run("pass", func(t *testing.T) {
@@ -1032,7 +1037,7 @@ func TestWipeBeforeEffectIsInconclusive(t *testing.T) {
 
 	t.Run("add-pack still awaits its engagement", func(t *testing.T) {
 		fight := []HostileObs{partyHostile(), idleHostile(402, 0, 40)}
-		in := NewInjector(mustInjects(t, "add-pack"), injectNames(), planexport.Rows{}, addPackPlan())
+		in := NewInjector(mustInjects(t, "add-pack"), injectNames(), addPackRows(), addPackPlan())
 		in.Tick(addPackObs(base, fight))
 		acts := in.Tick(addPackObs(base.Add(3*time.Second), fight))
 		if len(acts) != 1 || acts[0].Kind != ActOrder {
@@ -1127,7 +1132,7 @@ func TestWipeAfterEffectFails(t *testing.T) {
 
 	t.Run("add-pack engaged in the same observation", func(t *testing.T) {
 		fight := []HostileObs{partyHostile(), idleHostile(402, 0, 40)}
-		in := NewInjector(mustInjects(t, "add-pack"), injectNames(), planexport.Rows{}, addPackPlan())
+		in := NewInjector(mustInjects(t, "add-pack"), injectNames(), addPackRows(), addPackPlan())
 		in.Tick(addPackObs(base, fight))
 		acts := in.Tick(addPackObs(base.Add(3*time.Second), fight))
 		in.Ack(acts[0], InjectCtx{}, nil)
