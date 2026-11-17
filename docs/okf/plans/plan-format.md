@@ -82,6 +82,7 @@ A pull group is one pack: `entries` (creature entries) and `positions` (where me
 - `patrol`: a pack that walks a `path` of waypoints in a loop, with `period_s` for one round. `period_estimate: true` means the round is only estimated, so the driver does not predict its phase.
 - `approach`: up to four points the run leader walks before pulling; the last is the stand. The own driver ignores them.
 - `stand_pull: true` holds the party at the last approach point and pulls from there.
+- `wakes_boss`: the entry of this leg's boss whose encounter the pack's death starts (the core lifts the boss's pacify flags when it dies: Zul'Gurub's Vilebranch Speaker 11391 wakes Bloodlord Mandokir). It must be the leg's `boss.entry`; the export puts `; wakes boss <entry>` in the pull row's comment, and `raid-walk`'s prepull-aura fire moves in front of the row before that pull.
 - `max_bodies`: the pull's body-count ceiling for the `pull_size` lint.
 - `hold`: replaces the pull with a scripted event the party fights on one spot until an instance data value reads DONE.
 
@@ -132,6 +133,7 @@ The fields above cover the common case. The rest, each with its JSON name, what 
 | Pull group | `equiv` | Names a set of equivalent packs of the leg (same mobs, same kind of ground); a pull-test scenario pulls the next pack of the set for its next try. Empty means no equivalent. | `"equiv": "stonevault_row"` |
 | Pull group | `needs_walk` | The positions are not on the navmesh and could not be snapped to it; see the leg's `needs_walk`. | `"needs_walk": true` |
 | Pull group | `clear_yd` | How far from the lead bot another patrol must be for a `stand_pull` group's pull to go out, yd (1-60; 0 means the run leader's 40). Only with `stand_pull`. | `"clear_yd": 40` |
+| Pull group | `wakes_boss` | The entry of this leg's boss whose encounter the pack's death starts; must be the leg's `boss.entry`. The pull row's comment carries `; wakes boss <entry>` and `raid-walk` fires that boss row's pre-pull auras before the row before the pull. | `"wakes_boss": 11382` |
 | Boss | `phase_entries` | Entries the encounter turns into or summons that no other field names; only the raid walk's boss gates read them. The driver ignores them and the export does not carry them. | `"phase_entries": [14509]` |
 | Boss | `team` | Limits the fight to a leader of that team; the driver skips the boss with its `first` entries for the other one. | `"team": "horde"` |
 | Boss | `companions_loot` | `false` orders the party's corpse looting off before the boss is pulled and on again after the leader has looted, so a boss drop the plan needs (`loot_item`) goes to the leader. Absent or true leaves the companions as they are. | `"companions_loot": false` |

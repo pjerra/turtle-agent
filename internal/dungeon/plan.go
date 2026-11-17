@@ -376,6 +376,12 @@ type PullGroup struct {
 	// 0: the plan's PullCeiling (or the lint default). The pull row carries it in
 	// item (unused on pull rows today); 1-80 (kPlanMaxPullBodies).
 	MaxBodies int `json:"max_bodies,omitempty"`
+	// WakesBoss is the entry of this leg's boss whose encounter the group's death starts (the core lifts the boss's
+	// pacify flags when the pack dies: Zul'Gurub's Vilebranch Speaker 11391 clears Bloodlord Mandokir's). It must name
+	// the leg's Boss.Entry. plan-export writes it into the pull row's comment as "; wakes boss <entry>", and raid-walk
+	// fires that boss row's pre-pull auras in front of the row before this pull (PrepullFirePoint), so the fight the
+	// pull starts already carries them.
+	WakesBoss uint32 `json:"wakes_boss,omitempty"`
 }
 
 // Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
@@ -960,6 +966,8 @@ type rawPullGroup struct {
 	ClearYd int `json:"clear_yd"`
 	// MaxBodies is PullGroup.MaxBodies.
 	MaxBodies *int `json:"max_bodies"`
+	// WakesBoss is PullGroup.WakesBoss.
+	WakesBoss uint32 `json:"wakes_boss"`
 }
 
 type rawHold struct {
@@ -1591,6 +1599,15 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			} else {
 				pg.MaxBodies = v
 			}
+		}
+		if g.WakesBoss != 0 {
+			switch {
+			case r.Boss == nil:
+				c.fail(gp+".wakes_boss", "%d: the leg has no boss", g.WakesBoss)
+			case r.Boss.Entry != g.WakesBoss:
+				c.fail(gp+".wakes_boss", "%d: not this leg's boss entry (%d)", g.WakesBoss, r.Boss.Entry)
+			}
+			pg.WakesBoss = g.WakesBoss
 		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}

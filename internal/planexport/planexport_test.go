@@ -1889,6 +1889,46 @@ func TestPullGroupStandPullFlagParamAndStand(t *testing.T) {
 	}
 }
 
+// A pull group's wakes_boss exports as a comment token on its pull row ("; wakes boss <entry>"): raid-walk reads it
+// to fire that boss row's pre-pull auras in front of the row before the pull (Zul'Gurub's 11391 wakes Mandokir).
+// The entry must be the leg's boss: another entry, or a leg without a boss, is refused by the plan parser.
+func TestPullGroupWakesBossComment(t *testing.T) {
+	plan := func(group, boss string) string {
+		return `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"mandokir","to":{"x":300,"y":0,"z":0},"pull_groups":[` + group + `]` + boss + `}]}`
+	}
+	const boss = `,"boss":{"entry":11382,"position":{"x":400,"y":0,"z":0}}`
+	good := `{"entries":[11353,11830],"positions":[{"x":200,"y":0,"z":0}],"wakes_boss":11382}`
+	rows := build(t, parsePlan(t, plan(good, boss)))
+	found := false
+	for _, s := range rows.Steps {
+		if s.Kind == KindPull {
+			found = true
+			if !strings.Contains(s.Comment, "wakes boss 11382") {
+				t.Errorf("pull row comment %q, want the wakes boss 11382 token", s.Comment)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no pull row in %+v", rows.Steps)
+	}
+	// The token is exact and additive: no wakes_boss keeps the comment as before.
+	plain := build(t, parsePlan(t, plan(`{"entries":[11353],"positions":[{"x":200,"y":0,"z":0}]}`, boss)))
+	for _, s := range plain.Steps {
+		if s.Kind == KindPull && strings.Contains(s.Comment, "wakes boss") {
+			t.Errorf("plain pull row comment %q carries a wakes boss token", s.Comment)
+		}
+	}
+	for name, tc := range map[string]struct{ group, boss string }{
+		"another entry": {`{"entries":[11353],"positions":[{"x":200,"y":0,"z":0}],"wakes_boss":99999}`, boss},
+		"no boss":       {`{"entries":[11353],"positions":[{"x":200,"y":0,"z":0}],"wakes_boss":11382}`, ""},
+	} {
+		if _, err := dungeon.Parse("test.json", []byte(plan(tc.group, tc.boss))); err == nil || !strings.Contains(err.Error(), "wakes_boss") {
+			t.Errorf("%s: parse error %v (want the wakes_boss refusal)", name, err)
+		}
+	}
+}
+
 // A pull group's max_bodies lands in the pull row's item column (the run
 // leader's plan ceiling, kPlanMaxPullBodies 80); absent, the item stays 0.
 func TestPullGroupMaxBodiesIsTheRowItem(t *testing.T) {

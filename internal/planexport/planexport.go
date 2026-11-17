@@ -675,6 +675,9 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	if g.StandPull {
 		c += "; stand pull"
 	}
+	if g.WakesBoss != 0 {
+		c += "; wakes boss " + strconv.Itoa(int(g.WakesBoss))
+	}
 	b.at("pull", gi, 0)
 	var patrol []uint32
 	var patrolSource string

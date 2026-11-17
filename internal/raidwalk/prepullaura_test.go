@@ -366,3 +366,64 @@ func TestPrepullFirePointBeforeASummoningTrigger(t *testing.T) {
 		t.Errorf("out of range: fire %d trigger %d kind %q", fire, trig, kind)
 	}
 }
+
+// Walk 116 st16a (pulljoiners.json step 418): the Vilebranch Speaker 11391's death starts Bloodlord Mandokir's
+// encounter, so the 418 fight was the boss fight and the boss row's auras fired too late. A pull row whose comment
+// says "wakes boss <entry>" (a plan's wakes_boss) moves the fire in front of the row before that pull; a marker for
+// another entry, another leg, or one whose fire would stand on the previous leg's last row keeps the boss row's step.
+func TestPrepullFirePointBeforeAWakesBossPull(t *testing.T) {
+	row := func(leg int, kind, comment string, entry uint32) planexport.StepRow {
+		return planexport.StepRow{Plan: "p", Leg: leg, Kind: kind, Entry: entry, Comment: comment}
+	}
+	// The walk's own shape: a move, the pull that wakes the boss, a move, the Speaker's stand pull, a move, the boss.
+	rows := planexport.Rows{Steps: []planexport.StepRow{
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindPull, "pull group 17; wakes boss 11382", 11353),
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindPull, "pull group 19; stand pull", 11391),
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindBoss, "boss", 11382),
+	}}
+	if fire, trig, kind := PrepullFirePoint(rows, 6); fire != 2 || trig != 2 || kind != PrepullWakesBossKind {
+		t.Errorf("wakes-boss pull: fire %d trigger %d kind %q, want 2 2 %q", fire, trig, kind, PrepullWakesBossKind)
+	}
+	// A marker for another entry is not this boss's.
+	rows.Steps[1].Comment = "pull group 17; wakes boss 99999"
+	if fire, trig, kind := PrepullFirePoint(rows, 6); fire != 6 || trig != 0 || kind != "" {
+		t.Errorf("another entry's marker: fire %d trigger %d kind %q, want 6 0 \"\"", fire, trig, kind)
+	}
+	// A marker in another leg's pull row is not this leg's.
+	rows.Steps[1].Comment = "pull group 17; wakes boss 11382"
+	rows.Steps[1].Leg = 0
+	if fire, trig, kind := PrepullFirePoint(rows, 6); fire != 6 || trig != 0 || kind != "" {
+		t.Errorf("another leg's marker: fire %d trigger %d kind %q, want 6 0 \"\"", fire, trig, kind)
+	}
+	// A wakes-boss pull row that opens its leg cannot move the fire (it would stand on the previous leg's last row).
+	rows.Steps = []planexport.StepRow{
+		row(1, planexport.KindPull, "pull group 17; wakes boss 11382", 11353),
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindPull, "pull group 19; stand pull", 11391),
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindBoss, "boss", 11382),
+	}
+	if fire, trig, kind := PrepullFirePoint(rows, 5); fire != 5 || trig != 0 || kind != "" {
+		t.Errorf("marker on the leg's first row: fire %d trigger %d kind %q, want 5 0 \"\"", fire, trig, kind)
+	}
+	// The comment search is a token of the comment, not a substring of another word ("notwakes boss 11382").
+	rows.Steps[0] = row(1, planexport.KindMove, "approach", 0)
+	rows.Steps[1] = row(1, planexport.KindPull, "pull group 17; notwakes boss 11382", 11353)
+	if fire, trig, kind := PrepullFirePoint(rows, 5); fire != 5 || trig != 0 || kind != "" {
+		t.Errorf("substring marker: fire %d trigger %d kind %q, want 5 0 \"\"", fire, trig, kind)
+	}
+	// The wakes-boss trigger wins over a later summoning trigger (the wake is what starts the fight).
+	rows.Steps = []planexport.StepRow{
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindPull, "pull group 17; wakes boss 11382", 11353),
+		row(1, planexport.KindMove, "approach", 0),
+		row(1, planexport.KindOpen, "use object", 180526),
+		row(1, planexport.KindBoss, "boss", 11382),
+	}
+	if fire, trig, kind := PrepullFirePoint(rows, 5); fire != 2 || trig != 2 || kind != PrepullWakesBossKind {
+		t.Errorf("wakes-boss before an open: fire %d trigger %d kind %q, want 2 2 %q", fire, trig, kind, PrepullWakesBossKind)
+	}
+}
