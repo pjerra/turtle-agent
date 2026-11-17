@@ -465,15 +465,17 @@ func groupAutoTargets(targets []raidwalk.AutoTarget) []*autoState {
 }
 
 // autoTargetFingerprint is the sha256 of a state's ordered, normalised goal lines: id, server, slot, holder, goal,
-// start and the raid-walk args, one line per goal (the line numbers of targets.txt are not part of it). The
-// checkpoint stores it per id, so a start can tell whether a saved goal and step belongs to the lines targets.txt
-// holds now: a person may edit the goals under a crashed supervisor, and a checkpoint written for the old lines must
-// not mark the new ones done or place them from an old step.
+// start, the attempt and wipe budgets and the raid-walk args, one line per goal (the line numbers of targets.txt
+// are not part of it). The checkpoint stores it per id, so a start can tell whether a saved goal and step belongs
+// to the lines targets.txt holds now: a person may edit the goals under a crashed supervisor, and a checkpoint
+// written for the old lines must not mark the new ones done or place them from an old step. The budgets ride along
+// because they are taken out of Args (--max-attempts and --boss-wipe-max) or are a bare flag (--boss-wipe-fresh)
+// and would otherwise be invisible here: an offline --max-attempts edit must drop the stale stopped budget state.
 func autoTargetFingerprint(st *autoState) string {
 	var b strings.Builder
 	for _, g := range st.goals {
 		t := g.target
-		fmt.Fprintf(&b, "%q %q %q %q %q %q", t.ID, t.Server, t.Slot, t.Holder, t.Goal.String(), t.Start)
+		fmt.Fprintf(&b, "%q %q %q %q %q %q max-attempts=%d boss-wipe-max=%d boss-wipe-fresh=%v", t.ID, t.Server, t.Slot, t.Holder, t.Goal.String(), t.Start, t.MaxAttempts, t.BossWipeMax, t.BossWipeFresh)
 		for _, a := range t.Args {
 			fmt.Fprintf(&b, " %q", a)
 		}
@@ -1662,8 +1664,17 @@ func (s *autoSupervisor) finish(st *autoState) {
 	switch d.Action {
 	case raidwalk.AutoHirePoolWait:
 		g.hireWaits++
+		// A decided wait is no attempt (the run never placed): the launch's earlier claim of the budget is rolled
+		// back, so waits do not consume it. An adopted run claimed nothing (the launch did not start it), so the
+		// rollback cannot drive the counter below zero.
+		if !r.adopted && g.attempt > 0 {
+			g.attempt--
+		}
 	case raidwalk.AutoCapWait:
 		// Waiting for an instance place is no attempt: neither a failure nor progress, as the hire-pool wait.
+		if !r.adopted && g.attempt > 0 {
+			g.attempt--
+		}
 	default:
 		g.hireWaits = 0
 		if lastStep > prevBest {
@@ -1756,6 +1767,10 @@ func (s *autoSupervisor) finish(st *autoState) {
 			// escalation), so writeStatus reports it as stopped and finishAll exits 0 with the not-every-goal line.
 			if d.MaxAttemptsStop || st.stopping {
 				st.stopped = true
+				// A spent budget names its own stop reason; a stop file already set stopWhy at request time.
+				if d.MaxAttemptsStop && !st.stopping {
+					st.stopWhy = d.Reason
+				}
 			}
 		}
 	case raidwalk.AutoRestart:
@@ -1940,7 +1955,6 @@ func (s *autoSupervisor) launch(st *autoState) {
 		reuse = false
 	}
 	st.nextReuse = false
-	g.attempt++
 	st.seq++
 	seq := st.seq
 	out := filepath.Join(s.o.walkDir, fmt.Sprintf("%s-%d", st.id, seq))
@@ -1954,7 +1968,6 @@ func (s *autoSupervisor) launch(st *autoState) {
 			argsTarget.Goal.Cycles = remaining
 		}
 	}
-	attempt := g.attempt
 	st.mu.Unlock()
 
 	args := autoCommandArgs(s.o.binary, argsTarget, out, from, reuse, s.o.forwardInstanceCap())
@@ -1991,6 +2004,10 @@ func (s *autoSupervisor) launch(st *autoState) {
 		st.mu.Unlock()
 	}()
 	st.mu.Lock()
+	// The budget counts a started raid-walk child: the attempt is claimed only after cmd.Start succeeds. A launch
+	// failure keeps today's retry/escalation path and never spends the budget; a decided wait also never spent one.
+	g.attempt++
+	attempt := g.attempt
 	st.run = run
 	st.lastOut = out
 	st.launchFails = 0

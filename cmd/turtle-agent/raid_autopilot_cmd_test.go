@@ -787,8 +787,8 @@ func TestAutoMaxAttemptsOneStopsAfterTheFirstExit(t *testing.T) {
 	if !strings.Contains(f.events(), "not every target's goals are met (0 escalated, 0 refused, 1 stopped)") {
 		t.Fatalf("no clean not-every-goal finish line:\n%s", f.events())
 	}
-	if status := f.statusFile(); !strings.Contains(status, "a goal=boss:14515 stopped (") {
-		t.Fatalf("status.txt does not report the id stopped:\n%s", status)
+	if status := f.statusFile(); !strings.Contains(status, "a goal=boss:14515 stopped (max attempts 1 reached") {
+		t.Fatalf("status.txt does not name the spent budget:\n%s", status)
 	}
 	torn := false
 	for _, line := range f.teardowns() {
@@ -798,6 +798,88 @@ func TestAutoMaxAttemptsOneStopsAfterTheFirstExit(t *testing.T) {
 	}
 	if !torn {
 		t.Fatalf("the slot was not torn down verified:\n%s", strings.Join(f.teardowns(), "\n"))
+	}
+}
+
+// An instance-cap wait does not spend the --max-attempts budget: a wait then a launch is attempt 1, and the spent
+// budget still ends the id on that launch's first non-clear exit.
+func TestAutoMaxAttemptsIgnoresACapWait(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql --max-attempts 1")
+	f.attempt("a-1", 26, 0, capEnd)
+	f.attempt("a-2", 18, 51, "paused: 15 dead: 21")
+	s := f.supervisor()
+	tickUntil(t, s, "the cap-wait launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the next launch", func() bool { return len(f.args()) >= 2 })
+	if got := f.args()[1]; !strings.Contains(got, "a-2") {
+		t.Fatalf("the second launch is not attempt 2's out dir:\n%s", strings.Join(f.args(), "\n"))
+	}
+	finishAttempt(t, s)
+	if done, esc := runState(s.states[0]); !done || esc {
+		t.Fatalf("the spent budget did not stop the id cleanly:\n%s", f.events())
+	}
+	if strings.Contains(f.events(), "attempt 3") {
+		t.Fatalf("a third attempt launched after the spent budget:\n%s", f.events())
+	}
+	st := s.states[0]
+	st.mu.Lock()
+	attempt := st.goals[0].attempt
+	st.mu.Unlock()
+	if attempt != 1 {
+		t.Fatalf("attempt = %d, want 1 (the cap wait is no attempt):\n%s", attempt, f.events())
+	}
+}
+
+// A launch that never starts spends no budget: the retry claims the next seq/out but the same attempt number, and
+// the spent budget still ends the id on the started run's first exit. The launch log lines both say attempt 1.
+func TestAutoMaxAttemptsIgnoresALaunchFailure(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --instance-cap-wait 0 --max-attempts 1")
+	// The retry reuses the next seq out dir (a failed launch still advances the out numbering), so the started run
+	// is a-2: its spec decides the spent budget.
+	f.attempt("a-2", 18, 51, "paused: 15 dead: 21")
+	s := f.supervisor()
+	// The startup reconciliation verifies the slot's lease with the stub; only the launch gets a broken binary.
+	s.o.binary = filepath.Join(f.dir, "missing-turtle-agent")
+	tickUntil(t, s, "the failed launch", func() bool {
+		st := s.states[0]
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.launchFails >= 1
+	})
+	st := s.states[0]
+	st.mu.Lock()
+	budget := st.goals[0].attempt
+	st.mu.Unlock()
+	if budget != 0 {
+		t.Fatalf("attempt = %d, want 0 (a failed launch claims no budget):\n%s", budget, f.events())
+	}
+	clearWait(st)
+	s.o.binary = f.stub
+	tickUntil(t, s, "the retry launch", func() bool { return len(f.args()) >= 1 })
+	st.mu.Lock()
+	fails := st.launchFails
+	st.mu.Unlock()
+	if fails != 0 {
+		t.Fatalf("launchFails = %d, want 0 after the retry started", fails)
+	}
+	finishAttempt(t, s)
+	if done, esc := runState(s.states[0]); !done || esc {
+		t.Fatalf("the spent budget did not stop the id cleanly:\n%s", f.events())
+	}
+	if strings.Contains(f.events(), "attempt 2") {
+		t.Fatalf("the failed launch consumed the budget:\n%s", f.events())
+	}
+	st.mu.Lock()
+	attempt := st.goals[0].attempt
+	st.mu.Unlock()
+	if attempt != 1 {
+		t.Fatalf("attempt = %d, want 1 (a failed launch is no attempt):\n%s", attempt, f.events())
+	}
+	if n := len(f.args()); n != 1 {
+		t.Fatalf("%d walks started, want 1 (the failed launch starts nothing):\n%s", n, strings.Join(f.args(), "\n"))
 	}
 }
 
@@ -2720,6 +2802,48 @@ func TestAutoUnchangedGoalsRestoreTheDoneCheckpoint(t *testing.T) {
 	}
 	if !strings.Contains(f.events(), "already dead: goal boss:14507 is dead; the last goal is done") {
 		t.Fatalf("the restart did not restore the boss-dead goal:\n%s", f.events())
+	}
+}
+
+// An offline --max-attempts edit changes the fingerprint: the restart drops the stale stopped budget state and runs
+// the new budget fresh (attempt 1 of 2 relaunches instead of staying stopped on the old budget of 1).
+func TestAutoEditedMaxAttemptsRunsTheNewBudget(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --max-attempts 1")
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	st.goals[0].attempt = 1
+	st.done, st.stopped, st.stopWhy = true, true, "max attempts 1 reached: exit 18: paused"
+	st.mu.Unlock()
+	s.saveState()
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --max-attempts 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.attempt("a-1", 18, 51, "paused: 15 dead: 21")
+	f.attempt("a-2", 18, 51, "paused: 15 dead: 21")
+	s2 := f.supervisor()
+	st2 := f.stateByID(s2, "a")
+	if st2 == nil {
+		t.Fatalf("the restart dropped a:\n%s", f.events())
+	}
+	st2.mu.Lock()
+	fresh := !st2.done && !st2.stopped && st2.goals[0].attempt == 0
+	st2.mu.Unlock()
+	if !fresh {
+		t.Fatalf("the restart kept the stale stopped budget state:\n%s", f.events())
+	}
+	tickUntil(t, s2, "the first launch of the new budget", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s2)
+	if done, esc := runState(st2); done || esc {
+		t.Fatalf("attempt 1 of the new budget of 2 stopped the id:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "the goal lines changed since the checkpoint; its progress is not restored") {
+		t.Fatalf("the start did not say the checkpoint was stale:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "a launch: attempt 1 ") {
+		t.Fatalf("the new budget did not start at attempt 1:\n%s", f.events())
 	}
 }
 
