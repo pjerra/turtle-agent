@@ -2,11 +2,11 @@
 type: Concept
 title: The live event log
 description: The events RPC, its kinds, and how to page through the log.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/events/log.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/events/log.go
 tags: [events, concept]
 sources:
   - id: events
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/events/log.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/events/log.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:44:00+01:00

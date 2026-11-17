@@ -2,15 +2,15 @@
 type: Guide
 title: Pets, druids, shamans
 description: How the shared pet strategy attacks and recalls, and what druids and shamans cast around their forms and totems.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/pet.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/pet.go
 tags: [combat, pets, druid, shaman]
 sources:
   - id: pet-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/pet.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/pet.go
   - id: druid-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/druid.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/druid.go
   - id: shaman-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/shaman.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/shaman.go
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

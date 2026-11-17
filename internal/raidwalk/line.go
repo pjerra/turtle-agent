@@ -6,7 +6,7 @@ package raidwalk
 import (
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // CleanLine removes the control bytes a TBM line may carry (C0, DEL and C1) before it is parsed. The raw event text

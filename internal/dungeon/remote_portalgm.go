@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The GM move of the enter phase. The hires spawn at the commander, wherever it stands: the first Ragefire start had the party in Tanaris and

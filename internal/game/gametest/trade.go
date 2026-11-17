@@ -1,8 +1,8 @@
 package gametest
 
 import (
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // TradeStatus is WorldSession::SendTradeStatus (TradeHandler.cpp:36-70 on upstream/1181dev

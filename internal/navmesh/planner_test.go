@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh/navfixture"
 )
 
 const fixtureMap = 1

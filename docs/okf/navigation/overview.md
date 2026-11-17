@@ -2,17 +2,17 @@
 type: Overview
 title: How navigation works
 description: A tour of how the agent moves, sees and draws the world it walks through.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/planner.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/planner.go
 tags: [navigation, navmesh, map]
 sources:
   - id: planner
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/planner.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/planner.go
     title: The navmesh planner
   - id: navwalk
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/navwalk.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/navwalk.go
     title: Path planning and walking in the session
   - id: mapview
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/mapview/scene.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/mapview/scene.go
     title: Map scenes, floors and backgrounds
 generated:
   by: muse-spark-1.3/omp

@@ -2,17 +2,17 @@
 type: Concept
 title: "Client data: MPQ and BLP"
 description: The game client's archives and textures the minimap pictures come from.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/mpq/mpq.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/mpq/mpq.go
 tags: [navigation, minimap, client]
 sources:
   - id: mpq
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/mpq/mpq.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/mpq/mpq.go
     title: The MPQ archive reader
   - id: blp
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/blp/blp.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/blp/blp.go
     title: The BLP texture decoder
   - id: minimap-tiles
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/minimap/tiles.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/minimap/tiles.go
     title: Minimap tiles and coordinates
 generated:
   by: muse-spark-1.3/omp

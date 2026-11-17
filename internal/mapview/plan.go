@@ -1,6 +1,6 @@
 package mapview
 
-import "github.com/pjerra/turtle-agent/internal/dungeon"
+import "github.com/TortoiseBots/turtle-agent/internal/dungeon"
 
 // Overlay is a dungeon plan drawn over the run: the walk from the entrance through the legs' waypoints, the
 // positions of the pull groups, the bosses and the objects the plan uses.

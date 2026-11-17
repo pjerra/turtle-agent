@@ -2,14 +2,14 @@
 type: Concept
 title: What wakes when you walk
 description: Aggro radius, packs, the call-for-help ring, and what the estimate cannot see.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/aggroest/aggroest.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/aggroest/aggroest.go
 tags: [navigation, aggro, patrols]
 sources:
   - id: aggroest
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/aggroest/aggroest.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/aggroest/aggroest.go
     title: The offline aggro estimate
   - id: worldspawn
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/worldspawn/worldspawn.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/worldspawn/worldspawn.go
     title: Spawn aggro radius and packs
 generated:
   by: muse-spark-1.3/omp

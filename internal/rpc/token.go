@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/privfile"
+	"github.com/TortoiseBots/turtle-agent/internal/privfile"
 )
 
 // NewToken returns a random bearer token: 32 bytes from crypto/rand, base64url (43 characters).

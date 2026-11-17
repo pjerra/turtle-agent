@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // SuiteMetrics are the numbers raid-suite compares two walks of one plan by (spec raid-walk-addons 2.2).

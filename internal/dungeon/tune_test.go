@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/trace"
-	"github.com/pjerra/turtle-agent/internal/tracerun"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/tracerun"
 )
 
 // liveRig is a remote run over three legs (the second has two pull groups) whose plan and tunables files sit in a temp folder.

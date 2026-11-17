@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // Spells of the paladin tests (ids from internal/spells/meta.tsv.gz; TestPaladinSpellData checks the facts the rotation relies on).

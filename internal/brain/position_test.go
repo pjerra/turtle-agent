@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 func TestLineOfSightIsCachedPerTargetFor250msAndFollowsMovement(t *testing.T) {

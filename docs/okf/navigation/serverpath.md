@@ -2,11 +2,11 @@
 type: Concept
 title: How the server walks
 description: The server's own path query, and how the agent replays it.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/serverpath.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/serverpath.go
 tags: [navigation, navmesh, server]
 sources:
   - id: serverpath
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/serverpath.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/serverpath.go
     title: The server's own path query
 generated:
   by: muse-spark-1.3/omp

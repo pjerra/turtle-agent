@@ -1,6 +1,6 @@
 package dungeon
 
-import "github.com/pjerra/turtle-agent/internal/objects"
+import "github.com/TortoiseBots/turtle-agent/internal/objects"
 
 // StealthSpells are the auras that hide a unit from the party's companions: they never attack what they cannot see,
 // so a pull of such a unit draws no fight. 5916 is Shadowstalker Stealth, which the Uldaman Cave Lurkers (4850) carry

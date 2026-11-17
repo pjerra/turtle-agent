@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // RPCError is a JSON-RPC error an agent answered (as dashboard's RPCError).

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The pre-run kit check of a remote run (issue #83, remote Uldaman gap G4). Owned bots start with no drinks and no ammo: the run sends

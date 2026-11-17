@@ -2,17 +2,17 @@
 type: Overview
 title: Dungeon runs overview
 description: What a dungeon run is, the three modes, and how the parts of a run fit together.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
 tags: [dungeon, commander, overview]
 sources:
   - id: dungeon-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
     title: dungeon_run RPC, validation, and run lifecycle
   - id: dungeon-modes
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_modes.go
     title: Run modes and leader brain presets
   - id: remote-driver
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/remote.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/remote.go
     title: The commander-mode driver
 generated:
   by: muse-spark-1.3/omp

@@ -17,9 +17,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // Rotations as data (DESIGN-DUNGEON-MODES P2, TA-D). A rotation file is the priority list of one class and spec for the agent's own

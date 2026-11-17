@@ -2,8 +2,8 @@ package dungeon
 
 import (
 	"fmt"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 	"slices"
 	"testing"
 )

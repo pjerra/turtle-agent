@@ -2,17 +2,17 @@
 type: Guide
 title: Rogue, hunter, retribution paladin, warlock
 description: What each melee and ranged damage rotation casts, when, and where it stands.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/rogue.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/rogue.go
 tags: [combat, dps, rogue, hunter, paladin, warlock]
 sources:
   - id: rogue-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/rogue.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/rogue.go
   - id: hunter-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/hunter.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/hunter.go
   - id: paladin-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/paladin.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/paladin.go
   - id: warlock-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/warlock.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/warlock.go
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

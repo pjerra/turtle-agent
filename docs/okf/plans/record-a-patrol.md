@@ -2,11 +2,11 @@
 type: Guide
 title: Record a patrol
 description: Measure a patrolling pack with patrol-record for a plan's patrol block.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
 tags: [plans, patrol]
 sources:
   - id: patrol-record
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:52:00+01:00

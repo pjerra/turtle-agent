@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/dungeons"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/dungeons"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // planName limits a plan name to what a plan file name can be (the same rule dungeon_run applies).

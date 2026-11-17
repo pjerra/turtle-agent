@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // TestSaveFightsSkipsHistoryDetail: the first read (pre-placement, saveFightsAtStart) lists id A; a later read

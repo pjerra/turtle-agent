@@ -4,10 +4,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/planlint"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/planlint"
+	"github.com/TortoiseBots/turtle-agent/internal/worldspawn"
 )
 
 // Nav is what the offline pass asks the navmesh: the placement lints' queries and the server's own path.

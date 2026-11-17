@@ -2,25 +2,25 @@
 type: Overview
 title: Combat overview
 description: How spells, the brain, rotations, tactics, the addon host, Eluna and LFT fit together.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/brain.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/brain.go
 tags: [combat, overview]
 sources:
   - id: brain-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/brain.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/brain.go
   - id: spells-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/spells/spells.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/spells/spells.go
   - id: spellstate-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/spellstate/spellstate.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/spellstate/spellstate.go
   - id: tactics-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/tactics/tactics.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/tactics/tactics.go
   - id: addonhost-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/addonhost/host.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/addonhost/host.go
   - id: eluna-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/eluna/client.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/eluna/client.go
   - id: lft-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/lft/msg.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/lft/msg.go
   - id: rotations-doc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/ROTATIONS.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/ROTATIONS.md
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:35:00+01:00

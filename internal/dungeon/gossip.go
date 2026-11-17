@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The gossip step (Gossip in plan.go): the agent's own character talks to an NPC. The remote driver also lets a bot do it (remote_gossip.go);

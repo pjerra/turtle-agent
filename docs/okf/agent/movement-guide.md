@@ -2,17 +2,17 @@
 type: Guide
 title: Moving
 description: Walk short hops, plan paths, walk them, and teleport with a GM account.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/actions.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/actions.go
 tags: [agent, movement, walk, teleport]
 sources:
   - id: actions-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/actions.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/actions.go
     title: walk_to, teleport, target, cast
   - id: navwalk-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/navwalk.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/navwalk.go
     title: path_to and walk_path on the navmesh
   - id: move-mode-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/move_mode.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/move_mode.go
     title: Single movement owner (follow vs dungeon run)
 generated:
   by: muse-spark-1.3/omp

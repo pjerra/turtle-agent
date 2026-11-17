@@ -2,13 +2,13 @@
 type: Concept
 title: Captures
 description: What a capture file records, what it redacts, and what the tools around it do.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/capture/capture.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/capture/capture.go
 tags: [captures, fixtures]
 sources:
   - id: capture
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/capture/capture.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/capture/capture.go
   - id: testfixture
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/testfixture/testfixture.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/testfixture/testfixture.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:41:00+01:00

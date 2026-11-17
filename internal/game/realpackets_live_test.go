@@ -1,6 +1,6 @@
 package game_test
 
-import "github.com/pjerra/turtle-agent/internal/opcode"
+import "github.com/TortoiseBots/turtle-agent/internal/opcode"
 
 // Packets from the live run of #61 (m910q, TortoiseBots build 17), recorded with
 // `turtle-agent login --capture` and read back with the capture reader. They come from

@@ -2,14 +2,14 @@
 type: Guide
 title: Tune a live run
 description: Change a running commander run's numbers with tunables files, tune_set, and tune-diff.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/tune.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/tune.go
 tags: [dungeon, commander, tuning, guide]
 sources:
   - id: tune
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/tune.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/tune.go
     title: Tunables, limits, and file parsing
   - id: tune-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
     title: tune_set, tune_list, and tune-diff
 generated:
   by: muse-spark-1.3/omp

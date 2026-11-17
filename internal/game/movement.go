@@ -1,6 +1,6 @@
 package game
 
-import "github.com/pjerra/turtle-agent/internal/packet"
+import "github.com/TortoiseBots/turtle-agent/internal/packet"
 
 // Movement flags (Objects/Object.h:210-240).
 const (

@@ -2,14 +2,14 @@
 type: Concept
 title: The navmesh and the planner
 description: What the navmesh is, what the planner answers, and how routes are built.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/planner.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/planner.go
 tags: [navigation, navmesh]
 sources:
   - id: planner
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/planner.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/planner.go
     title: The navmesh planner
   - id: engine-nocgo
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/engine_nocgo.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/engine_nocgo.go
     title: The no-cgo stub engine
 generated:
   by: muse-spark-1.3/omp

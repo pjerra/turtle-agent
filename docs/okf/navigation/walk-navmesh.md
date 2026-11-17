@@ -2,14 +2,14 @@
 type: Guide
 title: Walk the navmesh
 description: Plan a route and walk it with path_to, walk_path and walk_to.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/navwalk.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/navwalk.go
 tags: [navigation, navmesh, rpc]
 sources:
   - id: navwalk
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/navwalk.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/navwalk.go
     title: Path planning and walking in the session
   - id: methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
     title: RPC method registration
 generated:
   by: muse-spark-1.3/omp

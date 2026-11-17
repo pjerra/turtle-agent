@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // legMapPlan: a, then a middle leg that is skip_export (wing) or optional (gong) or, in the default, the plan's own leg, then b. Each

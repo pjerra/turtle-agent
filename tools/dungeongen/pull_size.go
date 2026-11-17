@@ -17,10 +17,10 @@
 package main
 
 import (
-	"github.com/pjerra/turtle-agent/internal/aggroest"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/planlint"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
+	"github.com/TortoiseBots/turtle-agent/internal/aggroest"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planlint"
+	"github.com/TortoiseBots/turtle-agent/internal/worldspawn"
 )
 
 // PullFinding is one pull row over its ceiling, or a pull row with no target.

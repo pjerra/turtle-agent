@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh/navfixture"
 )
 
 // An avoid box over the ring's left column (the short way from (12, 12) to (30, 48)) marks its polygons as lava: the path goes the long way

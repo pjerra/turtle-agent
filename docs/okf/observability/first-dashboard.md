@@ -2,11 +2,11 @@
 type: Tutorial
 title: Watch your first run on the dashboard
 description: Start the read-only dashboard, open it in a browser, and read one run card.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
 tags: [dashboard, tutorial]
 sources:
   - id: dashboard-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:36:00+01:00

@@ -7,8 +7,8 @@ package main
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // TestZgHakkarBossApproachOnHisPlatform pins walk 42's fix 1. The approach is two plan points: the platform ramp's top

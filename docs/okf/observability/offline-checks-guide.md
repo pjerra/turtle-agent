@@ -2,13 +2,13 @@
 type: Guide
 title: Check a plan without a server
 description: stage-check and trash-check read plan rows and world data and log in to nothing.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/stage_check_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/stage_check_cmd.go
 tags: [stage-check, trash-check, guide]
 sources:
   - id: stage-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/stage_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/stage_check_cmd.go
   - id: trash-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trash_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/trash_check_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:51:00+01:00

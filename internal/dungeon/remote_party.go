@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The bound party of a remote run must be exactly the named lead bot and bots before anything enters the dungeon (issue #83, run 6b):

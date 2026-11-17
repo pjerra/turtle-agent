@@ -2,13 +2,13 @@
 type: Guide
 title: Supervise raids with the autopilot
 description: Write targets.txt, run the supervisor, and stop one raid or all of them.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_autopilot_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_autopilot_cmd.go
 tags: [raids, autopilot]
 sources:
   - id: auto-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_autopilot_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_autopilot_cmd.go
   - id: autopilot
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/autopilot.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/autopilot.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:40:00+01:00

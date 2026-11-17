@@ -1,8 +1,8 @@
 package brain
 
 import (
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The retribution paladin (issue #80 step 4b, preset ret_paladin): a melee damage dealer that stands behind its mob (melee_position),

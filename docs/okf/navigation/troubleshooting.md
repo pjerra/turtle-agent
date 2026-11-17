@@ -2,17 +2,17 @@
 type: Troubleshooting
 title: When navigation fails
 description: Real navigation error messages, what they mean, and the fix.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/planner.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/planner.go
 tags: [navigation, troubleshooting, errors]
 sources:
   - id: planner
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/navmesh/planner.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/navmesh/planner.go
   - id: navwalk
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/navwalk.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/navwalk.go
   - id: map-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
   - id: trash-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trash_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/trash_check_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

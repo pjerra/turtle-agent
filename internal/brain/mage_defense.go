@@ -3,7 +3,7 @@ package brain
 import (
 	"math"
 
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // The mage's answer to a mob that has picked it (issue #80 step 3b). The hard signal is the mob's target being the player: a 1.12

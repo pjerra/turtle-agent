@@ -1,6 +1,6 @@
 # turtle-agent
 
-[![test](https://github.com/pjerra/turtle-agent/actions/workflows/test.yml/badge.svg)](https://github.com/pjerra/turtle-agent/actions/workflows/test.yml)
+[![test](https://github.com/TortoiseBots/turtle-agent/actions/workflows/test.yml/badge.svg)](https://github.com/TortoiseBots/turtle-agent/actions/workflows/test.yml)
 
 A headless World of Warcraft client for **vanilla 1.12 / Turtle WoW 1.18.1** servers (login build 7272, world build 5875).
 One process logs one character in, with no game window, and exposes it over a local JSON-RPC API. It was built to test
@@ -51,10 +51,13 @@ spec is listed in the walk's `spec_failed`.
 
 Raid-walk's `--prepull-aura role=<role>:<ids>` (`tank`, `melee`, `ranged`, `caster`, `healer` or `all`) puts a flask,
 elixir, food and world-buff list on the raid as auras at the step before each boss row — whatever that step's phase,
-or on the boss row itself if the run passed that step too fast to pause, both only while the run is still before the
-pull — and
+or where the paused run stands when it passed that step too fast to pause (the boss row itself or beyond it) — and on
+the boss row's own pause, all only while the run is still before the pull and on the same three cases: a boss alive
+and out of combat gets the fire; a boss already dead — his corpse in the fresh arena read, or the walk's own record of
+the kill — gets none, one `run.log` line `boss already dead, no pre-pull fire`, and the run carries on; a boss the
+read cannot prove (engaged, or missing from the read) fails closed with no aura — and
 `prepull-auras.json` records what each bot carries. A value that is not a `role=` list is a `tb-prepull-auras` file, so
-`--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once. The targets are the walk's own hires,
+`--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once (`dungeons/prepull/onyxia-preraid.json` is the same six for Onyxia's Lair, with Greater Fire Protection Potion's aura 17543 on the `all` list). The targets are the walk's own hires,
 matched by name in the commander's raid read from its view (the walk's player is not in the hired bots' raid); a frame
 member the walk never hired gets no aura but is still watched for combat as one of the raid, and a hire whose role the
 walk cannot tell fails the fire. The role comes PER BOT from the module's own state rows: the walk reads `.bot roster`
@@ -66,10 +69,10 @@ row names the bot's own spec. The walk's mt and ot are tanks whatever their kit.
 incomplete snapshot, and a kit naming no spec or specs of more than one role all fail closed before any aura;
 `prepull-auras.json` records the source as `role_source` and each bot's `specs`. The batch is fail-closed: the commander and every living raid member, list or no list, are re-read for
 combat before each `.aura` (an in-combat unit or an unreadable `unit` row stops the batch), a boss row's arena is read
-fresh from the server (`q units` around the row: a boss already engaged, a read that cannot be made, or a unit row
-without its combat state, stops the walk), and every bot the walk hired must receive a list — a fire that reaches
-fewer of them, or none at all, fails with the bots and reasons named. A boss row lands in `boss_rows` only after its
-auras verified — a failed fire is an `attempts{row, reason}` entry instead.
+fresh from the server (`q units` around the row: a boss already engaged, a read that cannot be made or that lists no
+unit of the boss, or a unit row without its combat state, stops the walk), and every bot the walk hired must receive a
+list — a fire that reaches fewer of them, or none at all, fails with the bots and reasons named. A boss row lands in
+`boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
 By default every requested aura must verify; a miss fails the walk,
 and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot
 (see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).
@@ -87,6 +90,23 @@ walk, and `run.log` names how long the wait took. The coverage
 read is taken at the pull itself — the boss row current in the plan's `pull` or `task` (fight start) phase — never at
 the step before it; a row is read at the pull and refreshed once at the fight start, and a phase is recorded only after
 a successful read, so a failed read is retried at the next qualifying status.
+
+`--prepull-aura-topup` (off by default, needs `--prepull-aura`) closes the gap a death or an expiry leaves between boss
+rows: before EVERY pull row, trash or boss, out of combat and never inside the pull, the walk reads each living hire's
+auras and puts back only the ids its role's list is missing — a death strips every aura, and food (~15 min), the elixirs,
+the flasks and the world buffs expire — then reads them back. A boss row is the boss-row fire's own business in
+`--prepull-aura-when boss` (the default), so the top-up stays out of it and never sends a list the fire is sending;
+under `--prepull-aura-when start`, where no boss row is fired, the top-up is what reads and tops up the hires at the
+boss pull. It uses the fire's path (the commander join when the unit store cannot see the raid, the per-bot role, the
+combat recheck before each send), pauses the run only while there is something to send (at most 15 s, resumed right
+after or at the cap), never targets a dead bot, and never fails the walk: combat during the top-up stops the batch
+quietly and the pull goes on. One `run.log` line names the pull and each topped bot with the ids put back and the
+cause (`death`, `expired`, or `never had`). Completion is tracked per hire: each hire is read once per pull step, and
+one a status could not read (a failed unit read, a body, a hire out of the commander's view) is read again at the next
+pre-pull status of the same pull. A hire that still lacks an id after 3 sends is done for that pull step too, with one
+line naming the ids (`... still lacks <ids> after 3 tries; giving up for this step`): an aura the server will not
+stick is not resent on every status before the same pull. Nothing is carried to the next pull step: an aura that was
+there at one pull can expire seconds later.
 
 A `--place` walk revives the hires its own frames do not show alive before it moves the raid: the ZG Mandokir runs of
 walk 101b all wiped at the zone-in while the commander ran the corridor clear, and 19 corpses stayed dead through every

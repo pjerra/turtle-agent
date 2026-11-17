@@ -2,19 +2,19 @@
 type: Overview
 title: Observability and testing
 description: What the dashboard, captures, traces, events and scenarios are and how they fit together.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dashboard/server.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dashboard/server.go
 tags: [dashboard, traces, captures, events, scenarios]
 sources:
   - id: dashboard-server
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dashboard/server.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dashboard/server.go
   - id: capture
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/capture/capture.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/capture/capture.go
   - id: trace
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/trace/trace.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/trace/trace.go
   - id: events
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/events/log.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/events/log.go
   - id: scenario
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/scenario/runner.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/scenario/runner.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:35:00+01:00

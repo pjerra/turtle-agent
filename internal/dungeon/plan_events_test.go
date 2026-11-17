@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The event steps of the Zul'Farrak events design (TortoiseBots #984): area_trigger, wait_for unit and the leg's companions_loot.

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // The pull test in leader mode (dungeon_run mode "leader" with pulltest). The same scenario as the commander's (pulltest.go): one pull

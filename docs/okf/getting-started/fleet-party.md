@@ -2,13 +2,13 @@
 type: Guide
 title: Log several characters in
 description: Start one login process per party member with the fleet command and its fleet file.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
 tags: [getting-started, fleet, party, login]
 sources:
   - id: fleet
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fleet.go
   - id: config
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/config/config.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/config/config.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The frost mage, the first class of the brain (issue #80 step 2). Numbers come from the harvest of

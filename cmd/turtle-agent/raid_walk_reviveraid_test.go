@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 	"io"
 	"os"
 	"path/filepath"

@@ -1,6 +1,6 @@
 package planscout
 
-import "github.com/pjerra/turtle-agent/internal/planlint"
+import "github.com/TortoiseBots/turtle-agent/internal/planlint"
 
 // The run leader's rules and the scout's own, in yards (pinned by TestConstantsMirrorTheRunLeader).
 const (

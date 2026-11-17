@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Optional legs (Leg.Optional) in remote mode: a leg that needs an item no honest run carries (Zul'Farrak's gong needs the Mallet of

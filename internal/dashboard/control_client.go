@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 // The write client of the run controls (README "Controls (--control)"). It is separate from Client (agents.go), whose Call is read-only

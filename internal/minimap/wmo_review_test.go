@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/mpq"
+	"github.com/TortoiseBots/turtle-agent/internal/mpq"
 )
 
 func reviewWMO(boxes [][6]float32) []byte {

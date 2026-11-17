@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // A roster response as HandleRoster writes it (BotCommands.cpp:1880-2024 in TortoiseBots 18d4d14).

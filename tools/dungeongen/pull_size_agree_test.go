@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/planlint"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planlint"
+	"github.com/TortoiseBots/turtle-agent/internal/worldspawn"
 )
 
 // TestScoutAndPullSizeAgree: dungeongen's pull lint and plan-check's joiner lint score every ZG pull row with the same bodies.

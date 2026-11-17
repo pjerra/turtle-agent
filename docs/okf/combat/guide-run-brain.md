@@ -2,13 +2,13 @@
 type: Guide
 title: Run the brain
 description: Start, watch and stop the combat brain over RPC, with a rotation and a role.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
 tags: [combat, brain, rpc]
 sources:
   - id: brain-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
   - id: brain-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/brain.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/brain.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:40:00+01:00

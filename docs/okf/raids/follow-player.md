@@ -2,11 +2,11 @@
 type: Guide
 title: Follow the lead bot as a player
 description: Walk behind a bot-led run on its trail, hold, regroup and stop rules.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/follow.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/follow.go
 tags: [raids, follow, guide]
 sources:
   - id: follow
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/follow.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/follow.go
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

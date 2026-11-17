@@ -2,11 +2,11 @@
 type: Guide
 title: Re-score a trace
 description: The trace-score flags, its output, and its exit codes.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trace_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/trace_cmd.go
 tags: [traces, trace-score]
 sources:
   - id: trace-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trace_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/trace_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:48:00+01:00
