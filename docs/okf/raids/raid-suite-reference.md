@@ -2,13 +2,13 @@
 type: Reference
 title: raid-suite reference
 description: Every raid-suite flag, the suite file format, the verdicts and the exit codes.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_suite_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_suite_cmd.go
 tags: [raids, raid-suite, reference]
 sources:
   - id: suite-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_suite_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_suite_cmd.go
   - id: compare
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/compare.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/compare.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:50:00+01:00

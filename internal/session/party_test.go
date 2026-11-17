@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/game/gametest"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game/gametest"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func fullStats(g packet.GUID, hp, maxHP uint16) []byte {

@@ -10,7 +10,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbdash"
+	"github.com/TortoiseBots/turtle-agent/internal/tbdash"
 )
 
 const decisionsPullUsage = `usage: turtle-agent decisions pull --dash-url URL --dash-user U --dash-pass-file FILE --commander C [--since T] [--until T] --out DIR [--max-mib N]`

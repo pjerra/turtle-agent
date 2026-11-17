@@ -2,14 +2,14 @@
 type: Reference
 title: Unit positions and unit state
 description: Where unit x/y/z/o come from, what pos_age_ms means, and how to read distance, combat, class, auras and casting.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/objects/store.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/objects/store.go
 tags: [agent, units, reference, position, auras, casting]
 sources:
   - id: store-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/objects/store.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/objects/store.go
     title: Unit, aura, cast and position store
   - id: session-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
     title: StatusInfo and session state
 generated:
   by: omp

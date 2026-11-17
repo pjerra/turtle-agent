@@ -2,17 +2,17 @@
 type: Reference
 title: Navigation commands
 description: Every flag of map, path-check, minimap-extract and patrol-record.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
 tags: [navigation, reference, cli]
 sources:
   - id: map-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
   - id: path-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/path_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/path_check_cmd.go
   - id: minimap-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/minimap_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/minimap_cmd.go
   - id: patrol-record-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

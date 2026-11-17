@@ -2,23 +2,23 @@
 type: Guide
 title: Running dungeons with the agent
 description: Drive a party through a plan with dungeon_run, stage it, tune it live, and clean up with teardown.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
 tags: [agent, dungeon, commander, teardown, lfg]
 sources:
   - id: dungeon-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
     title: dungeon_run, dungeon_status, dungeon_stop, pause, resume, skip
   - id: stage-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/stage_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/stage_methods.go
     title: dungeon_stage params and result
   - id: teardown-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/teardown_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/teardown_methods.go
     title: teardown steps and result
   - id: lfg-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
     title: LFG queue, role check, proposals, listings
   - id: tune-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
     title: tune_set and tune_list
 generated:
   by: muse-spark-1.3/omp

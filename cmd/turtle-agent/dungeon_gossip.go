@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The agent's own gossip (dungeon.GossipTalker): the same session calls as the gossip_hello and gossip_select methods, each with the wait for

@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The kinds PracticeGMLine builds. Nothing else is a practice GM line.

@@ -3,10 +3,10 @@ package brain
 import (
 	"slices"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/spells"
-	"github.com/pjerra/turtle-agent/internal/tactics"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/tactics"
 )
 
 // Boss tactics for the agent's own character (DESIGN-DUNGEON-MODES P2). A dungeon plan lists, per boss, what a player does on the fight

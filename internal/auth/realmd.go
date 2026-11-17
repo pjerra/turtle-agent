@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // ClientBuild is the only build realmd knows (RealmList.cpp:39); realms show offline

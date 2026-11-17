@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // placeRow is one creature step row of a place fixture: its point, the pull's radius and its entries.

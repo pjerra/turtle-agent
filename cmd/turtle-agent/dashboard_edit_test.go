@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dashboard"
-	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
+	"github.com/TortoiseBots/turtle-agent/internal/dashboard"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh/navfixture"
 )
 
 func editSetup(t *testing.T) (p *dashboard.Poller, cfg, src, edits, tokens, mmaps string) {

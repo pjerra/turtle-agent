@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Roles (issue #80 step 3c). A role is a set of strategies that share a discipline: what to fight, when to start, where to stand.

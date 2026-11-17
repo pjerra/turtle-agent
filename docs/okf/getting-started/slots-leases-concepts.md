@@ -2,15 +2,15 @@
 type: Concept
 title: Slots and leases
 description: One slot per worker, lease identity, expiry, and how stale leases change hands.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/slots/lease.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/slots/lease.go
 tags: [getting-started, concept, slots, lease]
 sources:
   - id: lease
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/slots/lease.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/slots/lease.go
   - id: slots
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/slots/config.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/slots/config.go
   - id: lease-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

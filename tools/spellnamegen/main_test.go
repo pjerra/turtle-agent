@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // sample has three INSERTs with the aura columns of the three effects. 458 and 6648 apply

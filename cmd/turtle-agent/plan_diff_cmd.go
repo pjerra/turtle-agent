@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/minimap"
-	"github.com/pjerra/turtle-agent/internal/plandiff"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/minimap"
+	"github.com/TortoiseBots/turtle-agent/internal/plandiff"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // exitPlanDiffChanged: plan-diff --fail-on-change found a change other than a comment.

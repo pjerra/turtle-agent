@@ -20,8 +20,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 func main() {

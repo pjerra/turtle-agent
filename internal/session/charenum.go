@@ -3,7 +3,7 @@ package session
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Character is one SMSG_CHAR_ENUM entry (Player::BuildEnumData, Player.cpp:2176-2288).

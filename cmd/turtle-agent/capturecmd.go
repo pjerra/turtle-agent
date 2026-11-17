@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
 )
 
 // scrubCmd fails when a capture contains an account name (upper case, as on the wire)

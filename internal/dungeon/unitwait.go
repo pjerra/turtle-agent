@@ -3,8 +3,8 @@ package dungeon
 import (
 	"slices"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The unit waits (UnitWait: wait_for unit, the expect of an area_trigger) judge a list of sightings, whatever the driver they come from.

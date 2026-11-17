@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
 )
 
 // tuner is the part of a dungeon driver that tunes live (dungeon.RemoteDriver).

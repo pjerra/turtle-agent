@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // followFake is a fakeGame wrapped with the agent's own unit row and the melee

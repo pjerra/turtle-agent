@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
-	"github.com/pjerra/turtle-agent/internal/trace"
-	"github.com/pjerra/turtle-agent/internal/tracerun"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/tracerun"
 )
 
 // The gahzrilla leg's machinery (PR A, TortoiseBots #984): an optional leg that needs an item, the give_items run option that puts the item in

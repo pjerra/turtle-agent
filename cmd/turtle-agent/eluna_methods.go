@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/eluna"
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/eluna"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
 )
 
 // The `tt` method is one Eluna test toolkit command of the TEST server (TortoiseBots tools/eluna/test-toolkit): the agent sends

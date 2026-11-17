@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 // still is a hire that stood at (x, y) for secs seconds up to now, one sample a second.

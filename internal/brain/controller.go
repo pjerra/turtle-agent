@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/spells"
-	"github.com/pjerra/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
 )
 
 // ErrRunning is returned by Start while a brain runs.

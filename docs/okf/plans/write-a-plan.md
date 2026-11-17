@@ -2,13 +2,13 @@
 type: Guide
 title: Write a plan file
 description: Draft a new plan and edit an existing one by hand.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/plan.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/plan.go
 tags: [plans, authoring]
 sources:
   - id: plan-struct
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/plan.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/plan.go
   - id: plans-doc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/PLANS.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/PLANS.md
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:50:00+01:00

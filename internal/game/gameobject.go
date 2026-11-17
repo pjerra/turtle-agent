@@ -3,7 +3,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Game object packets. Line numbers cite the core at 5d79486 (tortoise-wow upstream).

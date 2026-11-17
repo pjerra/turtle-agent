@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tracerun"
+	"github.com/TortoiseBots/turtle-agent/internal/tracerun"
 )
 
 // Report is what a run did, kept while it goes and complete at the end. dungeon_status returns it as JSON.

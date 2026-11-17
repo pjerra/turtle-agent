@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The CC never takes a boss, a kill_first entry, a no_cc entry (undead) or a pet's GUID (live 2026-10-15: Velratha sheeped 8 times, the Witch

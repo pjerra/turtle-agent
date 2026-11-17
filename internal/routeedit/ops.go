@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // The kinds of op.

@@ -10,7 +10,7 @@ package routeoracle
 import (
 	"math"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // Vec3 is a WoW position (x, y, z).

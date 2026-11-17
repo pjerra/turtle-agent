@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // A druid leaves its shapeshift form with CMSG_CANCEL_AURA, as a right-click on the buff does.

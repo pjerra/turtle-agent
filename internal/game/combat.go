@@ -3,7 +3,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Hit info flags (UnitDefines.h:188-205).

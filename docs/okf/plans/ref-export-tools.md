@@ -2,15 +2,15 @@
 type: Reference
 title: plan-export, plan-diff, route-edits
 description: Every flag, default, and exit code of the export, diff, and route edit tools.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
 tags: [plans, reference]
 sources:
   - id: plan-export
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
   - id: plan-diff
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_diff_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_diff_cmd.go
   - id: route-edits
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/route_edits_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/route_edits_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T22:00:00+01:00

@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // When is a pull group gone? The feed lists only what the bots see (their line of sight, a frame cut short drops hostiles), so a group

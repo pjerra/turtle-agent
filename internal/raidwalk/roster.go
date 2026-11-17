@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // Roster is the tb-raid-roster v1 file: the batches hired, in order, and the level and tier.

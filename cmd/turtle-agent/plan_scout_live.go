@@ -19,17 +19,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/planscout"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/slots"
-	"github.com/pjerra/turtle-agent/internal/tbm"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/planscout"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/worldspawn"
 )
 
 const (

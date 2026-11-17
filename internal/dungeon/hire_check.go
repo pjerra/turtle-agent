@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The readiness check of one hired bot (hire.go step 3; TEST-BRIEF "Party readiness standard"). A problem fails the step with the bot's

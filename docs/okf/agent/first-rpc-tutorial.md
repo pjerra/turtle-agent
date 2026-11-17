@@ -2,14 +2,14 @@
 type: Tutorial
 title: Your first RPC calls
 description: Log an agent in, look around with status and units, and log back out.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
 tags: [agent, rpc, tutorial, status, logout]
 sources:
   - id: rpc-cmd-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
     title: The rpc subcommand (usage, timeouts, exit codes)
   - id: methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
     title: status, logout, events
 generated:
   by: muse-spark-1.3/omp

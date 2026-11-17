@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // tracePlan is a plan of two legs: leg 0 has a via point, a stage point, a pack 100 yd on and a boss 100 yd past the pack; leg 1 is a stage point

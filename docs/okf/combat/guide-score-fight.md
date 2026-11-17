@@ -2,15 +2,15 @@
 type: Guide
 title: Score a fight
 description: Judge finished fights against the spell oracle, and compare two pull tests.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fight_score_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fight_score_cmd.go
 tags: [combat, oracle, testing]
 sources:
   - id: fight-score
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/fight_score_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/fight_score_cmd.go
   - id: pulltest-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
   - id: kbspells-judge
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/kbspells/judge.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/kbspells/judge.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

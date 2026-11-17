@@ -2,17 +2,17 @@
 type: Concept
 title: Refusals, the watchdog, and the entry ledger
 description: What a bot's "no" means, how the stall guard works, and why the 6th instance entry is refused.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/refusals.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/refusals.go
 tags: [dungeon, refusals, watchdog, concept]
 sources:
   - id: refusals
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/refusals.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/refusals.go
     title: Refusal types and classification
   - id: watchdog
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/watchdog.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/watchdog.go
     title: The progress watchdog
   - id: entry-ledger
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/entry_ledger.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/entry_ledger.go
     title: The hourly instance-entry ledger
 generated:
   by: muse-spark-1.3/omp

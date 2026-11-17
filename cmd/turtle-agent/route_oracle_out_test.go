@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh/navfixture"
 )
 
 // outFixture is a one-leg plan on the fixture mesh: the plans folder and the mmaps folder.

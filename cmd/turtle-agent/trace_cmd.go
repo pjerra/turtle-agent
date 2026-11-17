@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/trace"
-	"github.com/pjerra/turtle-agent/internal/tracecheck"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/tracecheck"
 )
 
 // exitTraceFail: trace-score found a failed check.

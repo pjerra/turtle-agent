@@ -3,9 +3,9 @@ package main
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game/gametest"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/game/gametest"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 const rigSelf = 0x2A

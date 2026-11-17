@@ -39,10 +39,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // gmInstanceDataGap is the pause between two instance-data lines. It was the shell loop's 3 s; walk 74 measured six

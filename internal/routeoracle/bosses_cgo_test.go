@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh/navfixture"
 )
 
 // gapMesh is the L corridor with the column cell y 26..30 taken out: the mesh has a break at

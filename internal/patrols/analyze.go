@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Sample is one sighting of one unit at one moment.

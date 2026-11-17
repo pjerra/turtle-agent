@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Big packs (owner decision 2026-10-14): the party takes at most about BigPack mobs at once. Zul'Farrak's packs of 5 to 10 were too much

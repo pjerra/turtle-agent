@@ -2,26 +2,26 @@
 type: Reference
 title: Addons, LFG and tuning RPC
 description: tbm and addon calls, Eluna tt, LFG queue, and live tuning params and results.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
 tags: [agent, rpc, reference, addon, lfg, tune]
 sources:
   - id: lfg-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
     title: LFG methods and params
   - id: social-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
     title: addon_send, tbm, tbm_handshake, gossip
   - id: addon-host-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/addon_host.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/addon_host.go
     title: addon_start, addon_stop, addon_state, addon_tick, addon_click
   - id: tbm-click-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/tbm_click.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/tbm_click.go
     title: tbm_buttons, tbm_click, tbm_send
   - id: eluna-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/eluna_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/eluna_methods.go
     title: tt
   - id: tune-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
     title: tune_set and tune_list
 generated:
   by: muse-spark-1.3/omp

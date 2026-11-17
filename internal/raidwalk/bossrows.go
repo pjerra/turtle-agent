@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/mapview"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/mapview"
 )
 
 // FirstAddBossRadius is how near (yards, 2D) the plan position of a boss that lists it as a `first` add a frame row

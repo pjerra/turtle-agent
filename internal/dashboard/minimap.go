@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/pjerra/turtle-agent/internal/minimap"
+	"github.com/TortoiseBots/turtle-agent/internal/minimap"
 )
 
 // The page always gets the three picture slots of a map in the order Zul'Farrak has them: the world map (the main image, then

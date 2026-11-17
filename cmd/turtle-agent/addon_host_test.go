@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // testAddonDir is the real addon for the end-to-end tests: $TBM_ADDON_DIR or the copy

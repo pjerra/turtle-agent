@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 type fakeOpts struct {

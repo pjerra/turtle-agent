@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // exitStageRefused is the exit code of stage-check when the leg refuses to

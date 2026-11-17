@@ -3,9 +3,9 @@ package planlint
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/worldspawn"
 )
 
 // The spec's §8 tests, FIRST: a path point 9 yd from Ossirian flags, a stand

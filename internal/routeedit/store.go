@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // PlanName is the rule for a plan's name everywhere in the editor (the dashboard's and dungeon_run's): it is the only thing of the request

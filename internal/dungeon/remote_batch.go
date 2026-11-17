@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Batched chest opening (Zum'rah's graves, owner 2026-10-15: "make them open 3-6 graveyards, then use aoe to kill them", then "test how many

@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
 )
 
 // The loot_object, use_item and team parts of the dungeon driver's Game (dungeon.ObjectActor, dungeon.TeamSource) over the session.

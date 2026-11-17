@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // The spells of the priest tests, with their template numbers (internal/spells/meta.tsv.gz). Ranks: Lesser Heal 1-3, Heal 1-4,

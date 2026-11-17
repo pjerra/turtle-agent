@@ -2,19 +2,19 @@
 type: Reference
 title: walk-preflight reference
 description: Check a walk directory before any raid-walk starts: binaries, slots, leases, instance caps, plans, server keys and rosters.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/walk_preflight_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/walk_preflight_cmd.go
 tags: [raids, walk-preflight, reference]
 sources:
   - id: preflight-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/walk_preflight_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/walk_preflight_cmd.go
   - id: preflight
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/preflight/preflight.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/preflight/preflight.go
   - id: checks
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/preflight/checks.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/preflight/checks.go
   - id: instancecap
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/slots/instancecap.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/slots/instancecap.go
   - id: roster
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/roster.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/roster.go
 generated:
   by: omp/deepseek-v4.1-flash
   at: 2026-11-11T22:30:00+01:00

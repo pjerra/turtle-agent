@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
 )
 
 func leaseTestSlots(t *testing.T) string {

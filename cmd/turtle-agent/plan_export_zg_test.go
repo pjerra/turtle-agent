@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // zgW38MMaps is the folder with the server's map-309 mmaps: TURTLE_AGENT_MMAPS, else ~/turtle-agent-mmaps. A

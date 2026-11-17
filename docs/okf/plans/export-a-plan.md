@@ -2,13 +2,13 @@
 type: Guide
 title: Export a plan
 description: Write a TortoiseBots world migration with plan-export and compare two exports with plan-diff.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
 tags: [plans, export]
 sources:
   - id: plan-export
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_export_cmd.go
   - id: plan-diff
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_diff_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_diff_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:58:00+01:00

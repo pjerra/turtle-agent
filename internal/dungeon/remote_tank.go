@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Tank first, in remote mode: the party follows the tank's threat. Behaviour after mod-playerbots (ThreatStrategy, DpsTargetValue,

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The gossip step in remote mode (Gossip in plan.go). `by` says who talks:

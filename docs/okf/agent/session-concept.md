@@ -2,20 +2,20 @@
 type: Concept
 title: Session and world connection
 description: How the agent logs in, what the connection does, and how logout and reconnect work.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
 tags: [agent, session, connection, login, logout, reconnect]
 sources:
   - id: session-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
     title: Session states, Run loop, logout outcomes
   - id: worldconn-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/worldconn/conn.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/worldconn/conn.go
     title: Socket, auth handshake, packet cipher
   - id: packet-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/packet/writer.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/packet/writer.go
     title: Packet writer, GUID layout
   - id: opcode-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/opcode/opcodes_gen.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/opcode/opcodes_gen.go
     title: Generated 1.12 opcode table
 generated:
   by: muse-spark-1.3/omp

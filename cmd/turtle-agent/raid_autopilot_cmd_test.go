@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 // autoStub is the fake turtle-agent the autopilot launches: `raid-walk` writes the attempt's summary, run.log and

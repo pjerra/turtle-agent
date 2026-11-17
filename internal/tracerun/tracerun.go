@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/trace"
-	"github.com/pjerra/turtle-agent/internal/tracecheck"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/tracecheck"
 )
 
 // Config is how a run is traced. The zero value writes no file (the run still has an id); the agent's RPC methods turn On by default.

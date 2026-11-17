@@ -2,14 +2,14 @@
 type: Guide
 title: Watch a run leader
 description: Run in observe mode, where a TortoiseBots run leader on the server clears the dungeon.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/observe.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/observe.go
 tags: [dungeon, observe, guide]
 sources:
   - id: observe
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/observe.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/observe.go
     title: The observe driver
   - id: dungeon-remote
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
     title: Commander-mode checks and remote start
 generated:
   by: muse-spark-1.3/omp

@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 // zgArlokkLeg is the leg's index in dungeons/zul_gurub.json.

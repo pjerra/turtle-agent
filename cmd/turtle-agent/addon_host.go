@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/addonhost"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/addonhost"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The addon host (README "Addon host"): the real TortoiseBotsManager addon runs in a lua5.1

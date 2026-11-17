@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // A partial start of an observed run (#248). The run leader counts the steps of its own SQL plan (`ai_dungeon_step` rows loaded from

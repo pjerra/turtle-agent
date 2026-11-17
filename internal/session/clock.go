@@ -4,7 +4,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
 )
 
 // The client time in movement packets has to run at the server's pace: the anticheat syncs

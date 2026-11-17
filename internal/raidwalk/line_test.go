@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 func TestCleanLineAndParseRun(t *testing.T) {

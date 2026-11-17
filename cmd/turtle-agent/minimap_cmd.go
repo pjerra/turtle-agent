@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/minimap"
+	"github.com/TortoiseBots/turtle-agent/internal/minimap"
 )
 
 const minimapUsage = "usage: turtle-agent minimap-extract --client <Data dir> --out <dir> [--maps 70,209|all-instances] [--mmaps DIR] [--list] [--verbose]\n" +

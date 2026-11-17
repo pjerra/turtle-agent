@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
 )
 
 const rigPlan = `{"version":1,"name":"rig","map":0,"entrance":{"x":1,"y":2,"z":3},"legs":[

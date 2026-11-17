@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // buildChat transcribes ChatHandler::BuildChatPacket (Chat.cpp:2251-2314) for tests.

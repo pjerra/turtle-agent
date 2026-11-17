@@ -2,21 +2,21 @@
 type: Reference
 title: Combat RPC
 description: Every combat RPC method, its params, defaults and an example.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
 tags: [combat, rpc, reference]
 sources:
   - id: brain-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
   - id: spell-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/spell_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/spell_methods.go
   - id: cast-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
   - id: addon-host
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/addon_host.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/addon_host.go
   - id: eluna-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/eluna_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/eluna_methods.go
   - id: lfg-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:55:00+01:00

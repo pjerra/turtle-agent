@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // tdFakeGame is a fake teardownGame recording every command it gets.

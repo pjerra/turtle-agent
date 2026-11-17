@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // A boss that patrols is not at his spot when the step looks (Theka, Velratha: "no living [7795] seen"): the step waits up to 60 s for him

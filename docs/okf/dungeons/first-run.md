@@ -2,17 +2,17 @@
 type: Tutorial
 title: Your first dungeon run
 description: Hire a bot party and run a dungeon to the end, start to finish, with real commands.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
 tags: [dungeon, commander, tutorial, hire]
 sources:
   - id: dungeon-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
     title: dungeon_run RPC, validation, and run lifecycle
   - id: hire
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/hire.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/hire.go
     title: The hire step
   - id: prepare
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/prepare.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/prepare.go
     title: The prepare block
 generated:
   by: muse-spark-1.3/omp

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The hunter (issue #80 step 4b, preset marksman_hunter): a ranged damage dealer that shoots from 8 to 35 yards. The rotation is the

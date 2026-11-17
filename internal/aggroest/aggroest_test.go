@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 func pt(x, y, z float32) dungeon.Point { return dungeon.Point{X: x, Y: y, Z: z} }

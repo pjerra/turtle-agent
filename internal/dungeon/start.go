@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // Starting anywhere (remote mode; dungeon_run from_leg and from_pull_group, owner-approved 2026-10-14 to make combat fixes faster to

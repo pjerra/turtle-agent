@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 var (
