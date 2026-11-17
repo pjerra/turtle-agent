@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/tbdash"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/tbdash"
 )
 
 // decisionsBudgetDefaultMiB is --decisions-max-mib's default: the pull stops with a note past it.

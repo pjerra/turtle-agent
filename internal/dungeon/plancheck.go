@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // The plan check (issue #187): before a run, walk every point of a plan on the navmesh the run itself plans on, so that a point the

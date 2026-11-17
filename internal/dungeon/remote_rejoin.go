@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Bring a bot that spawned far from the party back to it (owner order 2026-10-15: "if a party member dies and corpse-runs and spawns at

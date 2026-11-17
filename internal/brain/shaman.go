@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // The shaman, the sixth class of the brain (issue #80 step 4c): a healer (resto_shaman), a caster (elemental_shaman) and a melee fighter

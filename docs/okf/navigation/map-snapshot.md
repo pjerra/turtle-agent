@@ -2,11 +2,11 @@
 type: Guide
 title: Watch the run live with map_snapshot
 description: Sample the running agent and read the run so far as a map.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
 tags: [navigation, map, rpc]
 sources:
   - id: map-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
     title: The map_snapshot RPC
 generated:
   by: muse-spark-1.3/omp

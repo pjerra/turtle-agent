@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 type fakeChild struct {

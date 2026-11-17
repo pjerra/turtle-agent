@@ -35,8 +35,9 @@
 //
 // The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
 // is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
-// boss row itself when the run passed that step too fast to pause, still before the pull (no member in combat and the
-// boss's arena read fresh out of combat). A boss row that an object or an NPC summons — a use_object (an open or
+// row where the run passed that step too fast to pause — the boss row itself, or any step beyond it, as walk 113's
+// one-tick 421-424 stretch left the pause for boss row 425 on step 426 — still before the pull (no member in combat
+// and the boss's arena read fresh out of combat). A boss row that an object or an NPC summons — a use_object (an open or
 // open_proof row) or a gossip row — fires on the step before that trigger instead, when only the trigger, waits and
 // moves of the approach stand between it and the boss row (raidwalk.PrepullFirePoint), because the trigger starts the
 // boss's script at once: walk 104's ZG gong 180526 summoned Arlokk into combat on her own row 346, and her boss row
@@ -72,6 +73,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -82,12 +84,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The --prepull-aura-when modes: boss (the default) fires the lists before each boss row, start fires them once,
@@ -189,13 +191,16 @@ func (w *walk) validatePrepullAura() error {
 
 // prepullTarget is the gate's answer: the boss row a fire prepares, the row its fire stands before (the gate fires on
 // the status of the row before fireRow), the trigger row the fire was moved in front of (0: it fires at the boss
-// row's own step, or on the boss row itself) and whether a fire may go out now. bossRow 0: nothing to do, no failure.
+// row's own step, or on the boss row itself), whether a fire may go out now, and whether the row's boss is already
+// dead (no fire and no failure: the caller marks the row done and the run continues). bossRow 0: nothing to do, no
+// failure.
 type prepullTarget struct {
 	bossRow int
 	fireRow int
 	trigger int
 	kind    string
 	fire    bool
+	dead    bool
 }
 
 // prepullTargetFor is the boss row's firing plan: raidwalk.PrepullFirePoint's answer, which moves a boss row's fire
@@ -230,10 +235,12 @@ func (w *walk) prepullBossRowFiredBy(next int) int {
 // starts the boss's script at once, so the boss row's own step is already inside the fight (walk 104: the ZG gong
 // summoned Arlokk into combat three rows before her boss row). The trigger row itself never fires: its own status
 // shows the script already running, and the moved fire carries a next==trigger row of its own. The boss row itself
-// fires only while the pause can still land before the pull: the same pre-pull check AND no engaged boss, read FRESH
-// from the server (prepullBossEngaged) rather than from the cached hostile frames bossEngagedNow reads: those can
-// still show the boss unengaged while the pull has started and the next view frame has not arrived. A boss row that
-// becomes current otherwise is (bossRow, fire=false), the caller's blocking failure: the preparation the run was
+// fires only while the pause can still land before the pull: the same pre-pull check AND the shared three-case
+// verdict (prepullAuraVerdict) — a boss alive out of combat fires, a dead or already-killed boss is skipped with one
+// line and the run continues, and an engaged or missing boss is the caller's blocking failure. The verdict's arena is
+// read FRESH from the server (prepullBossArena) rather than from the cached hostile frames bossEngagedNow reads: those
+// can still show the boss unengaged while the pull has started and the next view frame has not arrived. A boss row
+// that becomes current otherwise is (bossRow, fire=false), the caller's blocking failure: the preparation the run was
 // started to test never happened. A failed boss read is an error too (the gate never fires on a read it could not
 // make); the caller stops the walk with it, and no aura goes out.
 func (w *walk) prepullGate(ctx context.Context, st tbm.RunStatus, later bool) (prepullTarget, error) {
@@ -250,18 +257,41 @@ func (w *walk) prepullGate(ctx context.Context, st tbm.RunStatus, later bool) (p
 			// no read. The caller's sent check returns before it treats fire=false as one.
 			return t, nil
 		}
+		if w.prepullAuraDead[t.bossRow] {
+			// The row's boss was already dead when a pause overshot it or stood on it (prepullAuraOvershoot, the boss
+			// row's own pause): its status is no failure either, and no second pause attempts a fire that has
+			// nothing to prepare.
+			return t, nil
+		}
+		if w.prepullBossKilled(t.bossRow) {
+			// The walk's own boss record already holds this row's kill: no read and no pause can change that, so the
+			// row is done without one.
+			w.prepullAuraDeadLine(t.bossRow, "the boss row became current", "the walk's boss record holds the kill")
+			t.dead = true
+			return t, nil
+		}
 		if !w.prePullOK(st, later, w.env.now()) {
 			return t, nil
 		}
-		engaged, err := w.prepullBossEngaged(ctx, t.bossRow)
+		c, err := w.prepullAuraVerdict(ctx, t.bossRow)
 		if err != nil {
 			return prepullTarget{}, err
 		}
-		t.fire = !engaged
+		if c.dead {
+			w.prepullAuraDeadLine(t.bossRow, "the boss row became current", c.evidence)
+			t.dead = true
+			return t, nil
+		}
+		t.fire = c.fire
 		return t, nil
 	}
 	bossRow := w.prepullBossRowFiredBy(st.Step + 1)
 	if bossRow == 0 {
+		return prepullTarget{}, nil
+	}
+	if w.prepullAuraDead[bossRow] {
+		// The row's boss was already dead when a pause overshot it or stood on it: a later status of the row before
+		// its trigger fires nothing either.
 		return prepullTarget{}, nil
 	}
 	if !w.prePullOK(st, later, w.env.now()) {
@@ -275,21 +305,32 @@ func (w *walk) prepullGate(ctx context.Context, st tbm.RunStatus, later bool) (p
 }
 
 // prepullAuraSendPending is pollOnce's firing: at the step before a boss row (whatever its phase), before the trigger
-// row that summons the boss when there is one (prepullTarget), or at the boss row itself when the run passed that step
-// too fast to pause, once per boss row, the auras go out under a run pause that
-// must hold. A boss row that became current without a verified fire fails the walk (a configured boss row the walk
-// never prepared is not the test the run was started for). A boss row whose arena read fails is the gate's error and
-// stops the walk too. When the fire went out before a trigger, one line names the boss row and the trigger
-// ("fired before trigger step M (open)"); a boss row already prepared that way never fires again on its own row.
-// Whenever the status was running before the pause attempt, the resume is attempted afterwards
-// even when the hold or the fire failed: a run left paused stops the raid silently. A status that was already paused
-// sends no resume. A row is recorded as done only after the auras verified within the tolerance. It reports whether a
-// firing happened, so pollOnce breaks its line loop (the next poll re-reads from the cursor), like the instance-data
-// firing. Under --prepull-aura-when start nothing is sent here: the fire already went out before the run's first move,
-// and each boss row only gets a read of the auras the raid still carries (prepullAuraPullRead).
+// row that summons the boss when there is one (prepullTarget), or where a paused run stands when it passed that step
+// too fast to pause (the boss row itself or beyond it), once per boss row, the auras go out under a run pause that
+// must hold. A row whose boss is already dead (the shared verdict: a corpse in the fresh arena read, or the walk's
+// record of the kill) sends nothing and never pauses: the gate writes one line and the run continues, and a pause that
+// finds it dead on the row or past it does the same. A boss row that became current without a verified fire otherwise
+// fails the walk (a configured boss row the walk never prepared is not the test the run was started for). A boss row
+// whose arena read fails is the gate's error and stops the walk too. When the fire went out before a trigger, one line
+// names the boss row and the trigger ("fired before trigger step M (open)"); a boss row already prepared that way
+// never fires again on its own row. Whenever the status was running before the pause attempt, the resume is attempted
+// afterwards even when the hold or the fire failed: a run left paused stops the raid silently. A status that was
+// already paused sends no resume. A row is recorded as done only after the auras verified within the tolerance. It
+// reports whether a firing (or the hold of one) happened, so pollOnce breaks its line loop (the next poll re-reads
+// from the cursor), like the instance-data firing. Under --prepull-aura-when start nothing is sent here: the fire
+// already went out before the run's first move, and each boss row only gets a read of the auras the raid still
+// carries (prepullAuraPullRead).
 func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, later bool) (bool, error) {
 	if len(w.prepullAuras) == 0 {
 		return false, nil
+	}
+	// --prepull-aura-topup stands before every pull row, boss rows included (a boss pull's hires are read there, which
+	// under --prepull-aura-when start is the only read they get): it pauses the run only when it has something to send
+	// (capped at 15 s), never fails the walk, and does not fire this line loop (nothing of the run's state changes, so
+	// the page's other lines are still worth handling). A boss row the boss-row fire owns is the fire's business, not
+	// the top-up's (prepullTopupBossFires).
+	if step := w.prepullTopupStep(st, later); step != 0 {
+		w.prepullAuraTopup(ctx, st, step)
 	}
 	if w.opts.prepullAuraWhen == prepullAuraWhenStart {
 		// --prepull-aura-when start fired once before the run's first move: a boss row is never a place to send
@@ -307,13 +348,22 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 	if w.prepullAuraSent[t.bossRow] {
 		return false, nil
 	}
+	if w.prepullAuraDead[t.bossRow] {
+		return false, nil
+	}
+	if t.dead {
+		// The row's boss is already dead (the gate's verdict, prepullAuraVerdict): no fire and no failure, the row
+		// is done and the run continues.
+		w.prepullAuraMarkDead(t.bossRow)
+		return false, nil
+	}
 	if !t.fire {
 		return false, stopf(exitRaidWalkFailed,
 			"prepull-aura: boss row %d became current with no verified pre-pull application: the auras were never sent", t.bossRow)
 	}
 	pauseAttempted := st.State == tbm.RunRunning
-	fireErr := w.prepullAuraHold(ctx, t.bossRow, t.fireRow, pauseAttempted)
-	if fireErr == nil {
+	goOut, fireErr := w.prepullAuraHold(ctx, t.bossRow, t.fireRow, pauseAttempted)
+	if fireErr == nil && goOut {
 		fireErr = w.prepullAuraFire(ctx, t.bossRow, false)
 		if fireErr == nil {
 			if w.prepullAuraSent == nil {
@@ -326,6 +376,11 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 			}
 		}
 	}
+	if fireErr == nil && !goOut {
+		// The row's own pause (or the overshot one) found the boss already dead (prepullAuraVerdict): the row is done
+		// with no fire, and its own later statuses are no failure. The run is resumed like any other held pause.
+		w.prepullAuraMarkDead(t.bossRow)
+	}
 	if pauseAttempted {
 		if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
 			if fireErr != nil {
@@ -336,6 +391,501 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 		}
 	}
 	return true, fireErr
+}
+
+// prepullTopupStep is --prepull-aura-topup's gate: the pull row a status stands before. The status's OWN row comes
+// first: a pull row whose pull has not started is the pull this status stands before, and the row after it is a later
+// pull. Only a row that is not itself a pull row lets the gate look one ahead, at the pull the rest, gather, walk or
+// approach leads to — and a status on that pull row itself (the run passed the rest too fast) then still names it. A
+// boss row is a pull row here too (the boss pull): its statuses before the pull get the top-up, which is the only thing
+// that reads the hires there under --prepull-aura-when start. In boss mode the boss row's own fire owns it
+// (prepullTopupBossFires), so the top-up stays out of that row. prePullOK keeps the top-up out of the pull and the
+// fight (phase pull/fight, a pulling or fighting note, a later pull line of the page, a party bot in combat in a fresh
+// frame); 0 means no pull row to top up before.
+//
+// Reading the LATER pull from a status on the earlier one is what this row order fixes: adjacent pull rows (a trash
+// pull and the next pull, or a boss row and the next pull) had the gate pick st.Step+1 before st.Step, so a pre-pull
+// status on the current row recorded the NEXT pull as done — and a bot that died in the current fight was never
+// re-buffed before that next pull (test: TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentPulls). Completion is per
+// (step, hire) (prepullTopupDone), so the next pull is read again after the current fight.
+func (w *walk) prepullTopupStep(st tbm.RunStatus, later bool) int {
+	if !w.opts.prepullAuraTopup || len(w.prepullAuras) == 0 {
+		return 0
+	}
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return 0
+	}
+	if !w.prePullOK(st, later, w.env.now()) {
+		return 0
+	}
+	step := 0
+	if w.prepullPullRow(w.prepullRowAt(st.Step)) {
+		step = st.Step
+	} else if w.prepullPullRow(w.prepullRowAt(st.Step + 1)) {
+		step = st.Step + 1
+	}
+	if step == 0 || w.prepullTopupBossFires(st, step) {
+		return 0
+	}
+	return step
+}
+
+// prepullPullRow says the row is a pull the top-up stands before: a pull row, or a boss row, whose own pull is its
+// row's pull too.
+func (w *walk) prepullPullRow(row planexport.StepRow) bool {
+	return row.Kind == planexport.KindPull || row.Kind == planexport.KindBoss
+}
+
+// prepullTopupBossFires says the boss-row fire owns this pull row's auras. In boss mode (the default) the fire prepares
+// every boss row with the full lists and is fail-closed — on the step before the row, at its summoning trigger, or on
+// the row itself — so a top-up there would send the same ids a second time: it is skipped whether the fire is still to
+// come for that row or already went out (and likewise on a pull row the fire stands on in this same status). Under
+// --prepull-aura-when start no boss row is ever fired (the lists went out once before the run's first move), so the
+// top-up is what reads and tops up the hires at the boss pull.
+func (w *walk) prepullTopupBossFires(st tbm.RunStatus, step int) bool {
+	if w.opts.prepullAuraWhen == prepullAuraWhenStart {
+		return false
+	}
+	if _, ok := w.bossRowAt(step); ok {
+		return true
+	}
+	return step == st.Step+1 && w.prepullBossRowFiredBy(st.Step+1) != 0
+}
+
+// prepullRowAt is the plan row at step (1-based), the zero row for a step the plan does not have.
+func (w *walk) prepullRowAt(step int) planexport.StepRow {
+	if step < 1 || step > len(w.rows.Steps) {
+		return planexport.StepRow{}
+	}
+	return w.rows.Steps[step-1]
+}
+
+// prepullTopupHire is one hire's place in one pull step's top-up: read is set once its auras were read at that step
+// and the ids it lacked were put back and read back (or nothing was lacking, which is a complete read too), tries counts
+// the send attempts of that step and said is set once the walk wrote the reason it was left out, so later statuses of
+// the same step retry it without repeating the line. A hire whose read failed, that is dead or that is out of the
+// commander's view stays pending. Once tries reaches prepullTopupTryMax with an id still missing (an aura that will not
+// stick, ticket T32: 23768 misses on one bot about 1 in 3 fires) the hire is done for the step too: the walk does not
+// resend to it on every later pre-pull status.
+type prepullTopupHire struct {
+	read  bool
+	tries int
+	said  bool
+}
+
+// prepullTopupTryMax is how many times one pull step sends to the same hire. An id the server keeps refusing is the
+// bot's loss for that pull, not a reason to repeat the whole batch on every status before it.
+const prepullTopupTryMax = 3
+
+// prepullTopupMark is the hire's place in this pull step's top-up, created on first use. Keyed case-insensitively:
+// the frame's spelling may differ from the roster's.
+func (w *walk) prepullTopupMark(pullStep int, name string) *prepullTopupHire {
+	if w.prepullTopupDone == nil {
+		w.prepullTopupDone = map[int]map[string]*prepullTopupHire{}
+	}
+	byStep := w.prepullTopupDone[pullStep]
+	if byStep == nil {
+		byStep = map[string]*prepullTopupHire{}
+		w.prepullTopupDone[pullStep] = byStep
+	}
+	key := strings.ToLower(name)
+	h := byStep[key]
+	if h == nil {
+		h = &prepullTopupHire{}
+		byStep[key] = h
+	}
+	return h
+}
+
+// prepullTopupSettled reports whether every hire of the roster is done for this pull step's top-up: only then does a
+// later status of the same step read nothing at all.
+func (w *walk) prepullTopupSettled(pullStep int, roster []string) bool {
+	for _, name := range roster {
+		if h := w.prepullTopupDone[pullStep][strings.ToLower(name)]; h == nil || !h.read {
+			return false
+		}
+	}
+	return true
+}
+
+// prepullAuraTopupSaid logs the reason a hire is left out of this pull step's top-up, once per hire per step: the
+// later statuses of the same step retry that hire without repeating its line.
+func (w *walk) prepullAuraTopupSaid(pullStep int, name, format string, a ...any) {
+	mark := w.prepullTopupMark(pullStep, name)
+	if mark.said {
+		return
+	}
+	mark.said = true
+	w.prepullAuraTopupLine(format, a...)
+}
+
+// prepullAuraTopupUnheldOnce logs that pullStep's top-up is going out without a run pause, once per step.
+func (w *walk) prepullAuraTopupUnheldOnce(pullStep int, format string, a ...any) {
+	if w.prepullTopupUnheld[pullStep] {
+		return
+	}
+	if w.prepullTopupUnheld == nil {
+		w.prepullTopupUnheld = map[int]bool{}
+	}
+	w.prepullTopupUnheld[pullStep] = true
+	w.prepullAuraTopupLine(format, a...)
+}
+
+// prepullTopupPauseCap is the longest a top-up's run pause may hold the raid before resuming.
+const prepullTopupPauseCap = 15 * time.Second
+
+// errTopupPauseCap stops ApplyAuras when a top-up's run pause reaches prepullTopupPauseCap.
+var errTopupPauseCap = errors.New("prepull-aura: top-up pause cap reached")
+
+// prepullTopupMarkSeen records the spell ids observed on name in this run.
+func (w *walk) prepullTopupMarkSeen(name string, ids []uint32) {
+	if len(ids) == 0 {
+		return
+	}
+	if w.prepullTopupSeen == nil {
+		w.prepullTopupSeen = map[string]map[uint32]bool{}
+	}
+	key := strings.ToLower(name)
+	seen := w.prepullTopupSeen[key]
+	if seen == nil {
+		seen = map[uint32]bool{}
+		w.prepullTopupSeen[key] = seen
+	}
+	for _, id := range ids {
+		seen[id] = true
+	}
+}
+
+// prepullTopupEverSeen reports whether id was ever observed on name in this run.
+func (w *walk) prepullTopupEverSeen(name string, id uint32) bool {
+	return w.prepullTopupSeen[strings.ToLower(name)][id]
+}
+
+// prepullTopupCause names why name is missing its auras: "death" when it died since its last top-up, "expired" when
+// every missing id was seen on it before in this run, "never had" when none of the missing ids were ever seen on it,
+// and "expired, never had" when the missing ids mix both.
+func (w *walk) prepullTopupCause(name string, missing []dungeon.Buff) string {
+	key := strings.ToLower(name)
+	if w.prepullTopupDied[key] {
+		return "death"
+	}
+	seenCount := 0
+	for _, b := range missing {
+		if w.prepullTopupEverSeen(name, b.ID) {
+			seenCount++
+		}
+	}
+	switch seenCount {
+	case 0:
+		return "never had"
+	case len(missing):
+		return "expired"
+	default:
+		return "expired, never had"
+	}
+}
+
+// prepullAuraTopup is --prepull-aura-topup: before pull row pullStep, out of combat, it reads every living hire's
+// auras and puts back only the ids its role's list is missing, whether a death stripped them, an aura expired, or the
+// hire never had it. It reuses the fire's path (prepullRaid, the commander join when the store cannot see the raid, the
+// per-bot role from the module's state rows, the combat recheck before every send, the `.aura` kernel and the
+// read-back):
+//
+//   - only the bots that are missing something are sent to, and only their missing ids: a bot that carries its list
+//     costs no GM line and no run pause;
+//   - when there is something to send and the run is running, it pauses the run before the sends (`.bot run pause`,
+//     capped at 15 s) and resumes it right after the sends (including on every early exit path);
+//   - nothing here fails the walk. A raid read, a join, a role or a unit read, a send and a read-back that does not
+//     land are a run.log line, never a stop: a missed top-up is the run the walk was already going to have, while the
+//     boss-row fire stays fail-closed.
+//
+// One run.log line names the pull step and every upgraded bot with the number of ids put back and the cause: "death"
+// when the frames saw that hire die since its last top-up, "expired" when the missing ids were seen on it before in
+// this run, and "never had" when they were never seen on it. Completion is tracked PER HIRE for the pull step
+// (prepullTopupDone): a hire is done only after its auras were read and the ids it lacked were sent and read back, and
+// a dead, unseen or unreadable one stays retryable on the next pre-pull status of the same step, at most one read of
+// that hire per status. A hire that still lacks an id after prepullTopupTryMax sends is done for the step too, with one
+// line naming the ids: an aura the server will not stick (ticket T32) is not resent on every status before the pull.
+// The step is done when every hire of the roster is done, and only then does a later status of the same step read
+// nothing. Nothing is carried to the next pull step: an aura that was present at one pull can expire seconds later, so
+// only a read at the pull itself says what the hires carry.
+func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullStep int) {
+	roster := w.hireList()
+	if w.prepullTopupSettled(pullStep, roster) {
+		return
+	}
+	where := fmt.Sprintf("topup before step %d", pullStep)
+	raid, err := w.prepullRaid(ctx)
+	if err != nil {
+		w.prepullAuraTopupStop(where, err)
+		return
+	}
+	hired := make(map[string]string, len(roster))
+	for _, name := range roster {
+		hired[strings.ToLower(name)] = name
+	}
+	// Only a hire this step has not read yet can need the commander in the raid, so a step whose remaining hires are
+	// dead bodies or absent from the frame costs no join and no unit read: their revival or arrival at a later status
+	// of the same step retries them.
+	pending := false
+	for _, m := range raid {
+		if m.GUID == 0 || m.Name == "" || m.Dead || m.State == "d" {
+			continue
+		}
+		if name, ok := hired[strings.ToLower(m.Name)]; ok && !w.prepullTopupMark(pullStep, name).read {
+			pending = true
+			break
+		}
+	}
+	if !pending {
+		return
+	}
+	// The unit store only holds what the commander can see (walk 105c, 105, 104): join the raid before reading it.
+	if err := w.prepullAuraJoinRaid(ctx, raid, where); err != nil {
+		w.prepullAuraTopupStop(where, err)
+		return
+	}
+	// The roles come from the module's own state rows, read once per walk.
+	if _, err := w.prepullBotSpecs(ctx); err != nil {
+		w.prepullAuraTopupStop(where, stopf(exitRaidWalkFailed, "prepull-aura: %s: the per-bot roles could not be read: %v", where, err))
+		return
+	}
+	st, err := w.status(ctx)
+	if err != nil {
+		w.prepullAuraTopupStop(where, stopf(exitRaidWalkFailed, "prepull-aura: %s: the commander's status: %v", where, err))
+		return
+	}
+	if st.Character == "" || st.GUID == 0 {
+		w.prepullAuraTopupStop(where, stopf(exitRaidWalkFailed,
+			"prepull-aura: %s: the status names no commander (character %q, guid %s), so its combat state cannot be read", where, st.Character, st.GUID))
+		return
+	}
+	port := walkAuras{w: w}
+	watch := []dungeon.AuraTarget{{GUID: st.GUID, Name: st.Character}}
+	type topupTarget struct {
+		rec     *prepullAuraRecord
+		unit    dungeon.AuraTarget
+		want    []dungeon.Buff
+		missing []dungeon.Buff
+		cause   string
+	}
+	var targets []topupTarget
+	inView := make(map[string]bool, len(roster))
+	for _, m := range raid {
+		if m.GUID == 0 || m.GUID == st.GUID || m.Name == "" {
+			continue
+		}
+		name, ok := hired[strings.ToLower(m.Name)]
+		unit := dungeon.AuraTarget{GUID: m.GUID, Name: m.Name}
+		if ok {
+			unit.Name = name
+			inView[name] = true
+		}
+		if m.Dead || m.State == "d" {
+			// Never for a dead bot: it cannot carry an aura, and its revival is its own step. The hire stays pending:
+			// a status that sees it alive before the same pull reads it then.
+			continue
+		}
+		if !ok {
+			// A frame member the walk never hired is watched for combat, never buffed (as in the fire).
+			watch = append(watch, unit)
+			continue
+		}
+		watch = append(watch, unit)
+		mark := w.prepullTopupMark(pullStep, name)
+		if mark.read {
+			// Read at this pull step already: it stays in the combat watch and costs no read.
+			continue
+		}
+		u, seen := port.ViewUnit(ctx, unit)
+		if seen && (u.Dead || u.Ghost) {
+			continue
+		}
+		var role, why string
+		switch {
+		case seen && u.Class == 0:
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: its unit row carries no class, so its aura role is unknown: skipped", where, name)
+			continue
+		case seen:
+			role, why = w.prepullRole(name, u.Class)
+		default:
+			role, why = w.prepullRosterRole(name)
+		}
+		if role == "" {
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: %s: skipped", where, name, why)
+			continue
+		}
+		want := w.prepullAuras.For(role)
+		if len(want) == 0 {
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s has no list (role %q): skipped", where, name, role)
+			continue
+		}
+		if !seen {
+			// The roster named the role, but only the unit row carries the auras: no read, no top-up.
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
+			continue
+		}
+		missing, ok := dungeon.AurasMissing(ctx, port, unit, want)
+		if !ok {
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
+			continue
+		}
+		w.prepullTopupMarkSeen(name, subtractIDs(raidwalk.PrepullIDs(want), raidwalk.PrepullIDs(missing)))
+		if len(missing) == 0 {
+			mark.read = true
+			delete(w.prepullTopupDied, strings.ToLower(name))
+			continue
+		}
+		cause := w.prepullTopupCause(name, missing)
+		rec := w.prepullAuraRecordFor(name, role)
+		rec.Specs = w.prepullAuraSpecs[strings.ToLower(name)]
+		targets = append(targets, topupTarget{rec: rec, unit: unit, want: want, missing: missing, cause: cause})
+	}
+	for _, name := range roster {
+		if !inView[name] {
+			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s is not in the commander's view: skipped", where, name)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	pauseHeld := false
+	resumed := false
+	resume := func() {
+		if !pauseHeld || resumed {
+			return
+		}
+		resumed = true
+		w.prepullTopupPauseDeadline = time.Time{}
+		if rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
+			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up failed: %v", where, err)
+		} else if rep.Reply.Err != nil {
+			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up was refused: %s", where, rep.Reply.Err.Message)
+		}
+	}
+	if runSt.State == tbm.RunRunning {
+		deadline := w.env.now().Add(prepullTopupPauseCap)
+		if rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err != nil {
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause failed (%v): the top-up goes out unheld", where, err)
+		} else if rep.Reply.Err != nil {
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was refused (%s): the top-up goes out unheld", where, rep.Reply.Err.Message)
+		} else if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was not acknowledged (%s): the top-up goes out unheld", where, rep.Reply.Line)
+		} else {
+			pauseHeld = true
+			w.prepullTopupPauseDeadline = deadline
+			w.logLine(w.env.now(), fmt.Sprintf("> .bot run pause (prepull-aura, %s)", where))
+			defer resume()
+		}
+	}
+	// The watch and the send kernel's own combat recheck: the commander and every living member, list or no list. Each
+	// check is the one immediate read.
+	w.prepullAuraWatch, w.prepullAuraWhat = watch, where
+	w.prepullAuraCombatWaitEnd = w.env.now()
+	defer func() {
+		w.prepullAuraWatch, w.prepullAuraWhat = nil, ""
+		w.prepullAuraCombatWaitEnd = time.Time{}
+	}()
+	if err := w.prepullAuraCombatClear(ctx, where); err != nil {
+		w.prepullAuraTopupStop(where, err)
+		return
+	}
+	cfg := dungeon.AuraCfg{Gap: prepullAuraGap, Settle: prepullAuraSettle, ViewWait: prepullAuraViewWait}
+	var parts []string
+	var sent []int
+	for i := range targets {
+		if pauseHeld && !w.env.now().Before(w.prepullTopupPauseDeadline) {
+			resume()
+			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause reached %s; resuming and stopping the top-up", where, prepullTopupPauseCap)
+			break
+		}
+		tg := &targets[i]
+		// The attempt is counted before the send: a batch that combat stops mid-list leaves this hire's tries at the
+		// attempt it did not finish, so a later status of the step still has the budget to put the rest back.
+		w.prepullTopupMark(pullStep, tg.rec.Bot).tries++
+		if oc, err := dungeon.ApplyAuras(ctx, port, tg.unit, tg.missing, cfg, w.env.now); err != nil {
+			if errors.Is(err, errTopupPauseCap) {
+				resume()
+				w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause reached %s; resuming and stopping the top-up", where, prepullTopupPauseCap)
+				break
+			}
+			w.prepullAuraTopupStop(where, err)
+			break
+		} else if oc != dungeon.AuraTaken {
+			w.note("prepull-aura: %s: the first .aura (%s) did not land on the bot", tg.rec.Bot, tg.missing[0].Name)
+		}
+		parts = append(parts, fmt.Sprintf("%s +%d (%s)", tg.rec.Bot, len(tg.missing), tg.cause))
+		sent = append(sent, i)
+	}
+	resume()
+	if len(parts) > 0 {
+		w.prepullAuraTopupLine("prepull-aura: %s: %s", where, strings.Join(parts, ", "))
+	}
+	// One read-back of the ids just sent: an aura the store does not show is on disk as missing, so the record says so
+	// instead of trusting a send that left a bot short.
+	for deadline := w.env.now().Add(prepullAuraVerifyWait); ; {
+		over := 0
+		for _, i := range sent {
+			tg := &targets[i]
+			missing, seen := dungeon.AurasMissing(ctx, port, tg.unit, tg.missing)
+			if !seen {
+				missing = tg.missing
+			}
+			tg.rec.Missing = raidwalk.PrepullIDs(missing)
+			tg.rec.Seen = subtractIDs(raidwalk.PrepullIDs(tg.want), tg.rec.Missing)
+			w.prepullTopupMarkSeen(tg.rec.Bot, tg.rec.Seen)
+			if len(missing) > 0 {
+				over++
+			}
+		}
+		if over == 0 || !w.env.now().Before(deadline) {
+			break
+		}
+		if err := w.env.sleep(ctx, prepullAuraVerifyPoll); err != nil {
+			w.prepullAuraTopupStop(where, err)
+			return
+		}
+	}
+	// Only a hire whose ids the read-back shows are all there is done for this pull step: one the store still shows
+	// short, or does not answer for, stays pending and is read again at the next pre-pull status of the same step —
+	// until prepullTopupTryMax attempts were sent to it. An id that will not stick (the server refuses one aura on one
+	// bot; ticket T32) is then given up for this step with one line, instead of resending the batch on every status
+	// before the same pull.
+	for _, i := range sent {
+		tg := &targets[i]
+		mark := w.prepullTopupMark(pullStep, tg.rec.Bot)
+		if len(tg.rec.Missing) == 0 {
+			mark.read = true
+			delete(w.prepullTopupDied, strings.ToLower(tg.rec.Bot))
+			continue
+		}
+		if mark.tries >= prepullTopupTryMax {
+			w.prepullAuraTopupLine("prepull-aura: %s: %s still lacks %s after %d tries; giving up for this step",
+				where, tg.rec.Bot, idWords(tg.rec.Missing), mark.tries)
+			mark.read = true
+			delete(w.prepullTopupDied, strings.ToLower(tg.rec.Bot))
+		}
+	}
+	if err := w.prepullAuraWrite(); err != nil {
+		w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, err)
+	}
+}
+
+// prepullAuraTopupStop logs a top-up that did not go out. Unlike the boss-row fire it never stops the walk: the pull
+// goes on without the auras, and the line says so.
+func (w *walk) prepullAuraTopupStop(where string, err error) {
+	_, reason := stopInfo(err)
+	if !strings.HasPrefix(reason, "prepull-aura: ") {
+		reason = fmt.Sprintf("prepull-aura: %s: %v", where, err)
+	}
+	w.prepullAuraTopupLine("prepull-aura: WARN: %s; the top-up stopped and the pull goes on", reason)
+}
+
+// prepullAuraTopupLine writes one top-up line to run.log and the summary.
+func (w *walk) prepullAuraTopupLine(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	w.note("%s", msg)
+	w.logLine(w.env.now(), msg)
 }
 
 // prepullAuraStart is the --prepull-aura-when start fire: once per walk, right after the placement and before
@@ -476,6 +1026,7 @@ func (w *walk) prepullAuraCoverageRead(ctx context.Context, step int, phase stri
 			parts = append(parts, name+" unreadable")
 			continue
 		}
+		w.prepullTopupMarkSeen(name, subtractIDs(raidwalk.PrepullIDs(want), raidwalk.PrepullIDs(missing)))
 		if len(missing) == 0 {
 			whole++
 			parts = append(parts, fmt.Sprintf("%s %d/%d", name, len(want), len(want)))
@@ -493,118 +1044,271 @@ func (w *walk) prepullAuraCoverageRead(ctx context.Context, step int, phase stri
 // prepullAuraHold puts the run on hold for the batch and confirms it. A refused, unacknowledged or unconfirmed pause
 // is a blocking failure: no aura goes out on a run the walk cannot show is paused before the pull. The pause must
 // stand on the step before the row the fire stands before (fireRow: the boss row itself, or the trigger row that
-// summons it, bossRow); the one exception is a run that passed that row too fast to pause: then it may stand on
-// fireRow itself, and only while the boss is not engaged — the boss's arena is read fresh from the server after the
-// pause is confirmed (prepullBossEngaged), never from the cached frames, and the fire's own combat read still gates
-// the commander and every member. A pause past fireRow is mid-pull (or mid-summon) and fails. The confirmation is a
-// fresh `run status`, the run's own answer rather than the push feed's newest line.
-func (w *walk) prepullAuraHold(ctx context.Context, bossRow, fireRow int, pause bool) error {
+// summons it, bossRow); a run that passed that row too fast to pause may stand on fireRow itself or beyond it (walk
+// 113: steps 421-424 completed in one tick and the boss row 425's pause landed on step 426). On the boss row itself,
+// and past fireRow, the shared three cases of prepullAuraVerdict decide (alive out of combat fires, a dead or
+// already-killed boss is skipped with one line and the run continues, an engaged or missing boss fails closed); on the
+// trigger row only combat can rule the fire out, because the boss is not summoned yet. The boss's arena is read fresh
+// from the server after the pause is confirmed (prepullBossArena), never from the cached frames, and the fire's own
+// combat read still gates the commander and every member. A pause BEFORE the step before fireRow is not the hold the
+// fire stands before and fails. The confirmation is a fresh `run status`, the run's own answer rather than the push
+// feed's newest line. It returns whether the fire may go out; false means the boss row's boss was already dead and the
+// run carries on without auras (no failure).
+func (w *walk) prepullAuraHold(ctx context.Context, bossRow, fireRow int, pause bool) (bool, error) {
 	step := bossRow
 	if pause {
 		rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000})
 		if err != nil {
-			return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run pause failed, no auras were sent: %v", step, err)
+			return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run pause failed, no auras were sent: %v", step, err)
 		}
 		if rep.Reply.Err != nil {
-			return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run pause was refused (%s), no auras were sent", step, rep.Reply.Err.Message)
+			return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run pause was refused (%s), no auras were sent", step, rep.Reply.Err.Message)
 		}
 		if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
-			return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run pause was not acknowledged (%s), no auras were sent", step, rep.Reply.Line)
+			return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run pause was not acknowledged (%s), no auras were sent", step, rep.Reply.Line)
 		}
 		w.logLine(w.env.now(), fmt.Sprintf("> .bot run pause (prepull-aura, boss row %d)", step))
 	}
 	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "status", WaitMS: 5000})
 	if err != nil {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run could not be confirmed (%v), no auras were sent", step, err)
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run could not be confirmed (%v), no auras were sent", step, err)
 	}
 	if rep.Reply.Err != nil {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run status was refused (%s), no auras were sent", step, rep.Reply.Err.Message)
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run status was refused (%s), no auras were sent", step, rep.Reply.Err.Message)
 	}
 	run, line, ok := lastRunLine(rep.Reply.Lines)
 	if !ok {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run status answer has no TBM:RUN line, no auras were sent", step)
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run status answer has no TBM:RUN line, no auras were sent", step)
 	}
 	if run.State != tbm.RunPaused {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run is not paused (%s), no auras were sent", step, line)
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run is not paused (%s), no auras were sent", step, line)
 	}
 	if w.plan != nil && run.Plan != "" && run.Plan != w.plan.Name {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run is %s, not %s, no auras were sent", step, run.Plan, w.plan.Name)
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run is %s, not %s, no auras were sent", step, run.Plan, w.plan.Name)
 	}
-	if run.Step != fireRow-1 && run.Step != fireRow {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d), no auras were sent",
+	if run.Step < fireRow-1 {
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, before the step before it (step %d), no auras were sent",
 			step, run.Step, fireRow-1)
 	}
-	if run.Step == fireRow {
-		// The run passed the step before its fire row too fast for the pause. A pause on the fire row is still before
-		// the pull (or the summon) only while the boss is not engaged: the arena is read fresh here, after the pause was
-		// confirmed, because the cached hostile frames can lag the server by a frame and show a boss the commander
-		// already pulled. The fire re-reads the commander and every living member for combat before its first aura, so
-		// a pull that started anyway still stops the batch there.
-		engaged, err := w.prepullBossEngaged(ctx, step)
-		if err != nil {
-			return err
-		}
-		if engaged {
-			if fireRow == step {
-				return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the boss row with the boss engaged, no auras were sent", step)
-			}
-			return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the trigger step %d with the boss engaged, no auras were sent", step, fireRow)
-		}
-		if fireRow == step {
-			w.note("prepull-aura: boss row %d: the run reached the boss row before the pause; it paused there with the boss not engaged", step)
-		} else {
-			w.note("prepull-aura: boss row %d: the run reached the trigger step %d before the pause; it paused there with the boss not engaged", step, fireRow)
-		}
+	if run.Step > fireRow {
+		return w.prepullAuraOvershoot(ctx, step, fireRow, run.Step)
 	}
-	return nil
+	if run.Step == fireRow {
+		// The run reached the fire row before the pause confirmed: it stands on the boss row itself, or on the trigger
+		// row that summons the boss. The arena is read fresh here, after the pause was confirmed, because the cached
+		// hostile frames can lag the server by a frame and show a boss the commander already pulled. The fire re-reads
+		// the commander and every living member for combat before its first aura, so a pull that started anyway still
+		// stops the batch there.
+		if fireRow != step {
+			// The trigger row: the boss is not summoned yet, so an arena without a unit of his is the normal state
+			// there and only combat can rule the fire out.
+			a, err := w.prepullBossArena(ctx, step)
+			if err != nil {
+				return false, err
+			}
+			if a.engaged {
+				return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the trigger step %d with the boss engaged, no auras were sent", step, fireRow)
+			}
+			w.note("prepull-aura: boss row %d: the run reached the trigger step %d before the pause; it paused there with the boss not engaged", step, fireRow)
+			return true, nil
+		}
+		// The boss row itself: the same three cases as the overshot pause (prepullAuraVerdict) — a boss alive out of
+		// combat fires, a dead or already-killed boss is skipped with one line and the run continues, and an engaged
+		// or missing boss fails closed. A pause on the row must prove the boss's state like every other read.
+		c, err := w.prepullAuraVerdict(ctx, step)
+		if err != nil {
+			return false, err
+		}
+		if c.dead {
+			w.prepullAuraDeadLine(step, fmt.Sprintf("the run paused at step %d", run.Step), c.evidence)
+			return false, nil
+		}
+		if c.unclear() {
+			return false, stopf(exitRaidWalkFailed,
+				"prepull-aura: boss row %d: the run paused on the boss row, %s, no auras were sent", step, c.why())
+		}
+		w.note("prepull-aura: boss row %d: the run reached the boss row before the pause; it paused there with the boss not engaged", step)
+	}
+	return true, nil
 }
 
-// prepullBossEngaged reads the boss row's arena FRESH from the server and reports whether any unit there is in
-// combat: `q units 60 <anchor> all`, the same read the reuse-instance guard (`placeBossEngaged`) makes, with `cb`
-// the combat state. The walk's cached hostile frames (`bossEngagedNow`) are not used here: the push feed's statuses
-// are handled before the next view frame is fetched, so a cached frame can still show the boss unengaged after the
-// commander has pulled. It fails closed: a boss row without a point, a refused or unanswered read, a truncated reply,
-// and a unit row without a well-formed `cb` are all errors or counted as combat, never a clean read, and the caller
-// sends no aura on any of them (ttUnitOf's own InCombat stays tolerant for the other callers; the prepull read
-// demands the field).
-func (w *walk) prepullBossEngaged(ctx context.Context, step int) (bool, error) {
+// prepullAuraOvershoot decides the fire of a pause that landed PAST its fire row (the server completed rows in one
+// tick, walk 113: steps 421-424 in one tick, boss row 425's pause confirmed on 426). The three cases are the shared
+// verdict (prepullAuraVerdict), the same one the boss row's own pause reads: alive out of combat fires where the run
+// stands; a dead or already-killed boss gets no fire, one line, and the run continues; an engaged or missing boss (or
+// a failed read) fails closed. It returns whether the fire may go out; false is the dead case only.
+func (w *walk) prepullAuraOvershoot(ctx context.Context, step, fireRow, at int) (bool, error) {
+	c, err := w.prepullAuraVerdict(ctx, step)
+	if err != nil {
+		return false, err
+	}
+	switch {
+	case c.dead:
+		w.prepullAuraDeadLine(step, fmt.Sprintf("the run paused at step %d", at), c.evidence)
+		return false, nil
+	case c.unclear():
+		return false, stopf(exitRaidWalkFailed,
+			"prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d), %s, no auras were sent",
+			step, at, fireRow-1, c.why())
+	}
+	w.note("prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d); it fires there with the boss not engaged",
+		step, at, fireRow-1)
+	return true, nil
+}
+
+// prepullAuraVerdict is the one three-case decision of a boss row's pre-pull fire, read by both paths: the boss row's
+// own pause (prepullGate before it, prepullAuraHold on the row) and a pause that overshot the row
+// (prepullAuraOvershoot).
+//  1. fire: the boss is alive and nothing in his arena is in combat — the auras may go out;
+//  2. dead: the boss is dead — the fresh arena read lists his corpse, or the walk's own boss record for the row already
+//     holds the kill (the run's `boss down` note, a fight record, or the end-of-run credit) — no aura goes out, one
+//     line says so, and the run continues: in the live report that raised this, the step-418 pull killed Mandokir
+//     before his boss row, and preparing a corpse is not the test the run was started for;
+//  3. unclear: the boss's state cannot be proven — a unit of the arena in combat, a unit without a combat state, or no
+//     unit of the boss in the read at all (a despawned corpse or a read of the wrong place) — the caller fails closed
+//     with no aura, because an unknown boss may be pulling.
+//
+// A dead boss wins over an engaged arena: the row is moot, and failing the walk over a corpse's neighbours would stop
+// a raid the run is still walking through. A failed read is the error, never a verdict.
+func (w *walk) prepullAuraVerdict(ctx context.Context, step int) (prepullAuraCase, error) {
+	if w.prepullBossKilled(step) {
+		return prepullAuraCase{dead: true, evidence: "the walk's boss record holds the kill"}, nil
+	}
+	a, err := w.prepullBossArena(ctx, step)
+	if err != nil {
+		return prepullAuraCase{}, err
+	}
+	switch {
+	case a.dead:
+		return prepullAuraCase{dead: true, evidence: "the arena read shows the boss dead", arena: a}, nil
+	case a.engaged, !a.boss:
+		return prepullAuraCase{arena: a}, nil
+	}
+	return prepullAuraCase{fire: true, arena: a}, nil
+}
+
+// prepullAuraCase is one boss row's three-case verdict: fire, dead (with the evidence the line names) or neither, the
+// unclear case the caller fails closed on. arena keeps the read, for the failure line's why and the missing-boss line.
+type prepullAuraCase struct {
+	fire     bool
+	dead     bool
+	evidence string
+	arena    prepullArena
+}
+
+// unclear says the verdict is neither a fire nor a settled dead: the caller fails closed with why().
+func (c prepullAuraCase) unclear() bool { return !c.fire && !c.dead }
+
+// why is the clause a fail-closed line names after where the run stood: the engaged arena or the missing boss.
+func (c prepullAuraCase) why() string {
+	if c.arena.engaged {
+		return "with the boss engaged"
+	}
+	return fmt.Sprintf("the arena read (%s) lists no such boss, so his state cannot be ruled out", c.arena.cmd)
+}
+
+// prepullAuraDeadLine is the one line a dead boss row writes: no fire, and the run continues. where names where the
+// run stood (the boss row became current, or the paused step), evidence what held the kill. The row is marked dead by
+// the caller (prepullAuraMarkDead), so its own statuses neither pause again nor fail as "never prepared".
+func (w *walk) prepullAuraDeadLine(step int, where, evidence string) {
+	msg := fmt.Sprintf("prepull-aura: boss row %d: boss already dead, no pre-pull fire (%s, %s)", step, where, evidence)
+	w.note("%s", msg)
+	w.logLine(w.env.now(), msg)
+}
+
+// prepullAuraMarkDead records a boss row whose boss was already dead: no fire, and no later status of the row is a
+// failure or a second pause.
+func (w *walk) prepullAuraMarkDead(step int) {
+	if w.prepullAuraDead == nil {
+		w.prepullAuraDead = map[int]bool{}
+	}
+	w.prepullAuraDead[step] = true
+}
+
+// prepullBossKilled says the walk's own boss record for the row already holds the kill: the run's `boss down` note
+// (observeBossStatus), a commander fight record (creditFightKills) or the end-of-run credit (bossEndStatus). A dead
+// boss can also have despawned before the arena read, so the walk's record is the one evidence a corpse row cannot be.
+func (w *walk) prepullBossKilled(step int) bool {
+	t, ok := w.bossTracks[bossKey{step: step}]
+	return ok && t != nil && t.killed
+}
+
+// prepullArena is what one fresh arena read says about a boss row's boss: whether a unit of the boss's own family
+// (bossUnits: the row's entry and the phase entries that are the boss reborn) is in the reply, whether every such
+// unit is dead, and whether the arena holds a unit in combat (or one whose combat state the reply does not carry).
+// The boss's body is the evidence the pre-pull cases turn on, so the read keeps it apart from the arena's adds.
+type prepullArena struct {
+	boss    bool   // a boss unit is in the reply
+	dead    bool   // every boss unit in the reply is dead (no live form of him)
+	engaged bool   // a unit is in combat, or its combat state is missing
+	cmd     string // the `q units` line the read made, for the failure lines
+}
+
+// prepullBossArena reads the boss row's arena FRESH from the server: `q units 60 <anchor> all`, the same read the
+// reuse-instance guard (`placeBossEngaged`) makes, with `cb` the combat state and `dead` the corpse flag. The walk's
+// cached hostile frames (`bossEngagedNow`) are not used here: the push feed's statuses are handled before the next view
+// frame is fetched, so a cached frame can still show the boss unengaged after the commander has pulled. It fails
+// closed: a boss row without a point, a refused or unanswered read, and a truncated reply are errors, never a clean
+// read, and the callers send no aura on any of them (ttUnitOf's own InCombat stays tolerant for the other callers; the
+// prepull read demands the field). An unproven unit is counted as in combat too, no matter whether it is the boss.
+func (w *walk) prepullBossArena(ctx context.Context, step int) (prepullArena, error) {
 	row, ok := w.bossRowAt(step)
 	if !ok {
-		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d is not one of the plan's rows", step)
+		return prepullArena{}, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d is not one of the plan's rows", step)
 	}
 	if row.X == 0 && row.Y == 0 {
-		return false, stopf(exitRaidWalkFailed,
+		return prepullArena{}, stopf(exitRaidWalkFailed,
 			"prepull-aura: boss row %d has no point to read the boss's combat state at, so combat cannot be ruled out: no auras were sent", step)
 	}
 	cmd := fmt.Sprintf("q units %d %s %s %s all", placeBossArenaYd, num32(row.X), num32(row.Y), num32(row.Z))
+	a := prepullArena{cmd: cmd}
 	out, err := w.tt(ctx, cmd)
 	if err != nil {
-		return false, stopf(exitRaidWalkFailed,
+		return prepullArena{}, stopf(exitRaidWalkFailed,
 			"prepull-aura: boss row %d: the arena read (%s) failed, so combat cannot be ruled out: no auras were sent: %v", step, cmd, err)
 	}
 	body, ok := ttLast(out)
 	if !ok {
-		return false, stopf(exitRaidWalkFailed,
+		return prepullArena{}, stopf(exitRaidWalkFailed,
 			"prepull-aura: boss row %d: the arena read (%s) gave no reply, so combat cannot be ruled out: no auras were sent", step, cmd)
 	}
 	if body.flag("trunc") {
-		return false, stopf(exitRaidWalkFailed,
+		return prepullArena{}, stopf(exitRaidWalkFailed,
 			"prepull-aura: boss row %d: the arena read (%s) lists more units than one reply carries, so combat cannot be ruled out: no auras were sent", step, cmd)
 	}
+	units := w.bossUnits(row.Entry)
+	live, dead := false, false
 	for _, m := range body.list("units") {
 		u := ttUnitOf(m)
+		isBoss := inEntries(units, u.Entry)
+		if u.Dead {
+			// A corpse is no combatant: it neither engages the arena nor proves a live boss. The boss's own corpse is
+			// the dead that prepullAuraOvershoot's case 2 reads.
+			if isBoss {
+				dead = true
+			}
+			continue
+		}
+		if isBoss {
+			live = true
+		}
 		if !u.CBKnown {
 			// The reply does not say whether this unit is fighting (a degraded or version-skewed toolkit answer still
 			// has a valid envelope and no trunc flag). An unproven unit is not an out-of-combat unit.
-			w.note("prepull-aura: boss row %d: %s (%d) carries no combat state in the arena read at %s: counted as in combat", step, u.Name, u.Entry, cmd)
-			return true, nil
+			if !a.engaged {
+				w.note("prepull-aura: boss row %d: %s (%d) carries no combat state in the arena read at %s: counted as in combat", step, u.Name, u.Entry, cmd)
+			}
+			a.engaged = true
+			continue
 		}
-		if u.InCombat && !u.Dead {
+		if u.InCombat && !a.engaged {
 			w.note("prepull-aura: boss row %d: %s (%d) is in combat in the arena read at %s", step, u.Name, u.Entry, cmd)
-			return true, nil
+			a.engaged = true
 		}
 	}
-	return false, nil
+	a.boss = live || dead
+	a.dead = dead && !live
+	return a, nil
 }
 
 // prepullAuraCombatClear re-reads the commander and every living raid member and refuses the batch while any one of
@@ -1097,6 +1801,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 		// what the bot lacks: the file never claims a preparation the walk has not seen.
 		rec.Missing = raidwalk.PrepullIDs(missing)
 		rec.Seen = subtractIDs(raidwalk.PrepullIDs(list), rec.Missing)
+		w.prepullTopupMarkSeen(name, rec.Seen)
 		targets = append(targets, prepullAuraTarget{rec: rec, unit: t, want: list, missing: missing})
 	}
 	w.prepullAuraWatch, w.prepullAuraWhat = watch, where
@@ -1132,6 +1837,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 			}
 			tg.rec.Missing = raidwalk.PrepullIDs(missing)
 			tg.rec.Seen = subtractIDs(raidwalk.PrepullIDs(tg.want), tg.rec.Missing)
+			w.prepullTopupMarkSeen(tg.rec.Bot, tg.rec.Seen)
 			switch {
 			case len(missing) > tol:
 				over = append(over, tg.rec.Bot)
@@ -1170,12 +1876,15 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 
 // prepullAuraClear forgets which boss rows fired, so the rest before the next boss row (the one the wipe retries)
 // sends the lists again: a death stripped them. The bots' records keep their sent ids; the next fire's read-back
-// rewrites seen and missing.
+// rewrites seen and missing. The top-up's per-step completion is forgotten too: the pull a recovery retries must be
+// read again hire by hire, and the read from before the wipe describes a raid that no longer exists.
 func (w *walk) prepullAuraClear() {
 	if len(w.prepullAuras) == 0 {
 		return
 	}
 	w.prepullAuraSent = nil
+	w.prepullTopupDone = nil
+	w.prepullTopupUnheld = nil
 }
 
 // prepullAuraRecordFor is the bot's accumulating record, created on its first fire.
@@ -1411,6 +2120,9 @@ type walkAuras struct{ w *walk }
 // that started after the pause stops the batch before this line goes out. A refused or failed call breaks the walk: a
 // preparation the walk could not send is not a preparation it may report.
 func (p walkAuras) SendAura(ctx context.Context, t dungeon.AuraTarget, b dungeon.Buff) error {
+	if !p.w.prepullTopupPauseDeadline.IsZero() && !p.w.env.now().Before(p.w.prepullTopupPauseDeadline) {
+		return errTopupPauseCap
+	}
 	if len(p.w.prepullAuraWatch) > 0 {
 		if err := p.w.prepullAuraCombatClear(ctx, p.w.prepullAuraWhat); err != nil {
 			return err

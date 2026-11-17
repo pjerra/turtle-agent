@@ -2,11 +2,11 @@
 type: Concept
 title: Hire gear tiers
 description: Why the hire tier matters, where each raid's minimum comes from, and what comparison runs are.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/tiers.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/tiers.go
 tags: [raids, tier, hires]
 sources:
   - id: tiers
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/tiers.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/tiers.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

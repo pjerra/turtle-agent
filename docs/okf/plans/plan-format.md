@@ -2,11 +2,11 @@
 type: Concept
 title: Anatomy of a plan file
 description: Legs, pull groups, steps, bosses, and the plan-wide lists that steer a run.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/plan.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/plan.go
 tags: [plans, format]
 sources:
   - id: plan-struct
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/plan.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/plan.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

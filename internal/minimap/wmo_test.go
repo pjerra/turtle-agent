@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/mpq"
+	"github.com/TortoiseBots/turtle-agent/internal/mpq"
 )
 
 // Fixture geometry (yards, group-local): group 0 is 32 x 64 yd with one 64 x 128 px tile; group 1 is 160 x 160 yd at

@@ -2,13 +2,13 @@
 type: Guide
 title: Log a character in
 description: Log one character in with the login command, stay online, and log out cleanly.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
 tags: [getting-started, login, rpc, logout, exit-codes]
 sources:
   - id: login
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
   - id: main
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/main.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/main.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/netutil"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/netutil"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 // Spot is a place near hostile mobs used by the live checks (map id and world coordinates).

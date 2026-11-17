@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // The bots' feed names a creature by its entry id only, and a plan has no name field for one. The plan's notes do name them in

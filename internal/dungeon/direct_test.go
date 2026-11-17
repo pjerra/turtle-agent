@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // A leg with a via list: a plain waypoint, then a direct step to the leg's `to`.

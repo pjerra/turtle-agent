@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // SpecFile is plans.json.

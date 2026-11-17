@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // The route trace: the plan check's walk, with the paths kept. CheckPlan asks the navmesh for the way from each point of the plan to the next

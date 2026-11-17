@@ -1,6 +1,6 @@
 # Dungeon progress
 
-Every instance goes through three steps. Tracker: [issue #198](https://github.com/pjerra/turtle-agent/issues/198).
+Every instance goes through three steps. Tracker: [issue #198](https://github.com/TortoiseBots/turtle-agent/issues/198).
 
 1. **Mapped:** the plan is written from the server's world database, its instance script and the guides. The plan check and the navmesh test pass.
 2. **Walked:** a GM walks every plan point in game, invisible, so positions, nearby packs and patrol times are settled. The plan status becomes `mapped`.
@@ -12,7 +12,7 @@ Levels are the plan file's level band; for classic instances the Wowhead range i
 
 The Uldaman and Zul'Farrak plan files carry the status `live-checked` (a live-checked plan); neither has had a full clear of every boss in one run yet, so Cleared stays open.
 
-Legend: ✓ done, — not done. PR numbers are in the `pjerra/turtle-agent` repository.
+Legend: ✓ done, — not done. PR numbers are in the `TortoiseBots/turtle-agent` repository.
 
 ## Done or in progress
 

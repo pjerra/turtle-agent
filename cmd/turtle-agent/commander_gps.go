@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // The `.gps` read of the start's z check (dungeon.StartHands.GPS). `.gps` is a plain GM line (no ".bot " in front) and the core answers it

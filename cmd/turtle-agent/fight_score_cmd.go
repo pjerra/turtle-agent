@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/kbspells"
-	"github.com/pjerra/turtle-agent/internal/tracecheck"
+	"github.com/TortoiseBots/turtle-agent/internal/kbspells"
+	"github.com/TortoiseBots/turtle-agent/internal/tracecheck"
 )
 
 const fightScoreUsage = "usage: turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set spell_oracle=S] <combat-fight.json>...\n" +

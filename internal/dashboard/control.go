@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/netutil"
-	"github.com/pjerra/turtle-agent/internal/routeedit"
+	"github.com/TortoiseBots/turtle-agent/internal/netutil"
+	"github.com/TortoiseBots/turtle-agent/internal/routeedit"
 )
 
 // The run controls (README "Controls (--control)", issue #183). Off unless the dashboard is started with --control; then, and only then, does

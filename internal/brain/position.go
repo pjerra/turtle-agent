@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // Positioning (issue #80 step 3b). Ideas from mod-playerbots' ranged distance rules, tank facing and area avoidance (GPL-2.0+;

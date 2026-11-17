@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh/navfixture"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh/navfixture"
 )
 
 // The command's flags and failures, without navmesh: the oracle's own tests cover the

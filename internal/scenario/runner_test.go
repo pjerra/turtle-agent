@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // runWith wires a Runner to fakes and runs f under a background context.

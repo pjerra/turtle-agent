@@ -2,17 +2,17 @@
 type: Troubleshooting
 title: Observability troubleshooting
 description: Real error messages from the observability commands, what they mean, and the fix.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
 tags: [dashboard, traces, troubleshooting]
 sources:
   - id: dashboard-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
   - id: dashreplay-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashreplay_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashreplay_cmd.go
   - id: capturecmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/capturecmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/capturecmd.go
   - id: scenario-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/scenario_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/scenario_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:54:00+01:00

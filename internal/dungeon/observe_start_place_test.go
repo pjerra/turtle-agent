@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // observeStartFake is the run leader of observe_test.go with the agent's own GM character of start_test.go: an observed run that starts

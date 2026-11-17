@@ -1,10 +1,10 @@
 package main
 
-// The raid-walk --prepull-aura test tool: at the step before each boss row (whatever its phase), or on the boss row
-// itself when the run passed that step too fast to pause, the walk pauses the run, puts the flag's lists on the
-// living party with the gm_aura RPC (a confirmed select then ".aura <id>"), reads them back into prepull-auras.json
-// and resumes. Once per boss row, never at or after the pull, a pause is always resumed, and an aura on the
-// commander is a miss like any other.
+// The raid-walk --prepull-aura test tool: at the step before each boss row (whatever its phase), or where the paused
+// run stands when it passed that step too fast to pause (the boss row itself or beyond it, the boss not engaged), the
+// walk pauses the run, puts the flag's lists on the living party with the gm_aura RPC (a confirmed select then
+// ".aura <id>"), reads them back into prepull-auras.json and resumes. Once per boss row, never at or after the pull, a
+// pause is always resumed, and an aura on the commander is a miss like any other.
 import (
 	"bytes"
 	"context"
@@ -18,14 +18,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // prepullAgent is the agent side of a --prepull-aura test: a party of players whose auras the gm_aura RPC changes,
@@ -45,18 +45,32 @@ type prepullAgent struct {
 	selfCombat bool
 
 	// arenaCombat names the units the fresh `q units` read of a boss arena finds in combat, arenaCBUnknown names the
-	// units it lists without a `cb` field (a degraded reply), arenaTrunc makes that reply truncated, and arenaErr
-	// makes the `tt` call fail (the toolkit's refusal).
+	// units it lists without a `cb` field (a degraded reply), arenaAlive names the live units it lists out of combat
+	// (a boss standing in his arena, not yet pulled), arenaDead names the corpses it lists (`dead`, with a `cb` too, as
+	// the toolkit sends for a corpse), arenaTrunc makes that reply truncated, and arenaErr makes the `tt` call fail
+	// (the toolkit's refusal).
 	arenaCombat    []string
 	arenaCBUnknown []string
-	arenaTrunc     bool
-	arenaErr       error
-	ttCmds         []string
+	arenaAlive     []string
+	arenaDead      []string
+	// arenaReads counts the `q units` arena reads the fake answered. arenaDeadAt and arenaEmptyAt make the read at
+	// or after that 1-based index list the boss dead instead of alive, or list no units at all: the gate's read and
+	// the paused run's own read are two reads, and a test proves the second one's verdict.
+	arenaReads   int
+	arenaDeadAt  int
+	arenaEmptyAt int
+	arenaTrunc   bool
+	arenaErr     error
+	ttCmds       []string
 
-	sent    []string // "<bot name> <id>" per gm_aura call, in order
-	verbs   []string // every `run <verb>` the commander asked for
-	answers bool     // the unit RPC answers for the party (set by newPrepullAgent)
-	pauses  int
+	sent          []string      // "<bot name> <id>" per gm_aura call, in order
+	verbs         []string      // every `run <verb>` the commander asked for
+	trace         []string      // "run:<verb>" and "aura:<bot> <id>" in call order
+	advanceOnAura time.Duration // if > 0, advances a.clock on each gm_aura call
+	answers       bool          // the unit RPC answers for the party (set by newPrepullAgent)
+	pauses        int
+	// unitReads counts the unit RPC calls: the top-up's once-per-pull-step read is told from a second read by it.
+	unitReads int
 	// paused is the run's state as the fake's `run status` answers it; holdPause=false makes a pause ACK without
 	// the run going paused. statusStep is the step the status line names (the rest before the boss row).
 	paused      bool
@@ -83,9 +97,13 @@ type prepullAgent struct {
 	combatAfter   int
 	sends         int
 
-	// pauseErr and resumeErr are the commander's own refusals (the RPC itself failing).
-	pauseErr  error
-	resumeErr error
+	// pauseErr, pauseRefused and resumeErr are the commander's own failures/refusals.
+	pauseErr       error
+	pauseRefused   string
+	resumeErr      error
+	advanceOnPause time.Duration // if > 0, advances a.clock on each run pause call
+	pauseReqAt     time.Time
+	resumeAt       time.Time
 	// applyToSelf makes every ".aura" land on the commander instead of the target: the selection did not hold.
 	applyToSelf bool
 	// drop is the ids a bot never shows after its ".aura" (an aura the server refuses, or a selection that did not hold).
@@ -281,6 +299,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			GUID string `json:"guid"`
 		}
 		_ = json.Unmarshal(raw, &p)
+		a.unitReads++
 		g, err := packet.ParseGUID(p.GUID)
 		if err != nil {
 			return err
@@ -320,6 +339,10 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			return err
 		}
 		a.sent = append(a.sent, a.nameOf(g)+" "+itoaU(uint32(p.SpellID)))
+		a.trace = append(a.trace, "aura:"+a.nameOf(g)+" "+itoaU(uint32(p.SpellID)))
+		if a.advanceOnAura > 0 {
+			a.advance(a.advanceOnAura)
+		}
 		a.sends++
 		if a.combatAfter > 0 && a.sends >= a.combatAfter {
 			a.combat = true
@@ -344,12 +367,29 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		if a.arenaErr != nil {
 			return a.arenaErr
 		}
+		a.arenaReads++
+		if a.arenaEmptyAt > 0 && a.arenaReads >= a.arenaEmptyAt {
+			v = ttReplyOf(a.t, map[string]any{"units": []any{}, "n": 0, "trunc": a.arenaTrunc})
+			break
+		}
+		bossDead := a.arenaDeadAt > 0 && a.arenaReads >= a.arenaDeadAt
 		var units []any
 		for i, name := range a.arenaCombat {
 			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x200+i), "n": name, "e": 14834, "cb": true})
 		}
 		for i, name := range a.arenaCBUnknown {
 			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x300+i), "n": name, "e": 14834})
+		}
+		if !bossDead {
+			for i, name := range a.arenaAlive {
+				units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x400+i), "n": name, "e": 14834, "cb": false, "dead": false})
+			}
+		}
+		for i, name := range a.arenaDead {
+			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x500+i), "n": name, "e": 14834, "cb": true, "dead": true})
+		}
+		if bossDead {
+			units = append(units, map[string]any{"g": "0xF1300000000600", "n": "Hakkar", "e": 14834, "cb": true, "dead": true})
 		}
 		v = ttReplyOf(a.t, map[string]any{"units": units, "n": len(units), "trunc": a.arenaTrunc})
 	case "commander":
@@ -363,11 +403,25 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			break
 		}
 		a.verbs = append(a.verbs, p.Verb)
+		if p.Verb != "status" {
+			a.trace = append(a.trace, "run:"+p.Verb)
+		}
 		switch p.Verb {
 		case "pause":
 			a.pauses++
+			if a.pauseReqAt.IsZero() {
+				a.pauseReqAt = a.clock
+			}
+			if a.advanceOnPause > 0 {
+				a.advance(a.advanceOnPause)
+			}
 			if a.pauseErr != nil {
 				return a.pauseErr
+			}
+			if a.pauseRefused != "" {
+				v = commanderReply{Sent: ".bot run pause", Reply: tbm.Reply{Kind: tbm.KindErr,
+					Err: &tbm.Err{Intent: "run pause", Code: "refused", Message: a.pauseRefused}}}
+				break
 			}
 			if a.holdPause {
 				a.paused = true
@@ -377,6 +431,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			}
 			v = commanderReply{Sent: ".bot run pause", Reply: tbm.Reply{Kind: tbm.KindAck, OK: true, Line: "TBM:ACTION_ACK|run pause"}}
 		case "resume":
+			a.resumeAt = a.clock
 			if a.resumeErr != nil {
 				return a.resumeErr
 			}
@@ -685,10 +740,11 @@ func TestPrepullAuraFiresOnAPlainMoveStepBeforeTheBoss(t *testing.T) {
 }
 
 // The run passed the step before the boss too fast for the pause: the pause lands on the boss row itself, before the
-// pull, so the auras still go out and verify.
+// pull, with the boss standing alive out of combat in the fresh arena read, so the auras still go out and verify.
 func TestPrepullAuraAdvancedPauseAtTheBossRowFires(t *testing.T) {
 	a := newPrepullAgent(t)
 	a.statusStep = 5 // the pause confirms the run already stands on boss row 5
+	a.arenaAlive = []string{"Hakkar"}
 	w := newPrepullWalk(t, a, "role=all:22888")
 	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
 	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
@@ -706,11 +762,240 @@ func TestPrepullAuraAdvancedPauseAtTheBossRowFires(t *testing.T) {
 	}
 }
 
+// Walk 113, raid st13b: the server's run completed steps 421-424 in one tick, so the pause for boss row 425 was
+// confirmed on step 426 — past the boss row, not on it. Case 1: the boss is alive and nothing in his arena is in
+// combat, so the auras go out where the paused run stands, verify and the walk resumes. The assertion is that fire and
+// no exit: old code returns the "past the step before it" stop on any overshoot.
+func TestPrepullAuraPausePastTheBossRowFiresWhenTheBossIsNotEngaged(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6 // the pause confirms the run already passed boss row 5 and stands on 6
+	a.arenaAlive = []string{"Hakkar"}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("pause past the boss row: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the pause past the boss row sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	// The fresh arena read is what rules out an engaged boss on the overshoot; the fire's own combat watch is separate.
+	if len(a.ttCmds) != 1 || a.ttCmds[0] != "q units 60 100 200 10 all" {
+		t.Fatalf("arena reads %v", a.ttCmds)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
+		t.Fatalf("boss rows %v", f.BossRows)
+	}
+}
+
+// Case 2, the unit read shape: the overshot pause's fresh arena read lists the boss's corpse (the live report: the
+// step-418 pull killed Mandokir before his boss row). Preparing a corpse is not the run's test: no aura goes out,
+// one line says "boss already dead, no pre-pull fire", the row is not tried again, and the run is resumed and
+// continues. Old code treated a dead unit as "not engaged" and fired the whole batch at the corpse.
+func TestPrepullAuraPausePastTheBossRowWithTheBossDeadSendsNothing(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6
+	a.arenaDead = []string{"Hakkar"} // the corpse, with its `cb` too: a dead boss is no combatant and no pull
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil {
+		t.Fatalf("the dead overshoot failed the walk: %v", err)
+	}
+	if !fired {
+		t.Fatal("the dead overshoot did not report the hold it made")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the dead overshoot sent %v", a.sent)
+	}
+	if len(a.ttCmds) != 1 || a.ttCmds[0] != "q units 60 100 200 10 all" {
+		t.Fatalf("arena reads %v", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") {
+		t.Fatalf("run.log does not say the boss was dead:\n%s", log)
+	}
+	if n := strings.Count(log, "boss already dead, no pre-pull fire"); n != 1 {
+		t.Fatalf("the dead line appears %d times, want one:\n%s", n, log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the dead row was recorded as fired")
+	}
+	// No fire, so no evidence file: the row never prepared anything.
+	if _, err := os.Stat(filepath.Join(w.outDir, prepullAuraFileName)); !os.IsNotExist(err) {
+		t.Fatalf("%s exists after a run with no fire (%v)", prepullAuraFileName, err)
+	}
+	// The row is done: its own status neither pauses again nor fails as "never prepared".
+	before := len(a.verbs)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 6, Kind: planexport.KindMove, Phase: "walk", Note: "walking on"}
+	if fired, err := w.prepullAuraSendPending(context.Background(), boss, false); err != nil || fired {
+		t.Fatalf("a later status of the dead row: fired %v err %v", fired, err)
+	}
+	if len(a.verbs) != before {
+		t.Fatalf("a later status of the dead row asked the run %v", a.verbs[before:])
+	}
+}
+
+// Case 2, the walk's record shape: the boss died to an earlier pull and has despawned, so the arena read lists no
+// unit of his at all. The walk's own boss record for the row (a `boss down` status, a fight record or the end credit
+// — here the fight record the live walk had) already holds the kill, so the overshoot reads the arena not at all: no
+// aura, the same one line, and the run continues.
+func TestPrepullAuraPausePastTheBossRowWithTheBossRowAlreadyKilledSendsNothing(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.bossTracks = map[bossKey]*bossStepTrack{
+		{step: 5}: {entry: 14834, step: 5, engaged: true, killed: true, evidence: "fight 9-1: Hakkar killed (outcome kill)"},
+	}
+	prepullRunLog(t, w)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil {
+		t.Fatalf("the killed-row overshoot failed the walk: %v", err)
+	}
+	if !fired {
+		t.Fatal("the killed-row overshoot did not report the hold it made")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the killed-row overshoot sent %v", a.sent)
+	}
+	if len(a.ttCmds) != 0 {
+		t.Fatalf("arena reads %v (want none: the walk's record already holds the kill)", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") {
+		t.Fatalf("run.log does not say the boss was dead:\n%s", log)
+	}
+	if !strings.Contains(log, "the walk's boss record holds the kill") {
+		t.Fatalf("run.log does not name the record that held the kill:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the killed row was recorded as fired")
+	}
+	// The row's own status is no failure either: no second pause, no "never prepared" stop.
+	before := len(a.verbs)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	if fired, err := w.prepullAuraSendPending(context.Background(), boss, false); err != nil || fired {
+		t.Fatalf("the killed row's own status: fired %v err %v", fired, err)
+	}
+	if len(a.verbs) != before {
+		t.Fatalf("the killed row's own status asked the run %v", a.verbs[before:])
+	}
+}
+
+// Case 3: the overshot pause cannot prove the boss's state, so the walk still fails closed with no aura and the run
+// resumed — an arena read that lists no unit of the boss (a despawned corpse or a read of the wrong place), a read
+// that fails, and a read that lists a unit in combat. The not-found shape is the one the old "not engaged" reading got
+// wrong: no corpse row and no live row cannot be told apart from an unread arena, so it must not fire.
+func TestPrepullAuraPausePastTheBossRowWithoutAProvableBossFails(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(*prepullAgent)
+		reason string
+	}{
+		{"no boss unit in the read", func(*prepullAgent) {}, "lists no such boss"},
+		{"the arena read fails", func(a *prepullAgent) { a.arenaErr = errors.New("point_far") }, "arena read"},
+		{"the boss is engaged", func(a *prepullAgent) { a.arenaCombat = []string{"Hakkar"} }, "engaged"},
+	} {
+		a := newPrepullAgent(t)
+		tc.setup(a)
+		a.statusStep = 6
+		w := newPrepullWalk(t, a, "role=all:22888")
+		prepullRunLog(t, w)
+		st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+		fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+		code, reason := stopInfo(err)
+		if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, tc.reason) {
+			t.Fatalf("%s: fired %v, code %d, reason %q", tc.name, fired, code, reason)
+		}
+		if len(a.sent) != 0 {
+			t.Fatalf("%s: sent %v", tc.name, a.sent)
+		}
+		if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+			t.Fatalf("%s: verbs %q", tc.name, got)
+		}
+		if w.prepullAuraSent[5] {
+			t.Fatalf("%s: the row was recorded as done", tc.name)
+		}
+		if strings.Contains(prepullRunLogText(t, w), "boss already dead") {
+			t.Fatalf("%s: an unproven boss was reported dead", tc.name)
+		}
+	}
+}
+
+// The same overshoot with the boss engaged: the pull has started, so the walk still fails closed with no aura, and the
+// run is resumed as before. Old code also failed, but on the step alone and without the arena read; the assertion here
+// is the reason: an engaged boss, not merely a step past the row.
+func TestPrepullAuraPausePastTheBossRowWithTheBossEngagedFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6
+	a.arenaCombat = []string{"Hakkar"}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "past the step before it") || !strings.Contains(reason, "engaged") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.ttCmds) != 1 {
+		t.Fatalf("arena reads %v (want the one the overshoot reads)", a.ttCmds)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the engaged overshoot sent %v", a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the engaged row was recorded as done")
+	}
+}
+
+// The ordinary pause stands on the step before the boss row: no arena read is needed (the fire's own combat watch is
+// the only gate) and the fire, the verification and the resume are the pre-existing path. The control for the two
+// overshoot tests above.
+func TestPrepullAuraPauseOnTheStepBeforeTheBossRowIsUnchanged(t *testing.T) {
+	a := newPrepullAgent(t) // statusStep 4: the pause confirms the run stands on the step before boss row 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("pause on the step before: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the pause on the step before sent nothing")
+	}
+	if len(a.ttCmds) != 0 {
+		t.Fatalf("arena reads %v (want none on the normal path)", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+}
+
 // The boss row became current before any fire: still before the pull (begin, no combat, the boss's arena read fresh
 // out of combat), so the walk pauses on the row, fires, verifies and resumes.
 func TestPrepullAuraBossRowCurrentPausesFiresAndResumes(t *testing.T) {
 	a := newPrepullAgent(t)
 	a.statusStep = 5
+	a.arenaAlive = []string{"Hakkar"} // the fresh read finds him standing, out of combat
 	w := newPrepullWalk(t, a, "role=all:22888")
 	// The tracker holds the boss unengaged: alive at 100 %, no target, no live target. The fresh read is the one that
 	// decides, and it is clean too.
@@ -738,6 +1023,167 @@ func TestPrepullAuraBossRowCurrentPausesFiresAndResumes(t *testing.T) {
 	f := readPrepullAuraFile(t, w)
 	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
 		t.Fatalf("boss rows %v", f.BossRows)
+	}
+}
+
+// The boss row became current with its boss already dead: the same case 2 the overshot pause has, on the row itself.
+// The gate's fresh read lists the corpse, so no aura goes out, no pause is even asked for, one run.log line says
+// "boss already dead, no pre-pull fire", and the run continues. Old code read the corpse as "not engaged" and fired
+// the batch at it.
+func TestPrepullAuraBossRowCurrentWithTheBossDeadSkipsTheFire(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	a.arenaDead = []string{"Hakkar"} // the corpse, with its `cb` too: a dead boss is no combatant and no pull
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	if err != nil {
+		t.Fatalf("the dead boss row failed the walk: %v", err)
+	}
+	if fired {
+		t.Fatal("the dead boss row reported a fire")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the dead boss row sent %v", a.sent)
+	}
+	if len(a.verbs) != 0 {
+		t.Fatalf("the dead boss row asked the run %v (want no pause: the gate's read decides)", a.verbs)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") {
+		t.Fatalf("run.log does not say the boss was dead:\n%s", log)
+	}
+	if !strings.Contains(log, "the arena read shows the boss dead") {
+		t.Fatalf("run.log does not name the read:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the dead row was recorded as fired")
+	}
+	// The row is done: its own later status neither read the arena again nor fails as "never prepared".
+	reads := len(a.ttCmds)
+	if fired, err := w.prepullAuraSendPending(context.Background(), boss, false); err != nil || fired {
+		t.Fatalf("the dead row's second status: fired %v err %v", fired, err)
+	}
+	if len(a.ttCmds) != reads || len(a.verbs) != 0 {
+		t.Fatalf("the dead row's second status read/asked again: %v / %v", a.ttCmds[reads:], a.verbs)
+	}
+}
+
+// The boss row became current with the walk's own record already holding the kill (the boss died to an earlier pull
+// and has despawned): no arena read, no pause, the same one line, and the run continues.
+func TestPrepullAuraBossRowCurrentWithTheKilledRecordSkipsTheFire(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.bossTracks = map[bossKey]*bossStepTrack{
+		{step: 5}: {entry: 14834, step: 5, engaged: true, killed: true, evidence: "fight 9-1: Hakkar killed (outcome kill)"},
+	}
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	if err != nil || fired {
+		t.Fatalf("the killed boss row: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("the killed boss row sent %v / asked %v", a.sent, a.verbs)
+	}
+	if len(a.ttCmds) != 0 {
+		t.Fatalf("arena reads %v (want none: the walk's record already holds the kill)", a.ttCmds)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") || !strings.Contains(log, "the walk's boss record holds the kill") {
+		t.Fatalf("run.log does not name the dead row and the record:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the killed row was recorded as fired")
+	}
+}
+
+// The boss row became current before the pull and the fresh arena read lists no unit of the boss: the state cannot be
+// proven, so the walk fails closed as the overshot pause does, with no aura and no pause. Old code read the empty
+// arena as "not engaged" and fired.
+func TestPrepullAuraBossRowMissingFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5 // no arena units at all: the read lists nothing
+	w := newPrepullWalk(t, a, "role=all:22888")
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	code, reason := stopInfo(err)
+	if fired || code != exitRaidWalkFailed || !strings.Contains(reason, "boss row 5") || !strings.Contains(reason, "never sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("the missing boss sent %v / asked %v", a.sent, a.verbs)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
+	}
+}
+
+// Case 2 on the boss row's own pause (fireRow == bossRow): the gate's read finds him alive, so the walk pauses, and
+// the confirmed pause's read finds him dead — the gate said fire and the pause says skip. No aura goes out, one line
+// says so, the pause is resumed and the run continues.
+func TestPrepullAuraBossRowPausedOnAfterTheBossDiedSkipsTheFire(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5 // the pause confirms the run stands on boss row 5
+	a.arenaAlive = []string{"Hakkar"}
+	a.arenaDeadAt = 2 // the gate's read: alive; the confirmed pause's read: dead
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	if err != nil {
+		t.Fatalf("the died-before-the-pause row: %v", err)
+	}
+	if !fired {
+		t.Fatal("the died-before-the-pause row did not report the hold it made")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the died-before-the-pause row sent %v", a.sent)
+	}
+	if len(a.ttCmds) != 2 {
+		t.Fatalf("arena reads %v (want the gate's and the pause's)", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire (the run paused at step 5") {
+		t.Fatalf("run.log does not name the paused dead row:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the dead row was recorded as fired")
+	}
+}
+
+// Item 2 on the boss row's own pause: the gate's read found the boss, the confirmed pause's read lists no unit of
+// him (he despawned or the second read fell elsewhere). The pause must fail closed with no aura, exactly as the
+// overshot path does; old code read the empty arena as "not engaged" and fired.
+func TestPrepullAuraBossRowPausedOnWithTheBossMissingFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	a.arenaAlive = []string{"Hakkar"}
+	a.arenaEmptyAt = 2 // the gate's read: alive; the confirmed pause's read: nothing
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "paused on the boss row") || !strings.Contains(reason, "lists no such boss") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the missing boss sent %v", a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
+	}
+	if strings.Contains(prepullRunLogText(t, w), "boss already dead") {
+		t.Fatal("an unproven boss was reported dead")
 	}
 }
 
@@ -1387,6 +1833,10 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 	if code != exitOK || o.prepullAuraWhen != prepullAuraWhenStart {
 		t.Fatalf("start mode %q exit %d: %s", o.prepullAuraWhen, code, stderr.String())
 	}
+	// --prepull-aura-topup rides on --prepull-aura and is accepted beside it.
+	if _, code = parseRaidWalkArgs([]string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-topup"}, &stderr); code != exitOK {
+		t.Fatalf("--prepull-aura-topup: exit %d: %s", code, stderr.String())
+	}
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -1405,6 +1855,7 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 		{"tolerance alone", []string{"zul_gurub", "--prepull-aura-tolerance", "1"}, "needs --prepull-aura"},
 		{"bad when", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-when", "mid"}, `"boss" or "start"`},
 		{"when alone", []string{"zul_gurub", "--prepull-aura-when", "start"}, "needs --prepull-aura"},
+		{"topup alone", []string{"zul_gurub", "--prepull-aura-topup"}, "needs --prepull-aura"},
 	} {
 		var errBuf bytes.Buffer
 		_, code := parseRaidWalkArgs(tc.args, &errBuf)
@@ -2653,5 +3104,873 @@ func TestPrepullFirePointOnTheZulGurubArlokkLeg(t *testing.T) {
 		if s := rows.Steps[i]; s.Kind != planexport.KindMove {
 			t.Errorf("row %d (%s %q) stands between the gong and her boss row", i+1, s.Kind, s.Comment)
 		}
+	}
+}
+
+// --prepull-aura-topup: before every pull row, out of combat, the walk reads each living hire's auras and puts back
+// only what a death or an expiry took, then reads it back. The run is never paused and a top-up that cannot go out
+// only logs. These tests run the real flag parser, so on a tree without the flag the walk refuses it (exit 2) and the
+// cases below fail there instead of passing vacuously.
+
+// prepullPullRows is a plan of 8 rows with pull rows at the steps given (1-based), the rest and approach rows around
+// them plain moves: the top-up stands before a pull row, trash or boss (no boss row here, its own fire is unchanged).
+func prepullPullRows(pullAt ...int) planexport.Rows {
+	isPull := make(map[int]bool, len(pullAt))
+	for _, s := range pullAt {
+		isPull[s] = true
+	}
+	rows := planexport.Rows{}
+	for step := 1; step <= 8; step++ {
+		kind := planexport.KindMove
+		if isPull[step] {
+			kind = planexport.KindPull
+		}
+		rows.Steps = append(rows.Steps, planexport.StepRow{Kind: kind, Entry: 11338, Leg: 1, X: 100, Y: 200, Z: 10})
+	}
+	return rows
+}
+
+// newPrepullTopupWalk is newPrepullWalkHires over the parser's own options for every "--prepull-aura <flag>" plus
+// "--prepull-aura-topup": the flag itself goes through parseRaidWalkArgs, so the case fails where the flag does not
+// exist and never tests a walk the command line could not have built. Its plan pulls at rows 2, 4 and 6.
+func newPrepullTopupWalk(t *testing.T, a *prepullAgent, flags ...string) *walk {
+	t.Helper()
+	var stderr bytes.Buffer
+	args := []string{"zul_gurub"}
+	for _, f := range flags {
+		args = append(args, "--prepull-aura", f)
+	}
+	args = append(args, "--prepull-aura-topup")
+	o, code := parseRaidWalkArgs(args, &stderr)
+	if code != exitOK {
+		t.Fatalf("--prepull-aura-topup: exit %d: %s", code, stderr.String())
+	}
+	w := newPrepullWalkHires(t, a, prepullHires(), flags...)
+	w.opts = o
+	w.rows = prepullPullRows(2, 4, 6)
+	return w
+}
+
+// prepullNotes lists the summary lines that name a top-up, or the ones containing substr.
+func prepullNotes(w *walk, substr string) []string {
+	var out []string
+	for _, n := range w.notesCopy() {
+		if strings.Contains(n, "topup") && strings.Contains(n, substr) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// prepullFrame feeds one bot_view frame row to the walk's tracker: the frames' death marks are what name a hire's
+// missing ids as a death's doing.
+func prepullFrame(t *testing.T, w *walk, rec tbm.PartyRec) {
+	t.Helper()
+	if w.botAt == nil {
+		w.botAt = map[string]botPos{}
+	}
+	if w.partyG == nil {
+		w.partyG = map[uint64]bool{}
+	}
+	rec.Map, rec.HP, rec.MaxHP = 309, 6000, 6000
+	w.trackFrame(w.env.now(), &tbm.ViewFrame{Party: []tbm.PartyRec{rec}})
+}
+
+// (a) A bot dies at a pull and is revived: the next pull's top-up puts its whole list back on it, and only its list,
+// while every other bot still carries its own. Every pull step reads the raid, so the death is not what makes the read
+// happen; it is what names the cause.
+func TestPrepullAuraTopupRebuffsARevivedBot(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	// Pull 2's rest: nothing carries the lists yet, so the first top-up sends all 12 lines (2 tanks 1+1, four rest 2).
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("first top-up: fired %v err %v", fired, err)
+	}
+	first := len(a.sent)
+	if first != 12 {
+		t.Fatalf("%d lines sent, want 12: %v", first, a.sent)
+	}
+	// Rank (a rogue, melee: 17538 + the world list 22888) dies at the pull and is revived: a death strips its auras.
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", Dead: true, State: "d"})
+	a.advance(30 * time.Second)
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", State: "n"})
+	// Pull 4's rest: only Rank is missing, and only its own list goes back.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+		t.Fatalf("the pull after the death: fired %v err %v", fired, err)
+	}
+	tail := a.sent[first:]
+	if strings.Join(tail, " | ") != "Rank 17538 | Rank 22888" {
+		t.Fatalf("the top-up sent %v (want only Rank's list: 17538, 22888)", tail)
+	}
+	want := "prepull-aura: topup before step 4: Rank +2 (death)"
+	if lines := prepullNotes(w, "topup before step 4:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+	// Both top-ups had sends, so each paused before its sends and resumed right after.
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
+	}
+}
+
+// (a2) One aura on one living bot expires: only that id is sent again before the next pull, and nobody died, so the
+// cause is the expiry. Every pull step reads the raid, so the read happens because the pull is a new one.
+func TestPrepullAuraTopupResendsOnlyAnExpiredId(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	// Flitz (a hunter, ranged: 18192 + the world list 22888) loses the world buff to its timer.
+	flitz := a.bots[3]
+	if flitz.Name != "Flitz" {
+		t.Fatalf("the fourth fake bot is %s, not Flitz", flitz.Name)
+	}
+	delete(a.auras[flitz.GUID], 22888)
+	a.advance(61 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the pull after the expiry: %v", err)
+	}
+	tail := a.sent[first:]
+	if strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the top-up sent %v (want only the expired 22888 on Flitz)", tail)
+	}
+	want := "prepull-aura: topup before step 4: Flitz +1 (expired)"
+	if lines := prepullNotes(w, "topup before step 4:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+}
+
+// (a3) An aura expires between two pulls less than a minute apart: the second pull reads again and resends it. A read
+// taken at one pull says nothing about the next one: an aura can expire a few seconds later, so the top-up never
+// reuses a read across pull steps. On r1 this failed (the read of pull step 3 answered pull step 4 as well):
+//
+//	the top-up sent [] (want only the expired 22888 on Flitz)
+func TestPrepullAuraTopupResendsAnExpiryUnderAMinute(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	flitz := a.bots[3]
+	if flitz.Name != "Flitz" {
+		t.Fatalf("the fourth fake bot is %s, not Flitz", flitz.Name)
+	}
+	// The world buff runs out 5 s after the read, well inside a minute.
+	delete(a.auras[flitz.GUID], 22888)
+	a.advance(5 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the pull after the expiry: %v", err)
+	}
+	tail := a.sent[first:]
+	if strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the top-up sent %v (want only the expired 22888 on Flitz)", tail)
+	}
+	want := "prepull-aura: topup before step 4: Flitz +1 (expired)"
+	if lines := prepullNotes(w, "topup before step 4:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+}
+
+// (a4) A hire's read fails at the first status of a pull step (the unit store has not got its row yet): the hire is
+// not done, and a later status of the SAME step reads it again and puts back what it lacks before the pull. On r2 the
+// first attempt marked the step read, so the later status did nothing:
+//
+//	the retry sent [] (want only the expired 22888 on Flitz)
+func TestPrepullAuraTopupRetriesAHireAfterAFailedRead(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	flitz := a.bots[3]
+	if flitz.Name != "Flitz" {
+		t.Fatalf("the fourth fake bot is %s, not Flitz", flitz.Name)
+	}
+	// The world buff runs out and the store does not answer for Flitz yet: that status cannot read its auras.
+	delete(a.auras[flitz.GUID], 22888)
+	a.unseenUntil["Flitz"] = a.clock.Add(10 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the status with Flitz unseen: %v", err)
+	}
+	if tail := a.sent[first:]; len(tail) != 0 {
+		t.Fatalf("the status with Flitz unseen sent %v (want nothing: its auras were not read)", tail)
+	}
+	if lines := prepullNotes(w, "the unit read did not answer"); len(lines) != 1 {
+		t.Fatalf("skip lines %q, want exactly one for the failed read", lines)
+	}
+	// The store catches up: the same pull step reads Flitz again and puts the id back.
+	a.advance(10 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the retry: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the retry sent %v (want only the expired 22888 on Flitz)", tail)
+	}
+	want := "prepull-aura: topup before step 4: Flitz +1 (expired)"
+	if lines := prepullNotes(w, "Flitz +1"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up send lines %q, want one %q", lines, want)
+	}
+}
+
+// (b2) A hire is dead at the first status of a pull step and alive at the next: a body is never done, so the same step
+// reads it once it is back and puts its list on before the pull.
+func TestPrepullAuraTopupReadsAHireRevivedWithinTheStep(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	// Rank dies at the pull (a death strips its auras) and is revived before the next one.
+	a.deadBots["Rank"] = true
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the status with Rank dead: %v", err)
+	}
+	if tail := a.sent[first:]; len(tail) != 0 {
+		t.Fatalf("a dead hire got %v (want nothing)", tail)
+	}
+	a.deadBots["Rank"] = false
+	a.advance(2 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the status after the revive: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Rank 17538 | Rank 22888" {
+		t.Fatalf("the revived hire got %v (want its whole list: 17538, 22888)", tail)
+	}
+}
+
+// (c2) Every hire is done for the step once the top-up has sent and read back: a later status of the same pull step
+// reads nothing at all (no frame, no unit) and sends nothing.
+func TestPrepullAuraTopupDoneStepReadsNothingMore(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	flitz := a.bots[3]
+	delete(a.auras[flitz.GUID], 22888)
+	a.advance(5 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the pull's top-up: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the top-up sent %v (want only 22888 on Flitz)", tail)
+	}
+	units, frames := a.unitReads, a.frameReads
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the same pull step again: %v", err)
+	}
+	if a.unitReads != units || a.frameReads != frames {
+		t.Fatalf("the done step read again (%d unit reads, %d frame reads; want %d, %d)", a.unitReads, a.frameReads, units, frames)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Flitz 22888" {
+		t.Fatalf("the done step sent %v again", tail)
+	}
+}
+
+// (b) Nothing is missing: the pull is read and nothing goes out, and no top-up line is written.
+func TestPrepullAuraTopupNothingMissingSendsNothing(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	if first == 0 {
+		t.Fatal("the first top-up sent nothing")
+	}
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the covered pull: %v", err)
+	}
+	if tail := a.sent[first:]; len(tail) != 0 {
+		t.Fatalf("a covered raid sent %v", tail)
+	}
+	if lines := prepullNotes(w, "topup before step 4"); len(lines) != 0 {
+		t.Fatalf("a covered raid wrote %q", lines)
+	}
+	// The read happened (it is what found nothing): a second status of the same pull step does not read again.
+	// The unit RPC is the read's own witness: the top-up reads every hire's row and nothing else here does.
+	reads := a.unitReads
+	before := len(a.sent)
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("the same pull again: %v", err)
+	}
+	if a.unitReads != reads {
+		t.Fatalf("the same pull step read the units again (%d reads, want %d)", a.unitReads, reads)
+	}
+	if len(a.sent) != before {
+		t.Fatalf("the same pull read again and sent %v", a.sent[before:])
+	}
+}
+
+// (c) Combat starts during the top-up: the batch stops at once (the combat recheck before each send), the top-up is
+// logged, and the walk goes on. The pull is not failed and no error reaches the caller.
+func TestPrepullAuraTopupCombatStopsQuietly(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	ctx := context.Background()
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	first := len(a.sent)
+	// Rank's two auras are gone and the first one sent lands, then the party pulls: the second send must not go out.
+	rank := a.bots[2]
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	a.advance(61 * time.Second)
+	a.combatAfter = first + 1
+	fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false)
+	if err != nil || fired {
+		t.Fatalf("combat during the top-up: fired %v err %v (want the walk to go on)", fired, err)
+	}
+	if tail := a.sent[first:]; len(tail) != 1 {
+		t.Fatalf("the top-up sent %v after the pull started (want the one line before it)", tail)
+	}
+	lines := prepullNotes(w, "top-up stopped")
+	if len(lines) != 1 || !strings.Contains(lines[0], "combat") || !strings.Contains(lines[0], "pull goes on") {
+		t.Fatalf("top-up stop lines %q", lines)
+	}
+	// Both top-ups had sends, and the second still resumed after combat stopped it mid-batch.
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
+	}
+}
+
+// (e) A boss row is a pull row for the top-up: under --prepull-aura-when start no boss row is ever fired, so the step
+// before a KindBoss row reads the hires and puts back what they lack. On r3 the gate took only KindPull rows, so a boss
+// pull got no top-up at all:
+//
+//	the top-up sent 0 line(s) before the boss row, want the world buff on all six hires: []
+func TestPrepullAuraTopupTopsUpBeforeABossRowInStartMode(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	w.rows = prepullRows(2, 5)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	if fired, err := w.prepullAuraSendPending(context.Background(), st, false); err != nil || fired {
+		t.Fatalf("the step before the boss row: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 6 {
+		t.Fatalf("the top-up sent %d line(s) before the boss row, want the world buff on all six hires: %v", len(a.sent), a.sent)
+	}
+	if lines := prepullNotes(w, "topup before step 5:"); len(lines) != 1 {
+		t.Fatalf("top-up lines %q, want one naming step 5", lines)
+	}
+}
+
+// (f) A hire dead at the first status before a boss row and alive at the next one gets its list before that pull: the
+// boss row's step retries a hire like a trash pull's.
+func TestPrepullAuraTopupRetriesARevivedHireBeforeABossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	w.rows = prepullRows(2, 5)
+	ctx := context.Background()
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	a.deadBots["Rank"] = true
+	if _, err := w.prepullAuraSendPending(ctx, st, false); err != nil {
+		t.Fatalf("the status with Rank dead: %v", err)
+	}
+	if len(a.sent) != 5 {
+		t.Fatalf("the status with Rank dead sent %v (want the five living hires only)", a.sent)
+	}
+	first := len(a.sent)
+	a.deadBots["Rank"] = false
+	a.advance(2 * time.Second)
+	if _, err := w.prepullAuraSendPending(ctx, st, false); err != nil {
+		t.Fatalf("the status after the revive: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Rank 22888" {
+		t.Fatalf("the revived hire got %v (want the world buff before the boss pull)", tail)
+	}
+}
+
+// (g) With --prepull-aura-when boss (the default) the boss row's own fire sends the full lists: the top-up stays out of
+// that row, so the step before it sends each hire's list once, from the fire, and writes no top-up line.
+func TestPrepullAuraTopupDoesNotDoubleSendAtTheBossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	w.rows = prepullRows(2, 5)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("the boss-row fire: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 12 {
+		t.Fatalf("%d line(s) at the boss row, want the fire's 12 once each: %v", len(a.sent), a.sent)
+	}
+	if lines := prepullNotes(w, "topup"); len(lines) != 0 {
+		t.Fatalf("the top-up ran at a boss row the fire owns: %q", lines)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the boss row was not recorded as prepared by the fire")
+	}
+}
+
+// (d) The flag is off by default: the same pull steps send nothing, with no top-up line, and the boss-row fire keeps
+// its own gate (no boss row in this plan, so nothing fires at all).
+func TestPrepullAuraTopupOffByDefault(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.rows = prepullPullRows(2, 4, 6)
+	ctx := context.Background()
+	for _, step := range []int{1, 3} {
+		if fired, err := w.prepullAuraSendPending(ctx, prepullRest(step), false); err != nil || fired {
+			t.Fatalf("step %d with the flag off: fired %v err %v", step, fired, err)
+		}
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the flag was off and the walk sent %v", a.sent)
+	}
+	if len(prepullHoldVerbs(a)) != 0 {
+		t.Fatalf("the flag was off and the walk asked the run for %v", prepullHoldVerbs(a))
+	}
+	if lines := prepullNotes(w, ""); len(lines) != 0 {
+		t.Fatalf("the flag was off and the walk wrote %q", lines)
+	}
+}
+
+// (h) Two adjacent pull rows in boss mode: a pre-pull status on the FIRST pull row must read that row, not the next
+// one. On r4 the gate picked st.Step+1 before st.Step, so the rest on pull row 2 recorded row 3 as done; Rank died in
+// pull 2's fight, was revived, and pull 3's rest found its step settled and sent nothing:
+//
+//	the top-up sent [] (want only Rank's list: 17538, 22888)
+func TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentPulls(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	w.rows = prepullPullRows(2, 3)
+	ctx := context.Background()
+	// Pull 2's rest (the move before it): every hire gets its list.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("pull 2's rest: fired %v err %v", fired, err)
+	}
+	first := len(a.sent)
+	if first != 12 {
+		t.Fatalf("%d line(s) before pull 2, want 12: %v", first, a.sent)
+	}
+	// The rest ON pull row 2, its pull not started and row 3 a pull too: nothing is missing, so nothing goes out —
+	// and pull 3 is NOT recorded as read.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(2), false); err != nil || fired {
+		t.Fatalf("the rest on pull row 2: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != first {
+		t.Fatalf("the rest on pull row 2 sent %v", a.sent[first:])
+	}
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 0 {
+		t.Fatalf("the rest on pull row 2 read pull 3 ahead of its fight: %q", lines)
+	}
+	// Pull 2's fight: Rank dies, every aura stripped, and the party is in combat.
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	mt := a.bots[0]
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", Dead: true, State: "d"})
+	prepullFrame(t, w, tbm.PartyRec{GUID: mt.GUID, Name: "Mtbot", State: "c"})
+	// No top-up during the fight: neither a fighting note nor a rest-phase status with a member in a fresh in-combat
+	// frame sends anything.
+	for _, st := range []tbm.RunStatus{
+		{State: tbm.RunRunning, Step: 2, Kind: planexport.KindMove, Phase: "fight", Note: "fighting 11338"},
+		prepullRest(2),
+	} {
+		if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+			t.Fatalf("a status in the fight (phase %q): fired %v err %v", st.Phase, fired, err)
+		}
+	}
+	if len(a.sent) != first {
+		t.Fatalf("a status in the fight sent %v", a.sent[first:])
+	}
+	// Rank is revived before pull 3: its own list goes back, and only its own.
+	a.advance(30 * time.Second)
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", State: "n"})
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+		t.Fatalf("pull 3's rest: fired %v err %v", fired, err)
+	}
+	tail := a.sent[first:]
+	if strings.Join(tail, " | ") != "Rank 17538 | Rank 22888" {
+		t.Fatalf("the top-up sent %v (want only Rank's list after the death in pull 2: 17538, 22888)", tail)
+	}
+	want := "prepull-aura: topup before step 3: Rank +2 (death)"
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+	// Both top-ups had sends, so each paused before its sends and resumed right after.
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
+	}
+}
+
+// (i) The same two adjacent rows as boss rows under --prepull-aura-when start: the rest on boss row 2 must read boss
+// row 2, not record boss row 3. On r4 the false step made the top-up mark boss row 3 read, so a bot that died in the
+// first boss fight got no list before the second boss pull:
+//
+//	the top-up sent [] (want only Rank's world buff: 22888)
+func TestPrepullAuraTopupReadsTheSecondOfTwoAdjacentBossRowsInStartMode(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	w.rows = prepullRows(2, 3)
+	ctx := context.Background()
+	walk := func(step int) tbm.RunStatus {
+		return tbm.RunStatus{State: tbm.RunRunning, Step: step, Kind: planexport.KindMove, Phase: "walk", Note: "walking"}
+	}
+	// Boss row 2's approach: every hire gets the world buff.
+	if _, err := w.prepullAuraSendPending(ctx, walk(1), false); err != nil {
+		t.Fatalf("boss row 2's approach: %v", err)
+	}
+	first := len(a.sent)
+	if first != 6 {
+		t.Fatalf("%d line(s) before boss row 2, want 6: %v", first, a.sent)
+	}
+	// The walk status on boss row 2 itself, its pull not started and row 3 a boss row too: nothing is missing, nothing
+	// goes out, and boss row 3 is NOT recorded as read.
+	if _, err := w.prepullAuraSendPending(ctx, walk(2), false); err != nil {
+		t.Fatalf("the walk on boss row 2: %v", err)
+	}
+	if len(a.sent) != first {
+		t.Fatalf("the walk on boss row 2 sent %v", a.sent[first:])
+	}
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 0 {
+		t.Fatalf("the walk on boss row 2 read boss row 3 ahead of its fight: %q", lines)
+	}
+	// Boss row 2's fight: Rank dies, its aura stripped, the party in combat.
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	mt := a.bots[0]
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", Dead: true, State: "d"})
+	prepullFrame(t, w, tbm.PartyRec{GUID: mt.GUID, Name: "Mtbot", State: "c"})
+	for _, st := range []tbm.RunStatus{
+		{State: tbm.RunRunning, Step: 2, Kind: planexport.KindMove, Phase: "fight", Note: "fighting 14834"},
+		walk(2),
+	} {
+		if _, err := w.prepullAuraSendPending(ctx, st, false); err != nil {
+			t.Fatalf("a status in the fight (phase %q): %v", st.Phase, err)
+		}
+	}
+	if len(a.sent) != first {
+		t.Fatalf("a status in the fight sent %v", a.sent[first:])
+	}
+	// Revived before boss row 3: the world buff goes back, before the second boss pull.
+	a.advance(30 * time.Second)
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", State: "n"})
+	if _, err := w.prepullAuraSendPending(ctx, walk(3), false); err != nil {
+		t.Fatalf("boss row 3's walk: %v", err)
+	}
+	if tail := a.sent[first:]; strings.Join(tail, " | ") != "Rank 22888" {
+		t.Fatalf("the top-up sent %v (want only Rank's world buff after the death in boss row 2: 22888)", tail)
+	}
+	want := "prepull-aura: topup before step 3: Rank +1 (death)"
+	if lines := prepullNotes(w, "topup before step 3:"); len(lines) != 1 || lines[0] != want {
+		t.Fatalf("top-up lines %q, want one %q", lines, want)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want pause resume pause resume", got)
+	}
+}
+
+// (j) An id the server will not stick (ticket T32: 23768 misses on one bot about 1 in 3 fires) is sent at most three
+// times per pull step. On r5 the hire stayed pending for ever, so every pre-pull status of the step resent it: a
+// fourth status before the same pull sent again and no line ever said the walk gave up.
+//
+//	the top-up sent to Rank 4 time(s) before the pull, want 3: ["prepull-aura: topup before step 4: Mtbot +2
+//	(expired), Otbot +2 (expired), Rank +2 (expired), Flitz +2 (expired), Zap +2 (expired), Holi +2 (expired)"
+//	"prepull-aura: topup before step 4: Rank +1 (expired)" "prepull-aura: topup before step 4: Rank +1 (expired)"
+//	"prepull-aura: topup before step 4: Rank +1 (expired)"]
+func TestPrepullAuraTopupGivesUpAfterThreeTries(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888,23768")
+	ctx := context.Background()
+	rank := a.bots[2]
+	if rank.Name != "Rank" {
+		t.Fatalf("the third fake bot is %s, not Rank", rank.Name)
+	}
+	// The second id of the list never lands on Rank: the first aura lands and is verified, so the resends are the one
+	// stubborn id.
+	a.drop[rank.GUID] = map[uint32]bool{23768: true}
+	// Four pre-pull statuses of pull step 4: the first puts both ids on every hire and the next ones retry Rank only,
+	// so without the cap the fourth would send to it again.
+	for i := 0; i < 3; i++ {
+		a.advance(2 * time.Second)
+		if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+			t.Fatalf("status %d of pull step 4: fired %v err %v", i+1, fired, err)
+		}
+	}
+	before := len(a.sent)
+	a.advance(2 * time.Second)
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil || fired {
+		t.Fatalf("the fourth status of pull step 4: fired %v err %v", fired, err)
+	}
+	// One top-up send is one apply of Rank's missing list, and each of those writes its own "+k" line (the AuraPort's
+	// first-aura verification may send the same id twice inside one apply, exactly as dungeon_run's buff presets do;
+	// that internal retry is not a second top-up attempt). So the attempt count is read from the walk's own lines.
+	attempts := 0
+	for _, n := range w.notesCopy() {
+		attempts += strings.Count(n, "Rank +")
+	}
+	if attempts != 3 {
+		t.Fatalf("the top-up sent to Rank %d time(s) before the pull, want 3: %q", attempts, prepullNotes(w, "Rank +"))
+	}
+	// Nothing lands for the stubborn id, at most three applies were made, and the walk said so once.
+	want := "prepull-aura: topup before step 4: Rank still lacks 23768 after 3 tries; giving up for this step"
+	runs := 0
+	for _, n := range w.notesCopy() {
+		if n == want {
+			runs++
+		}
+	}
+	if runs != 1 {
+		t.Fatalf("the give-up line appears %d time(s), want once: %q", runs, prepullNotes(w, "still lacks"))
+	}
+	// The other five hires were done at the first status: the later ones only retried Rank.
+	for _, line := range a.sent[12:] {
+		if !strings.HasPrefix(line, "Rank ") {
+			t.Fatalf("a later status sent to somebody else too: %v", a.sent[12:])
+		}
+	}
+	// The step is done for Rank now: the fourth status after the third apply sent nothing at all.
+	if tail := a.sent[before:]; len(tail) != 0 {
+		t.Fatalf("the fourth status sent %v after the walk gave up on Rank", tail)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume pause resume pause resume" {
+		t.Fatalf("the top-up asked the run for %q, want three pause/resume pairs", got)
+	}
+}
+
+// (k) Cause labels: "(never had)" when the hire was never seen with the missing id in this run, "(expired)" when
+// it was seen with that id before and lost it without dying, and "(death)" when the hire died since its last top-up.
+func TestPrepullAuraTopupLabelsDeathExpiredAndNeverHad(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, prepullRestAuras...)
+	w.rows = prepullPullRows(2, 4, 6)
+	ctx := context.Background()
+	zap := a.bots[4]
+	if zap.Name != "Zap" {
+		t.Fatalf("the fifth fake bot is %s, not Zap", zap.Name)
+	}
+	// Zap never receives 22888 on the first top-up, so it is never seen with it.
+	a.drop[zap.GUID] = map[uint32]bool{22888: true}
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil {
+		t.Fatalf("first top-up: %v", err)
+	}
+	lines := prepullNotes(w, "topup before step 2:")
+	if len(lines) != 1 || !strings.Contains(lines[0], "Mtbot +2 (never had)") || !strings.Contains(lines[0], "Zap +2 (never had)") {
+		t.Fatalf("first top-up lines %q, want (never had) labels", lines)
+	}
+	// Pull 4: Flitz (had 22888 at step 2) loses 22888 -> (expired); Rank dies and is revived -> (death);
+	// Zap still never had 22888 -> (never had).
+	delete(a.drop, zap.GUID)
+	flitz := a.bots[3]
+	rank := a.bots[2]
+	delete(a.auras[flitz.GUID], 22888)
+	for id := range a.auras[rank.GUID] {
+		delete(a.auras[rank.GUID], id)
+	}
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", Dead: true, State: "d"})
+	a.advance(30 * time.Second)
+	prepullFrame(t, w, tbm.PartyRec{GUID: rank.GUID, Name: "Rank", State: "n"})
+	if _, err := w.prepullAuraSendPending(ctx, prepullRest(3), false); err != nil {
+		t.Fatalf("second top-up: %v", err)
+	}
+	lines = prepullNotes(w, "topup before step 4:")
+	if len(lines) != 1 {
+		t.Fatalf("second top-up lines %q, want 1 line", lines)
+	}
+	for _, want := range []string{"Rank +2 (death)", "Flitz +1 (expired)", "Zap +1 (never had)"} {
+		if !strings.Contains(lines[0], want) {
+			t.Fatalf("second top-up line %q missing %q", lines[0], want)
+		}
+	}
+}
+
+// (l) Fix 3a: a top-up with sends issues pause, then the .aura sends, then resume, in that order.
+func TestPrepullAuraTopupPausesBeforeSendsAndResumesAfter(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up: fired %v err %v", fired, err)
+	}
+	if len(a.trace) != 8 {
+		t.Fatalf("trace %v, want 8 entries (pause + 6 sends + resume)", a.trace)
+	}
+	if a.trace[0] != "run:pause" {
+		t.Fatalf("first trace entry %q, want run:pause (full trace: %v)", a.trace[0], a.trace)
+	}
+	for i := 1; i <= 6; i++ {
+		if !strings.HasPrefix(a.trace[i], "aura:") {
+			t.Fatalf("trace[%d] = %q, want aura send (full trace: %v)", i, a.trace[i], a.trace)
+		}
+	}
+	if a.trace[7] != "run:resume" {
+		t.Fatalf("last trace entry %q, want run:resume (full trace: %v)", a.trace[7], a.trace)
+	}
+}
+
+// (m) Fix 3b: nothing to send -> no pause at all.
+func TestPrepullAuraTopupNothingToSendDoesNotPause(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// Pre-populate 22888 on every hire so nothing is missing.
+	for _, b := range a.bots {
+		a.auras[b.GUID][22888] = true
+	}
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("nothing missing sent %v", a.sent)
+	}
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("nothing to send asked the run for %v", verbs)
+	}
+}
+
+// (n) Fix 3c: combat during the top-up (both before the first send and mid-batch) still sends resume.
+func TestPrepullAuraTopupCombatDuringSendsStillResumes(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// Combat starts when the pause lands (before the first send): resume must still go out.
+	a.combatOnPause = true
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("combat on pause: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("combat on pause sent %v", a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("combat on pause run verbs %q, want pause resume", got)
+	}
+}
+
+// (o) Fix 3 cap: a top-up pause is capped at 15 s; reaching it resumes the run and logs one WARN.
+func TestPrepullAuraTopupPauseCappedAt15Seconds(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	// Each .aura send advances the clock by 3 s plus the 1.5 s settle (4.5 s per target): after 4 sends (18 s >= 15 s),
+	// the cap stops the batch before the 5th target.
+	a.advanceOnAura = 3 * time.Second
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("capped top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 4 {
+		t.Fatalf("capped top-up sent %d lines (%v), want 4 before 15s cap", len(a.sent), a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("capped top-up run verbs %q, want pause resume", got)
+	}
+	warns := prepullNotes(w, "the run pause reached 15s")
+	if len(warns) != 1 {
+		t.Fatalf("cap WARN lines %q, want exactly 1", warns)
+	}
+}
+
+// Pause refused: top-up sends still go out unheld, no resume is sent, and the unheld warning is logged once per step.
+func TestPrepullAuraTopupPauseRefusedSendsUnheldWithoutResume(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.pauseRefused = "already paused by player"
+	// Drop 22888 so the first call leaves all 6 hires pending for a second poll on the same step.
+	for _, b := range a.bots {
+		a.drop[b.GUID] = map[uint32]bool{22888: true}
+	}
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up 1: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatalf("pause refused sent no auras, want unheld sends")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause" {
+		t.Fatalf("pause refused run verbs %q, want only pause (no resume)", got)
+	}
+	// A second poll on the same step must not repeat the unheld warning.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("top-up 2: fired %v err %v", fired, err)
+	}
+	warns := prepullNotes(w, "the top-up goes out unheld")
+	if len(warns) != 1 {
+		t.Fatalf("unheld WARN lines %q, want exactly 1 per step", warns)
+	}
+}
+
+// Run already paused before the top-up began: no pause and no resume are sent.
+func TestPrepullAuraTopupAlreadyPausedDoesNotPauseOrResume(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.paused = true
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	st := prepullRest(1)
+	st.State = tbm.RunPaused
+	if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+		t.Fatalf("already paused top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 6 {
+		t.Fatalf("already paused sent %d auras (%v), want 6", len(a.sent), a.sent)
+	}
+	if verbs := prepullHoldVerbs(a); len(verbs) != 0 {
+		t.Fatalf("already paused run verbs %v, want none", verbs)
+	}
+}
+
+// Slow pause acknowledgement: the 15 s cap starts before the pause request is sent, so resume still fires within 15 s
+// of the pause request even when the pause RPC itself takes most of the budget.
+func TestPrepullAuraTopupSlowPauseAckResumesWithin15sOfRequest(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.advanceOnPause = 10 * time.Second
+	a.advanceOnAura = 1 * time.Second
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	ctx := context.Background()
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || fired {
+		t.Fatalf("slow pause top-up: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 2 {
+		t.Fatalf("slow pause top-up sent %d lines (%v), want 2 within remaining 5s budget", len(a.sent), a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("slow pause top-up run verbs %q, want pause resume", got)
+	}
+	if elapsed := a.resumeAt.Sub(a.pauseReqAt); elapsed > prepullTopupPauseCap {
+		t.Fatalf("resume sent %s after pause request, want <= %s", elapsed, prepullTopupPauseCap)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 func TestMapSnapshotDrawsTheSessionSoFar(t *testing.T) {

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/auth"
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn/worldtest"
+	"github.com/TortoiseBots/turtle-agent/internal/auth"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn/worldtest"
 )
 
 // e2eChars builds SMSG_CHAR_ENUM with one character (Player::BuildEnumData layout).

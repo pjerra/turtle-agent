@@ -2,13 +2,13 @@
 type: Concept
 title: How placement works
 description: "What --place does inside the instance: the staged start, the corridor clear, the quiet check and the four tries."
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/place.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/place.go
 tags: [raids, placement]
 sources:
   - id: place
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/place.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/place.go
   - id: walk-place
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_place.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_place.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

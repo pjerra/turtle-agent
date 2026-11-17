@@ -2,13 +2,13 @@
 type: Reference
 title: Fault injection
 description: The --inject grammar, arbitration, pass rules, allow-list, cleanup, exits and inject.json.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/inject.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/inject.go
 tags: [raids, inject, reference]
 sources:
   - id: inject
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/inject.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/inject.go
   - id: inject-allow
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/inject_allow.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/inject_allow.go
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

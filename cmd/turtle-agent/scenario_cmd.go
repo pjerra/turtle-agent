@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/scenario"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/scenario"
 )
 
 // exitScenarioFail (14) and exitScenarioAbort (15): the run's checks failed

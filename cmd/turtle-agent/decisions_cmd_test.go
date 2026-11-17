@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbdash"
+	"github.com/TortoiseBots/turtle-agent/internal/tbdash"
 )
 
 // fakeDecisionsDash is the standalone pull's dashboard.

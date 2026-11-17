@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // PLAN-ULDAMAN-GRIMLOK (2026-10-21, eight Uldaman runs): every wipe and near wipe at the Ancient Stone Keeper and in Grimlok's corridor was a

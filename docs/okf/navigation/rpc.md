@@ -2,17 +2,17 @@
 type: Reference
 title: Navigation RPCs
 description: Every navigation call a logged-in agent answers, with params and answers.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
 tags: [navigation, reference, rpc]
 sources:
   - id: methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
   - id: navwalk
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/navwalk.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/navwalk.go
   - id: map-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
   - id: follow-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/follow_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/follow_methods.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

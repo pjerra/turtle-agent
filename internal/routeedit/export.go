@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // Pick reads a version of a plan for use: version 0 is the newest one that is checked (or accepted). A refused version has no plan file and is

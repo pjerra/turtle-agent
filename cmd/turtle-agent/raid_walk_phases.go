@@ -17,14 +17,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/slots"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/slots"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // noUntilText is the refusal of a server whose run leader has no `until` (spec 3.3 phase 9).
@@ -2255,6 +2255,15 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		}
 		if p.Name == "" {
 			continue
+		}
+		if w.opts.prepullAuraTopup {
+			// A death strips every aura: the per-bot mark names the death as the cause of the missing ids.
+			if dead := p.Dead || p.State == "d"; dead && !w.botAt[p.Name].dead {
+				if w.prepullTopupDied == nil {
+					w.prepullTopupDied = map[string]bool{}
+				}
+				w.prepullTopupDied[strings.ToLower(p.Name)] = true
+			}
 		}
 		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: at}
 	}

@@ -3,7 +3,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // BuildGroupInvite is CMSG_GROUP_INVITE: the name (GroupHandler.cpp:56-59).

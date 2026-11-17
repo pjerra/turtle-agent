@@ -3,9 +3,9 @@ package main
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The remote driver finds what the gossip step needs by asserting these interfaces on remoteGame (d.g.(X)): a missing method is no compile

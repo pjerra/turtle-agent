@@ -9,9 +9,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // gnomerDevWalkYd is the walk before the re-order: origin/dev's plan, measured here the same way (the sum of the navmesh

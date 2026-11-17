@@ -3,7 +3,7 @@ package main
 import (
 	"sync"
 
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 // The movement modes that walk the agent's character by themselves: a dungeon run (any mode) and the player follow.

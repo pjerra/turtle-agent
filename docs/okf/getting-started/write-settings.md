@@ -2,13 +2,13 @@
 type: Guide
 title: Write the settings file
 description: Create the JSON settings file with the server address, accounts, folders and RPC token.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/config/config.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/config/config.go
 tags: [getting-started, settings, config, rpc-auth]
 sources:
   - id: config
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/config/config.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/config/config.go
   - id: readme
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/README.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/README.md
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

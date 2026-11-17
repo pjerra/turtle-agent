@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The rest gate's shared parts: the targets a leg asks for, the watch on members whose mana is short, and the per-gate record

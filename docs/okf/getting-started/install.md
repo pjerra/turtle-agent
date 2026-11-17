@@ -2,15 +2,15 @@
 type: Guide
 title: Install and build
 description: Build turtle-agent with make, including the Go toolchain, cgo, and the test targets.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/Makefile
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/Makefile
 tags: [getting-started, install, build, cgo, make]
 sources:
   - id: makefile
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/Makefile
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/Makefile
   - id: readme
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/README.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/README.md
   - id: gomod
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/go.mod
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/go.mod
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

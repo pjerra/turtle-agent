@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // The druid, the fifth class of the brain (issue #80 step 4c): a healer (resto_druid), a caster (balance_druid), a cat (feral_cat_druid)

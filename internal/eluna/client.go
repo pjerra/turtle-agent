@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // DefaultTimeout is how long a one-shot answer is awaited when the client names no timeout.

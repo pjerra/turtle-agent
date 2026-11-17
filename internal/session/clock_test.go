@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 // driftHost is a host whose monotonic clock runs fast and whose wall clock is stepped back a

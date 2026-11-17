@@ -3,7 +3,7 @@
 Date: 2026-10-12. Status: draft for owner review.
 Owner decisions (2026-10-12): purpose = bot testing; route = our own small Go client (not a fork); MVP = login + chat/GM,
 party + combat log, move + attack; interface = local JSON-RPC + thin Python wrapper in wowharness; repo =
-github.com/pjerra/turtle-agent (private). Built even though another Turtle port of agent-wow exists (owner's call).
+github.com/TortoiseBots/turtle-agent (private). Built even though another Turtle port of agent-wow exists (owner's call).
 Background: spike report `~/TortoiseBots-audit/spike-agent-wow.md` (agent-wow `5ef4916` vs core `~/tortoise-wow` `5d79486`).
 
 ## Goal

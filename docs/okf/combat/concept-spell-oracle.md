@@ -2,15 +2,15 @@
 type: Concept
 title: The spell oracle
 description: What each knowledge-base spec casts every fight, and how finished fights are judged.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/kbspells/oracle.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/kbspells/oracle.go
 tags: [combat, oracle, concept]
 sources:
   - id: kbspells-oracle
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/kbspells/oracle.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/kbspells/oracle.go
   - id: kbspells-judge
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/kbspells/judge.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/kbspells/judge.go
   - id: rotations-doc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/ROTATIONS.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/ROTATIONS.md
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:50:00+01:00

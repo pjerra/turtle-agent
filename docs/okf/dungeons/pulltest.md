@@ -2,17 +2,17 @@
 type: Guide
 title: Score one pack
 description: Run a pull test on one pull group, read its table, and compare two results.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/pulltest.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/pulltest.go
 tags: [dungeon, pulltest, guide]
 sources:
   - id: pulltest
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/pulltest.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/pulltest.go
     title: The commander-mode pull-test scenario
   - id: pulltest-report
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/pulltest_report.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/pulltest_report.go
     title: Pull-test report, table, and comparison
   - id: pulltest-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/pulltest_cmd.go
     title: The pulltest shell command
 generated:
   by: muse-spark-1.3/omp

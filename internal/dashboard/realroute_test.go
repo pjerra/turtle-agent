@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // routeNav is a flat mesh (testNav) whose paths bend through a corner, so that a path is not the straight line; block names the goals it cannot

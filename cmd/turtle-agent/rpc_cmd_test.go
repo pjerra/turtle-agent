@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 // rpcTestAgent starts the REAL internal/rpc server (not a fake handler) with

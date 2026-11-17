@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // Staging a leg at its safe start for the TortoiseBots run leader

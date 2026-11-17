@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // dbcs are the three DBC tables the template points into by index.

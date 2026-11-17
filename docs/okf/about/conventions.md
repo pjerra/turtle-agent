@@ -2,7 +2,7 @@
 type: Guide
 title: How this documentation is written
 description: The format and writing rules every page in this bundle follows (OKF v0.2 plus a plain-language style).
-resource: https://github.com/pjerra/turtle-agent/tree/dev/docs/okf
+resource: https://github.com/TortoiseBots/turtle-agent/tree/dev/docs/okf
 tags: [docs, conventions]
 sources:
   - id: okf
@@ -27,11 +27,11 @@ Every page except `index.md` and `log.md` starts with a block like this:
 type: Guide            # required. One of: Overview, Tutorial, Guide, Concept, Reference, Troubleshooting
 title: Run a dungeon   # the page title
 description: One sentence saying what the page helps you do.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/<main source file or folder>
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/<main source file or folder>
 tags: [dungeon, commander]
 sources:               # the code or docs the page was written from
   - id: dungeon-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/dungeon.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/dungeon.go
 generated:
   by: <writer>/<version>
   at: 2026-11-05T21:30:00+01:00   # ISO 8601 with an explicit offset

@@ -2,11 +2,11 @@
 type: Reference
 title: Settings file
 description: Every settings file key with its default, validation, and an example.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/config/config.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/config/config.go
 tags: [getting-started, reference, settings]
 sources:
   - id: config
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/config/config.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/config/config.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

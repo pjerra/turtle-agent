@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 func hexsum(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }

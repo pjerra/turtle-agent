@@ -2,17 +2,17 @@
 type: Guide
 title: Hire the party and enter
 description: Bring bots online, hire a fresh party, get it into the dungeon, and pass the kit check.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/prepare.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/prepare.go
 tags: [dungeon, commander, hire, prepare, enter]
 sources:
   - id: prepare
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/prepare.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/prepare.go
     title: The prepare block
   - id: hire
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/hire.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/hire.go
     title: The hire step
   - id: dungeon-remote
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
     title: Commander-mode checks and remote start
 generated:
   by: muse-spark-1.3/omp

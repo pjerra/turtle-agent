@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // The driver reads the module's refusals out of the event log: TBM:ACTION_ERR replies (system messages or addon

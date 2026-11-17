@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // flaggedPlan has an area trigger with a stand point, a gossip step with a stand, a use_object with a stand, a needs_walk end, a check_skip hop and a

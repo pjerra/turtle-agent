@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/routeedit"
+	"github.com/TortoiseBots/turtle-agent/internal/routeedit"
 )
 
 // TestDashboardControlFlags: the flags that must stop the dashboard before it serves, and that no token is ever printed.

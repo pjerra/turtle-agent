@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
 )
 
 // The parsers against the packets of the live run of #61 (realpackets_live_test.go).

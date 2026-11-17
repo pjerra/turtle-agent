@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/privfile"
+	"github.com/TortoiseBots/turtle-agent/internal/privfile"
 )
 
 type LinuxProbe struct{}

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/mapview"
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/mapview"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 const mapUsage = "usage: turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json]\n" +

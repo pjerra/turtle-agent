@@ -2,15 +2,15 @@
 type: Concept
 title: Spell data and spell state
 description: The embedded spell tables, and what the agent knows about its own spells mid-fight.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/spellstate/spellstate.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/spellstate/spellstate.go
 tags: [combat, spells, concept]
 sources:
   - id: spells-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/spells/spells.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/spells/spells.go
   - id: spells-meta
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/spells/meta.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/spells/meta.go
   - id: spellstate-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/spellstate/spellstate.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/spellstate/spellstate.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:50:00+01:00

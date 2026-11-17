@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
 )
 
 // The three rate readings of the spells report: how fast a mob off the tank was answered, whether a crowd-control episode held,

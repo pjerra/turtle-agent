@@ -2,20 +2,20 @@
 type: Reference
 title: Remote-control calls
 description: commander, bot_view, tbm, tune, and lfg calls with every field and default.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/commander_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/commander_methods.go
 tags: [dungeon, commander, reference, rpc]
 sources:
   - id: commander-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/commander_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/commander_methods.go
     title: commander and bot_view RPC
   - id: tbm-click
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/tbm_click.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/tbm_click.go
     title: tbm_buttons, tbm_click, tbm_send RPC
   - id: tune-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/tune_methods.go
     title: tune_set and tune_list RPC
   - id: lfg-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
     title: The lfg RPC methods
 generated:
   by: muse-spark-1.3/omp

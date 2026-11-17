@@ -2,21 +2,21 @@
 type: Troubleshooting
 title: Getting started troubleshooting
 description: Real error messages from login, fleet, lease, slot setup and rpc, what they mean, and the fix.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
 tags: [getting-started, troubleshooting, login, lease, slots]
 sources:
   - id: login
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
   - id: lease
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
   - id: slot-setup
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/slot_setup_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/slot_setup_cmd.go
   - id: teardown
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/teardown_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/teardown_cmd.go
   - id: rpc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
   - id: config
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/config/config.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/config/config.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

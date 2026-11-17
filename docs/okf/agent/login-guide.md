@@ -2,14 +2,14 @@
 type: Guide
 title: Logging in
 description: Start the agent in a slot, pick the flags you need, and read the login output.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
 tags: [agent, login, cli, flags]
 sources:
   - id: login-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
     title: Login flags and flow
   - id: cli-args-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/cli_args.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/cli_args.go
     title: Slot, lease, rpc and teardown flags
 generated:
   by: muse-spark-1.3/omp

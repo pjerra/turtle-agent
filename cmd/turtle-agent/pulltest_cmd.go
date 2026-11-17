@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 const pulltestUsage = "usage: turtle-agent pulltest [--json] <result.json>\n" +

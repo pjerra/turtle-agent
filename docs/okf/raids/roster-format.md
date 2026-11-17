@@ -2,11 +2,11 @@
 type: Reference
 title: Roster file format
 description: The tb-raid-roster v1 and v2 batch format, specs and the faction check.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/roster.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/roster.go
 tags: [raids, roster, reference]
 sources:
   - id: roster
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/roster.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/roster.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:55:00+01:00

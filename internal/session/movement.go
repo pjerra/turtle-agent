@@ -5,9 +5,9 @@ import (
 	"math"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 // maxFlight bounds a flight; one that meets no floor by then lands where it is.

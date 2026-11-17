@@ -6,8 +6,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
 )
 
 // The place-unfreeze safety net (walks 54 and 55, Jin'do): after a `--place` two bots of every raid could stay frozen

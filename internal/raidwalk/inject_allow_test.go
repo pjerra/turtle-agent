@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func allowCtx() InjectCtx {

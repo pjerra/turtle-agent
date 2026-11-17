@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // give_items (prepare.go): `.additem <entry>` on a bot, for a test run. The line acts on the SELECTED player, so the bot is selected by GUID

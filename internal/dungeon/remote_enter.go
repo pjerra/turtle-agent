@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // The enter phase of a remote run (issue #83, deploy-19i BLOCKERS fix 1). A dungeon's instance bind belongs to the group, and a
