@@ -1153,9 +1153,9 @@ func autoSameTargets(a, b *autoState) bool {
 	}
 	for i := range a.goals {
 		x, y := a.goals[i].target, b.goals[i].target
-		// The boss-wipe budget is a goal option (--boss-wipe-max is taken out of Args), so an edit of it alone is a
-		// changed goal line too.
-		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax {
+		// The boss-wipe and attempt budgets are goal options (both flags are taken out of Args), so an edit of
+		// either alone is a changed goal line too.
+		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax || x.MaxAttempts != y.MaxAttempts {
 			return false
 		}
 		if len(x.Args) != len(y.Args) {
@@ -1591,7 +1591,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
 			BossWipes: g.bossWipes, BossWipeMax: g.target.BossWipeMax, Progressed: progressed, CapWaits: st.capWaits,
-			PracticeRelaunches: g.practiceRelaunches, PracticeKilledRetry: g.practiceKilledRetry,
+			PracticeRelaunches: g.practiceRelaunches, PracticeKilledRetry: g.practiceKilledRetry, MaxAttempts: g.target.MaxAttempts,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1752,7 +1752,9 @@ func (s *autoSupervisor) finish(st *autoState) {
 			esc = "stop: " + d.Reason
 		} else {
 			st.done = true
-			if st.stopping {
+			// A spent --max-attempts budget ends the strict run like a STOP file: done and stopped (never an
+			// escalation), so writeStatus reports it as stopped and finishAll exits 0 with the not-every-goal line.
+			if d.MaxAttemptsStop || st.stopping {
 				st.stopped = true
 			}
 		}

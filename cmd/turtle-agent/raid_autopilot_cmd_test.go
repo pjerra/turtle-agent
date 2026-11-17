@@ -762,6 +762,45 @@ func TestAutoExitTwoEscalates(t *testing.T) {
 	}
 }
 
+// A strict id (`--max-attempts 1`) ends after its first non-clear exit: the slot is torn down verified, the id is
+// done and stopped (never escalated), no `launch: attempt 2` appears, and the supervisor exits 0 with the
+// not-every-goal line (the walk 116 end this flag replaces: removing the last targets line was a no-op).
+func TestAutoMaxAttemptsOneStopsAfterTheFirstExit(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --max-attempts 1")
+	f.attempt("a-1", 18, 51, "paused: 15 dead: 21")
+	if code := f.run(); code != exitOK {
+		t.Fatalf("exit %d, want 0 (a spent budget is a clean stop, not an escalation)", code)
+	}
+	if args := f.args(); len(args) != 1 {
+		t.Fatalf("%d launches, want 1 (no attempt 2 after the spent budget):\n%s", len(args), strings.Join(args, "\n"))
+	}
+	if !strings.Contains(f.events(), "a stop: max attempts 1 reached") {
+		t.Fatalf("no max-attempts stop event:\n%s", f.events())
+	}
+	if strings.Contains(f.events(), "ESCALATE") {
+		t.Fatalf("a spent budget escalated:\n%s", f.events())
+	}
+	if strings.Contains(f.events(), "attempt 2") {
+		t.Fatalf("a second attempt launched after the spent budget:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "not every target's goals are met (0 escalated, 0 refused, 1 stopped)") {
+		t.Fatalf("no clean not-every-goal finish line:\n%s", f.events())
+	}
+	if status := f.statusFile(); !strings.Contains(status, "a goal=boss:14515 stopped (") {
+		t.Fatalf("status.txt does not report the id stopped:\n%s", status)
+	}
+	torn := false
+	for _, line := range f.teardowns() {
+		if strings.HasPrefix(line, "done") && strings.Contains(line, "a-1/slot") {
+			torn = true
+		}
+	}
+	if !torn {
+		t.Fatalf("the slot was not torn down verified:\n%s", strings.Join(f.teardowns(), "\n"))
+	}
+}
+
 // Exit 29 on a same-instance (--reuse-instance) placement: the autopilot retries ONCE in a fresh instance (no
 // --reuse-instance, same --from) and logs it; a second exit 29 stops the id with an ESCALATE line (walk 40: 45 ids
 // stopped on the first one and a person re-added each).
@@ -3407,6 +3446,21 @@ func TestAutoSameTargetsSeesABossWipeMaxEdit(t *testing.T) {
 	}
 	if autoSameTargets(line(5), line(3)) {
 		t.Fatal("a --boss-wipe-max edit is not seen as a changed goal line")
+	}
+}
+
+// An edit of only --max-attempts is a changed goal line (the flag is taken out of the raid-walk args, so the args
+// alone would look the same), like --boss-wipe-max.
+func TestAutoSameTargetsSeesAMaxAttemptsEdit(t *testing.T) {
+	line := func(max int) *autoState {
+		g := raidwalk.AutoGoal{Kind: "boss", Boss: 14834}
+		return &autoState{goals: []autoGoalState{{target: raidwalk.AutoTarget{ID: "a", Server: "srv", Slot: "1", Holder: "h", Goal: g, Start: "leg hakkar", Args: []string{"zg", "--sql", "/zg.sql"}, MaxAttempts: max}}}}
+	}
+	if !autoSameTargets(line(1), line(1)) {
+		t.Fatal("the same goal lines differ")
+	}
+	if autoSameTargets(line(1), line(2)) {
+		t.Fatal("a --max-attempts edit is not seen as a changed goal line")
 	}
 }
 
