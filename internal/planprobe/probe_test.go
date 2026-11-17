@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // fakeNav scripts the navmesh: a nil query keeps the neutral answer (a complete path, one floor at the asked height, the point

@@ -1,6 +1,6 @@
 package objects
 
-import "github.com/pjerra/turtle-agent/internal/packet"
+import "github.com/TortoiseBots/turtle-agent/internal/packet"
 
 // PlayerCoinage is PLAYER_FIELD_COINAGE (Objects/UpdateFields.h:238): the owner's copper.
 // Its index, 1176, was read off the enum by compiling the header.

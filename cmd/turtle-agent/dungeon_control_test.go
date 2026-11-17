@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
 )
 
 // ctlDriver is a RemoteDriver as the control methods see it: Pause and RunControl on every remote run (as the real one has both),

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 // The rotation files generated from the Turtle knowledge base (tools/kbrotgen) are committed next to the recipes: the

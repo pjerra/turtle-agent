@@ -2,11 +2,11 @@
 type: Guide
 title: Start and run the dashboard
 description: The dashboard flags, which agents and folders it reads, and how to reach it from another machine.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
 tags: [dashboard, guide]
 sources:
   - id: dashboard-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dashboard_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:37:00+01:00

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The party-strength half of the pre-run check (issue #266): the tank below the plan's tank_min_hp, and a hired bot of the other team than

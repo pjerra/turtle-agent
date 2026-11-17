@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dashreplay"
+	"github.com/TortoiseBots/turtle-agent/internal/dashreplay"
 )
 
 // exitReplayRefused: dashboard-replay will not send to a target that is not a

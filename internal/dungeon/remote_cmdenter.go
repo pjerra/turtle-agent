@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // Entering by `cmd enter` (TortoiseBots #939). A bot never sends CMSG_AREATRIGGER by itself and the module takes a trigger only from

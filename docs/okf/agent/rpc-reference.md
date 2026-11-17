@@ -2,50 +2,50 @@
 type: Reference
 title: RPC reference
 description: "Every core RPC method: params, result, and what can go wrong."
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
 tags: [agent, rpc, reference, status, movement, combat]
 sources:
   - id: methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
     title: Core RPC methods and param structs
   - id: rpc-server-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/rpc/server.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/rpc/server.go
     title: Error codes and the JSON-RPC envelope
   - id: brain-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
     title: brain_start, brain_stop, brain_status
   - id: follow-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/follow_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/follow_methods.go
     title: follow_start, follow_stop, follow_status
   - id: death-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/death_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/death_methods.go
     title: Death methods
   - id: group-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/group_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/group_methods.go
     title: Group methods
   - id: social-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
     title: addon_send, tbm, channels, gossip, taxi
   - id: item-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/item_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/item_methods.go
     title: use_item, loot, open_object, mount
   - id: npc-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/npc_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/npc_methods.go
     title: vendor, trainer, quest methods
   - id: pet-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/pet_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/pet_methods.go
     title: pet and pet_action
   - id: gameobject-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/gameobject_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/gameobject_methods.go
     title: gameobjects and use_object
   - id: trade-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trade_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/trade_methods.go
     title: trade
   - id: spell-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/spell_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/spell_methods.go
     title: spells and cast_state
   - id: map-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_methods.go
     title: map_snapshot
 generated:
   by: muse-spark-1.3/omp

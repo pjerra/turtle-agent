@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // BotCasts is one bot's casts, from a trace (1 Hz samples) or a finished fight (the module's exact counts, capped at 8 spell

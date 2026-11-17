@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 // Refusal is TortoiseBots saying no to one of the driver's orders: the TBM:ACTION_ERR|<intent>|<code>|<message> reply to

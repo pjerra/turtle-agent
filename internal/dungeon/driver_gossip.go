@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 // doGossip is the gossip step of the group driver: the leader is the agent's own character, so it is the one that talks, whatever `by`

@@ -1,6 +1,6 @@
 package gametest
 
-import "github.com/pjerra/turtle-agent/internal/packet"
+import "github.com/TortoiseBots/turtle-agent/internal/packet"
 
 // Vendor, trainer and quest packets written the way the core does. Core cites in this file
 // are tortoise-wow upstream/1181dev 5784fb0.

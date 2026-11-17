@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/auth"
-	"github.com/pjerra/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/auth"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
 )
 
 // holdTrace pins the hold's clock at at (UTC) with the env on, records every hold sleep and every realmd login in order, and makes

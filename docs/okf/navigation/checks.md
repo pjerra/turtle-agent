@@ -2,20 +2,20 @@
 type: Guide
 title: Check a route before the run
 description: Walk a plan on the navmesh and estimate what it wakes, before anyone logs in.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
 tags: [navigation, plans, aggro]
 sources:
   - id: plan-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
     title: The plan-check command
   - id: trash-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trash_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/trash_check_cmd.go
     title: The trash-check command
   - id: stage-check-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/stage_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/stage_check_cmd.go
     title: The stage-check command
   - id: route-oracle-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/route_oracle_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/route_oracle_cmd.go
     title: The route-oracle command
 generated:
   by: muse-spark-1.3/omp

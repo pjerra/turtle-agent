@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 const voidwalkerMinion = 8996 // the Warlock's pet: the summon spell 12746's misc value, a level 13-15 hostile (faction 554), no spawn row

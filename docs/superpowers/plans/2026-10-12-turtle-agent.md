@@ -55,7 +55,7 @@ All Go paths are relative to `~/turtle-agent`; Python paths are in `~/wow-play-h
 
 | File | Responsibility |
 | :--- | :--- |
-| `go.mod` | Module `github.com/pjerra/turtle-agent`, `go 1.27.1`, no requirements |
+| `go.mod` | Module `github.com/TortoiseBots/turtle-agent`, `go 1.27.1`, no requirements |
 | `Makefile` | `test` (gofmt check, vet, `go test -race`), `fmt`, `build`, `opcodes` |
 | `.gitignore` | Ignores `bin/`, raw local captures in `captures/`, any `settings.json` |
 | `NOTICE` | agent-wow MIT notice, source SHA 5ef4916, table of files taken |
@@ -144,7 +144,7 @@ Expected: `sha256sum` prints `.../go1.27.1.linux-amd64.tar.gz: OK` and the last 
 `~/turtle-agent/go.mod`:
 
 ```
-module github.com/pjerra/turtle-agent
+module github.com/TortoiseBots/turtle-agent
 
 go 1.27.1
 ```
@@ -291,7 +291,7 @@ func usage(w io.Writer) {
 - [ ] **Step 6: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS: `ok  github.com/pjerra/turtle-agent/cmd/turtle-agent`.
+Expected: PASS: `ok  github.com/TortoiseBots/turtle-agent/cmd/turtle-agent`.
 
 - [ ] **Step 7: Create `NOTICE`**
 
@@ -693,7 +693,7 @@ func ParseGUID(s string) (GUID, error) {
 - [ ] **Step 4: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS, `ok  github.com/pjerra/turtle-agent/internal/packet`.
+Expected: PASS, `ok  github.com/TortoiseBots/turtle-agent/internal/packet`.
 
 - [ ] **Step 5: Commit**
 
@@ -1259,7 +1259,7 @@ func (s Settings) GoString() string { return s.String() }
 - [ ] **Step 4: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS, `ok  github.com/pjerra/turtle-agent/internal/config`.
+Expected: PASS, `ok  github.com/TortoiseBots/turtle-agent/internal/config`.
 
 - [ ] **Step 5: Commit**
 
@@ -1665,7 +1665,7 @@ func toLE32(n *big.Int) [32]byte {
 - [ ] **Step 4: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS, `ok  github.com/pjerra/turtle-agent/internal/auth` (the edge searches finish in well under a second each).
+Expected: PASS, `ok  github.com/TortoiseBots/turtle-agent/internal/auth` (the edge searches finish in well under a second each).
 
 - [ ] **Step 5: Record provenance and commit**
 
@@ -1718,7 +1718,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 type fakeOpts struct {
@@ -1930,7 +1930,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // ClientBuild is the only build realmd knows (RealmList.cpp:39); realms show offline
@@ -2331,10 +2331,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
-	"github.com/pjerra/turtle-agent/internal/worldconn/worldtest"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn/worldtest"
 )
 
 var key40 = bytes.Repeat([]byte{0x11, 0x22, 0x33, 0x44}, 10)
@@ -2529,7 +2529,7 @@ import (
 	"bytes"
 	"compress/zlib"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // fingerprintAddons are the addons the anticheat reads its fingerprint from
@@ -2578,8 +2578,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // WorldBuild is the only build the world server accepts (game/Database/DBCStores.cpp:121-129).
@@ -2863,9 +2863,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 type Options struct {
@@ -3239,7 +3239,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 const (
@@ -3410,7 +3410,7 @@ func (l *Log) Wait(ctx context.Context, since uint64) error {
 - [ ] **Step 4: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS, `ok  github.com/pjerra/turtle-agent/internal/events` (with `-race`).
+Expected: PASS, `ok  github.com/TortoiseBots/turtle-agent/internal/events` (with `-race`).
 
 - [ ] **Step 5: Commit**
 
@@ -3452,8 +3452,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 func TestRoundTripAndMode(t *testing.T) {
@@ -3560,9 +3560,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 const (
@@ -3734,7 +3734,7 @@ func Stats(recs []Record) map[string]int {
 - [ ] **Step 4: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS, `ok  github.com/pjerra/turtle-agent/internal/capture`.
+Expected: PASS, `ok  github.com/TortoiseBots/turtle-agent/internal/capture`.
 
 - [ ] **Step 5: Commit**
 
@@ -3782,11 +3782,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
-	"github.com/pjerra/turtle-agent/internal/worldconn/worldtest"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn/worldtest"
 )
 
 var testKey = bytes.Repeat([]byte{0x5A, 0xA5}, 20)
@@ -4060,7 +4060,7 @@ package session
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Character is one SMSG_CHAR_ENUM entry (Player::BuildEnumData, Player.cpp:2176-2288).
@@ -4137,10 +4137,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 type Status string
@@ -4633,7 +4633,7 @@ func (s *Session) onLogoutComplete([]byte) error {
 - [ ] **Step 5: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS, `ok  github.com/pjerra/turtle-agent/internal/session` (with `-race`).
+Expected: PASS, `ok  github.com/TortoiseBots/turtle-agent/internal/session` (with `-race`).
 
 - [ ] **Step 6: Record provenance and commit**
 
@@ -4684,9 +4684,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 func settingsFile(t *testing.T, body string) string {
@@ -4779,12 +4779,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/auth"
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/auth"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
 )
 
 func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -4929,9 +4929,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 // scrubCmd fails when a capture contains an account name (upper case, as on the wire)
@@ -5098,9 +5098,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // fixture loads a capture recorded on m910q by a milestone's live step.
@@ -5198,7 +5198,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // buildChat transcribes ChatHandler::BuildChatPacket (Chat.cpp:2251-2314) for tests.
@@ -5306,7 +5306,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func TestNameQuery(t *testing.T) {
@@ -5362,7 +5362,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // ChatType is ChatMsg (SharedDefines.h:1358-1455).
@@ -5524,7 +5524,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // BuildNameQuery is CMSG_NAME_QUERY (QueryHandler.cpp:121-125).
@@ -5589,7 +5589,7 @@ func ParseCreatureQueryResponse(body []byte) (CreatureInfo, error) {
 - [ ] **Step 4: Run the tests**
 
 Run: `make -C ~/turtle-agent fmt test`
-Expected: PASS, `ok  github.com/pjerra/turtle-agent/internal/game`.
+Expected: PASS, `ok  github.com/TortoiseBots/turtle-agent/internal/game`.
 
 - [ ] **Step 5: Commit**
 
@@ -5633,10 +5633,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // chatBody transcribes ChatHandler::BuildChatPacket's default and say branches (Chat.cpp:2251-2314).
@@ -5741,10 +5741,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // namesWait bounds how long an event waits for a name before it is logged with the
@@ -5894,9 +5894,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 func (s *Session) registerChat() {
@@ -6164,12 +6164,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/session"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
-	"github.com/pjerra/turtle-agent/internal/worldconn/worldtest"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn/worldtest"
 )
 
 type agentRig struct {
@@ -6521,9 +6521,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/rpc"
-	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/rpc"
+	"github.com/TortoiseBots/turtle-agent/internal/session"
 )
 
 type empty struct{}
@@ -6620,7 +6620,7 @@ func rpcErr(err error) error {
 
 In `~/turtle-agent/cmd/turtle-agent/login.go`:
 
-1. Add `"github.com/pjerra/turtle-agent/internal/rpc"` to the imports.
+1. Add `"github.com/TortoiseBots/turtle-agent/internal/rpc"` to the imports.
 2. After the `stay := fs.Duration(...)` line add `rpcAddr := fs.String("rpc", "", "JSON-RPC listen address (default: the settings file's rpc)")`.
 3. Between the `select` that waits for `s.Ready()` and the line `var stayC <-chan time.Time`, insert:
 
@@ -6730,8 +6730,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 func fixture(t *testing.T, name string) []capture.Record {
@@ -6805,7 +6805,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // groupListBody transcribes Group::SendUpdate (Group.cpp:1402-1432) for the receiving player.
@@ -6950,7 +6950,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // BuildGroupInvite is CMSG_GROUP_INVITE: the name (GroupHandler.cpp:56-59).
@@ -7235,10 +7235,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // groupList transcribes Group::SendUpdate (Group.cpp:1402-1432).
@@ -7357,10 +7357,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 type PartyMember struct {
@@ -7758,7 +7758,7 @@ package game
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func TestMoveInfoRoundTrip(t *testing.T) {
@@ -7793,8 +7793,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // values writes Object::BuildValuesUpdate's mask and values (Object.cpp:553-556), for an
@@ -7951,7 +7951,7 @@ package objects
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func linearMove(g packet.GUID) []byte {
@@ -8001,8 +8001,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 func fixture(t *testing.T, name string) []capture.Record {
@@ -8073,7 +8073,7 @@ Expected: FAIL, `undefined: MoveInfo` (game) and `undefined: ParseUpdate`, `unde
 ```go
 package game
 
-import "github.com/pjerra/turtle-agent/internal/packet"
+import "github.com/TortoiseBots/turtle-agent/internal/packet"
 
 // Movement flags (Objects/Object.h:210-240).
 const (
@@ -8202,8 +8202,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // BlockType is ObjectUpdateType (UpdateData.h:33-41).
@@ -8444,7 +8444,7 @@ package objects
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 type SubPacket struct {
@@ -8571,7 +8571,7 @@ package objects
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func createBlock(g packet.GUID, typ uint8, x, y float32, vals map[uint16]uint32) Block {
@@ -8692,7 +8692,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 type ChangeKind uint8
@@ -8983,11 +8983,11 @@ import (
 	"compress/zlib"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 const youngWolf = packet.GUID(0xF13000012B000001) // entry 299
@@ -9107,11 +9107,11 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // moveRelays are the movement packets the server relays for other units: packed guid +
@@ -9255,7 +9255,7 @@ func (s *Session) onMoveRelay(body []byte) error {
 
 In `~/turtle-agent/internal/session/session.go`:
 
-1. Add `"github.com/pjerra/turtle-agent/internal/objects"` to the imports.
+1. Add `"github.com/TortoiseBots/turtle-agent/internal/objects"` to the imports.
 2. In `Options`, add `Store *objects.Store // nil: a new store`.
 3. In the `Session` struct, next to `log`, add `store *objects.Store`.
 4. In `New`, before building `s`, add `if opts.Store == nil { opts.Store = objects.NewStore() }`, and add `store: opts.Store,` to the struct literal.
@@ -9278,7 +9278,7 @@ and in `Status()` replace `return StatusInfo{` … `}` by `info := StatusInfo{` 
 	return info
 ```
 
-In `~/turtle-agent/cmd/turtle-agent/methods.go`, add `"github.com/pjerra/turtle-agent/internal/objects"` to the imports, the type
+In `~/turtle-agent/cmd/turtle-agent/methods.go`, add `"github.com/TortoiseBots/turtle-agent/internal/objects"` to the imports, the type
 
 ```go
 type unitsParams struct {
@@ -9404,7 +9404,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 const wolfGUID = packet.GUID(0xF13000012B000001)
@@ -9494,7 +9494,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // BuildSetSelection is CMSG_SET_SELECTION (MiscHandler.cpp:488-493).
@@ -9686,11 +9686,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func wolfNearby(h *harness) {
@@ -9834,11 +9834,11 @@ import (
 	"math"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 const (
@@ -10301,7 +10301,7 @@ func (s *Session) send(ctx context.Context, op uint16, body []byte) error {
 }
 ```
 
-In `~/turtle-agent/cmd/turtle-agent/methods.go`, add `"github.com/pjerra/turtle-agent/internal/packet"` to the imports, the types
+In `~/turtle-agent/cmd/turtle-agent/methods.go`, add `"github.com/TortoiseBots/turtle-agent/internal/packet"` to the imports, the types
 
 ```go
 type targetParams struct {
@@ -10508,9 +10508,9 @@ package game_test
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/game/gametest"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game/gametest"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 const (
@@ -10619,7 +10619,7 @@ Expected: FAIL, `package .../internal/game/gametest is not in std` / `no non-tes
 // session. It imports only packet, so any test package can use it.
 package gametest
 
-import "github.com/pjerra/turtle-agent/internal/packet"
+import "github.com/TortoiseBots/turtle-agent/internal/packet"
 
 // AttackerStateUpdate is Unit::SendAttackStateUpdate with one sub-damage (Unit.cpp:4892-4920).
 func AttackerStateUpdate(hitInfo uint32, attacker, victim packet.GUID, total, school, absorb uint32, resist int32, victimState, blocked uint32) []byte {
@@ -10743,7 +10743,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Hit info flags (UnitDefines.h:188-205).
@@ -11153,11 +11153,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/game/gametest"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/game/gametest"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func TestCombatEventsNamesAndPartyFilter(t *testing.T) {
@@ -11242,9 +11242,9 @@ Expected: FAIL: `melee []` — no combat handler is registered yet, so the packe
 package session
 
 import (
-	"github.com/pjerra/turtle-agent/internal/events"
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 func (s *Session) registerCombat() {
@@ -11617,7 +11617,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'wowharness.headless'`.
 ```python
 """Headless backend: the tester surface of client.Client / mcp.py over turtle-agent's JSON-RPC.
 
-turtle-agent (github.com/pjerra/turtle-agent) logs one character in without a game window and
+turtle-agent (github.com/TortoiseBots/turtle-agent) logs one character in without a game window and
 serves JSON-RPC 2.0 on a loopback port. Offsets here are event sequence numbers (status.last_seq).
 """
 import itertools

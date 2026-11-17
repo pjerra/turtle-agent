@@ -2,13 +2,13 @@
 type: Guide
 title: Heal and play a priest
 description: How the healer triages the party, picks heals and dispels, stands, and what the priest adds.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/heal.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/heal.go
 tags: [combat, healer, priest]
 sources:
   - id: heal-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/heal.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/heal.go
   - id: priest-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/priest.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/priest.go
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

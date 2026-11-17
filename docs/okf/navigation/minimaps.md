@@ -2,14 +2,14 @@
 type: Guide
 title: Put a real map under the run
 description: Extract the game's own map pictures and draw the run over them.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/minimap_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/minimap_cmd.go
 tags: [navigation, minimap, dashboard]
 sources:
   - id: minimap-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/minimap_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/minimap_cmd.go
     title: The minimap-extract command
   - id: minimap-extract
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/minimap/extract.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/minimap/extract.go
     title: The extraction pipeline
 generated:
   by: muse-spark-1.3/omp

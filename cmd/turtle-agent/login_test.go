@@ -11,13 +11,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/auth"
-	"github.com/pjerra/turtle-agent/internal/capture"
-	"github.com/pjerra/turtle-agent/internal/config"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/worldconn"
-	"github.com/pjerra/turtle-agent/internal/worldconn/worldtest"
+	"github.com/TortoiseBots/turtle-agent/internal/auth"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/config"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn"
+	"github.com/TortoiseBots/turtle-agent/internal/worldconn/worldtest"
 )
 
 func settingsFile(t *testing.T, body string) string {

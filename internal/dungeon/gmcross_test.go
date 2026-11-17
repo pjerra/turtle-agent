@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // gm_cross (remote_gmcross.go): a waypoint a GM account moves the party to, for a gap no walk crosses.

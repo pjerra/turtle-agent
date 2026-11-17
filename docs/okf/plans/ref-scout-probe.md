@@ -2,15 +2,15 @@
 type: Reference
 title: plan scout, plan-probe, patrol-record
 description: Every flag, default, and exit code of the scout, probe, and patrol recorder.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
 tags: [plans, reference]
 sources:
   - id: plan-scout
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_scout_cmd.go
   - id: plan-probe
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_probe_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_probe_cmd.go
   - id: patrol-record
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:58:00+01:00

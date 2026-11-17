@@ -2,11 +2,11 @@
 type: Guide
 title: Pets and their orders
 description: What the shared pet strategy sends, when it recalls, and what it never drives.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/pet.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/pet.go
 tags: [combat, pets]
 sources:
   - id: pet-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/pet.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/pet.go
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

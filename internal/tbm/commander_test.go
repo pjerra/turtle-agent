@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // fakeLink answers every command through reply (the module): the lines it returns are logged as system messages.

@@ -2,20 +2,20 @@
 type: Guide
 title: Dying and coming back
 description: Read death state, release, find the corpse, reclaim it, and accept a resurrect.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/death_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/death_methods.go
 tags: [agent, death, corpse, resurrect]
 sources:
   - id: death-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/death_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/death_methods.go
     title: death_status, release_spirit, corpse_query, reclaim_corpse, accept_resurrect, area_trigger
   - id: death-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/death.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/death.go
     title: Leader death recovery, corpse run, portal, bounds
   - id: dungeon-driver-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/dungeon/driver.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/dungeon/driver.go
     title: Driver limits ResWait CorpseRunTimeout MaxLeaderDeaths SicknessMax
   - id: session-death-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/death.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/death.go
     title: Reclaim delay packet, corpse query, resurrect offer
 generated:
   by: muse-spark-1.3/omp

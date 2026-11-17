@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // tools/run-uldaman.sh builds its dungeon_run params by hand: they must be what the agent accepts (no unknown key, a mode, a prepare

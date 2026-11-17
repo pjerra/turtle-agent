@@ -2,29 +2,29 @@
 type: Guide
 title: Talking, trading and the world
 description: Chat, whispers, group control, spells, items, loot, vendors, trainers, quests, flights and pets.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
 tags: [agent, chat, group, trade, spells, loot, quests, pets]
 sources:
   - id: methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
     title: chat, gm, group basics, cast, loot, roll
   - id: group-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/group_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/group_methods.go
     title: promote, assistant, convert_raid, raid_move, loot_method, disband
   - id: social-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
     title: addon_send, tbm, channels, gossip, taxi
   - id: trade-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trade_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/trade_methods.go
     title: trade params and result
   - id: npc-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/npc_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/npc_methods.go
     title: vendor, trainer, quest methods
   - id: item-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/item_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/item_methods.go
     title: use_item, loot, open_object, mount
   - id: pet-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/pet_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/pet_methods.go
     title: pet and pet_action
 generated:
   by: muse-spark-1.3/omp

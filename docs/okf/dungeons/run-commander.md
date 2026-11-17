@@ -2,14 +2,14 @@
 type: Guide
 title: Run a commander dungeon
 description: Drive a bot party through a dungeon from outside the group, start to finish.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
 tags: [dungeon, commander, guide]
 sources:
   - id: dungeon-remote
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
     title: Commander-mode checks and remote start
   - id: dungeon-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
     title: dungeon_run RPC, validation, and run lifecycle
 generated:
   by: muse-spark-1.3/omp

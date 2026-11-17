@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // PullJoiners is one pull attempt's joiner record: the pull's step and time,

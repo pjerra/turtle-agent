@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/mpq"
+	"github.com/TortoiseBots/turtle-agent/internal/mpq"
 )
 
 type mapPoint struct {

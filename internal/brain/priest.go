@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The priest, the third class of the brain (issue #80 step 4a): a healer (holy_priest: the healer role with the priest's kit) and a damage

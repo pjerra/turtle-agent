@@ -2,17 +2,17 @@
 type: Guide
 title: Lease a slot and set it up
 description: Take a test slot with a lease, build its private client dir, start the agent, and tear it down.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/slot_setup_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/slot_setup_cmd.go
 tags: [getting-started, slots, lease, teardown]
 sources:
   - id: slot-setup
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/slot_setup_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/slot_setup_cmd.go
   - id: lease
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
   - id: teardown
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/teardown_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/teardown_cmd.go
   - id: slots
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/slots/config.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/slots/config.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

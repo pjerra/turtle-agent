@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/kbspells"
-	"github.com/pjerra/turtle-agent/internal/spells"
-	"github.com/pjerra/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/kbspells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
 )
 
 // The spells oracle check scores what each party bot cast against the Turtle WoW knowledge-base spec lists

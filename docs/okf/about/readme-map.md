@@ -2,11 +2,11 @@
 type: Reference
 title: README section map
 description: Every section of the old long README and the docs pages that now hold its detail.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/okf/about/readme-map.md
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/okf/about/readme-map.md
 tags: [docs, readme, map]
 sources:
   - id: readme
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/README.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/README.md
     title: The old long README (about 5400 lines) whose detail moved here
 generated:
   by: omp
@@ -23,10 +23,10 @@ The old `README.md` (about 5400 lines) was a manual; this bundle is now the manu
 | Old README section | Docs pages that now hold it |
 |---|---|
 | Title, badges, intro (what it is, who it is for) | [What turtle-agent is](../getting-started/what-it-is.md), [Agent overview](../agent/overview.md) |
-| Branches and CI | [Install and build](../getting-started/install.md) (branch flow, `test` gate), [docs/CI.md](https://github.com/pjerra/turtle-agent/blob/dev/docs/CI.md) (jobs, secrets) |
+| Branches and CI | [Install and build](../getting-started/install.md) (branch flow, `test` gate), [docs/CI.md](https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/CI.md) (jobs, secrets) |
 | Quick start | [First login](../getting-started/first-login.md), [Write the settings file](../getting-started/write-settings.md), [Settings reference](../getting-started/settings-reference.md), [Log a character in](../getting-started/log-in.md) |
 | CLI | [Command map](../getting-started/command-map.md), [login reference](../getting-started/login-reference.md), [lease/slot reference](../getting-started/lease-slot-reference.md), [rpc/fleet reference](../getting-started/rpc-fleet-reference.md) |
-| What the server sees | [What turtle-agent is](../getting-started/what-it-is.md), [Settings reference](../getting-started/settings-reference.md) (`addons`, `shared_fingerprint`), [Log troubleshooting](https://github.com/pjerra/turtle-agent/blob/dev/docs/okf/getting-started/troubleshooting.md) (Warden section) |
+| What the server sees | [What turtle-agent is](../getting-started/what-it-is.md), [Settings reference](../getting-started/settings-reference.md) (`addons`, `shared_fingerprint`), [Log troubleshooting](https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/okf/getting-started/troubleshooting.md) (Warden section) |
 | Test slots, leases and teardown | [Slots and leases concepts](../getting-started/slots-leases-concepts.md), [Lease a slot](../getting-started/lease-slot.md), [lease/slot reference](../getting-started/lease-slot-reference.md), [rpc/fleet reference](../getting-started/rpc-fleet-reference.md) (token, envelope, exits) |
 | JSON-RPC API | [Drive the agent with RPC](../getting-started/drive-rpc.md), [RPC reference](../agent/rpc-reference.md) (envelope, codes) |
 | RPC authentication | [Drive the agent with RPC](../getting-started/drive-rpc.md), [Settings reference](../getting-started/settings-reference.md) (`rpc_auth`, `rpc_token`) |

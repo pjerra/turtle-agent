@@ -3,7 +3,7 @@ package objects
 import (
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // ccMechanics are the spell mechanics (SpellDefines.h Mechanics) of the crowd control that damage breaks and that a party

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
 )
 
 // Load reads testdata/captures/name from the repository root and fails the test when

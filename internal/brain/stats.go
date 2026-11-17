@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // What the brain counts about the character's own play (leader-mode pull test, README "Pull test in leader mode"): the numbers an A/B of

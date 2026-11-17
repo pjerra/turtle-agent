@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/netutil"
+	"github.com/TortoiseBots/turtle-agent/internal/netutil"
 )
 
 var runID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)

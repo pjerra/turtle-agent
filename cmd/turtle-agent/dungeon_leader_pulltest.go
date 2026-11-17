@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 
-	"github.com/pjerra/turtle-agent/internal/brain"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/brain"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // The halves of the leader-mode pull test (README "Pull test in leader mode") that need the session: the character's own `.respawn`, and

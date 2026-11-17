@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // npcFlagNames names the UNIT_NPC_FLAG bits a mob that is not a mob carries (Unit.h, 1.12).

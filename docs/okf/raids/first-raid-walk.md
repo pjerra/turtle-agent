@@ -2,13 +2,13 @@
 type: Tutorial
 title: Walk your first raid
 description: Run one trash walk on a test server from the first command to the summary.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
 tags: [raids, raid-walk, tutorial]
 sources:
   - id: walk-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
   - id: tiers
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/tiers.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/tiers.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:35:00+01:00

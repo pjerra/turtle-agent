@@ -3,7 +3,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // InfiniteCooldown is the category cooldown the core sends for a cooldown it keeps for a

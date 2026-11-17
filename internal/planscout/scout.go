@@ -4,8 +4,8 @@
 package planscout
 
 import (
-	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/planlint"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/planlint"
 )
 
 // Format and Version are the report's file format (tb-plan-scout v1).

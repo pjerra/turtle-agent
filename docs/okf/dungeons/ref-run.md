@@ -2,20 +2,20 @@
 type: Reference
 title: Run calls
 description: Every dungeon_run field with its default, plus status, stop, pause, stage, and plan check.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
 tags: [dungeon, reference, rpc]
 sources:
   - id: dungeon-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
     title: dungeon_run RPC, validation, and run lifecycle
   - id: dungeon-remote
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_remote.go
     title: Commander-mode checks and remote start
   - id: stage
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/stage_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/stage_methods.go
     title: dungeon_stage RPC
   - id: plan-check
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_check_cmd.go
     title: plan-check CLI and plan_check RPC
 generated:
   by: muse-spark-1.3/omp
