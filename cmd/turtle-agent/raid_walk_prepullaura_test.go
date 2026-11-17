@@ -1,10 +1,10 @@
 package main
 
-// The raid-walk --prepull-aura test tool: at the step before each boss row (whatever its phase), or on the boss row
-// itself when the run passed that step too fast to pause, the walk pauses the run, puts the flag's lists on the
-// living party with the gm_aura RPC (a confirmed select then ".aura <id>"), reads them back into prepull-auras.json
-// and resumes. Once per boss row, never at or after the pull, a pause is always resumed, and an aura on the
-// commander is a miss like any other.
+// The raid-walk --prepull-aura test tool: at the step before each boss row (whatever its phase), or where the paused
+// run stands when it passed that step too fast to pause (the boss row itself or beyond it, the boss not engaged), the
+// walk pauses the run, puts the flag's lists on the living party with the gm_aura RPC (a confirmed select then
+// ".aura <id>"), reads them back into prepull-auras.json and resumes. Once per boss row, never at or after the pull, a
+// pause is always resumed, and an aura on the commander is a miss like any other.
 import (
 	"bytes"
 	"context"
@@ -45,13 +45,23 @@ type prepullAgent struct {
 	selfCombat bool
 
 	// arenaCombat names the units the fresh `q units` read of a boss arena finds in combat, arenaCBUnknown names the
-	// units it lists without a `cb` field (a degraded reply), arenaTrunc makes that reply truncated, and arenaErr
-	// makes the `tt` call fail (the toolkit's refusal).
+	// units it lists without a `cb` field (a degraded reply), arenaAlive names the live units it lists out of combat
+	// (a boss standing in his arena, not yet pulled), arenaDead names the corpses it lists (`dead`, with a `cb` too, as
+	// the toolkit sends for a corpse), arenaTrunc makes that reply truncated, and arenaErr makes the `tt` call fail
+	// (the toolkit's refusal).
 	arenaCombat    []string
 	arenaCBUnknown []string
-	arenaTrunc     bool
-	arenaErr       error
-	ttCmds         []string
+	arenaAlive     []string
+	arenaDead      []string
+	// arenaReads counts the `q units` arena reads the fake answered. arenaDeadAt and arenaEmptyAt make the read at
+	// or after that 1-based index list the boss dead instead of alive, or list no units at all: the gate's read and
+	// the paused run's own read are two reads, and a test proves the second one's verdict.
+	arenaReads   int
+	arenaDeadAt  int
+	arenaEmptyAt int
+	arenaTrunc   bool
+	arenaErr     error
+	ttCmds       []string
 
 	sent          []string      // "<bot name> <id>" per gm_aura call, in order
 	verbs         []string      // every `run <verb>` the commander asked for
@@ -357,12 +367,29 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		if a.arenaErr != nil {
 			return a.arenaErr
 		}
+		a.arenaReads++
+		if a.arenaEmptyAt > 0 && a.arenaReads >= a.arenaEmptyAt {
+			v = ttReplyOf(a.t, map[string]any{"units": []any{}, "n": 0, "trunc": a.arenaTrunc})
+			break
+		}
+		bossDead := a.arenaDeadAt > 0 && a.arenaReads >= a.arenaDeadAt
 		var units []any
 		for i, name := range a.arenaCombat {
 			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x200+i), "n": name, "e": 14834, "cb": true})
 		}
 		for i, name := range a.arenaCBUnknown {
 			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x300+i), "n": name, "e": 14834})
+		}
+		if !bossDead {
+			for i, name := range a.arenaAlive {
+				units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x400+i), "n": name, "e": 14834, "cb": false, "dead": false})
+			}
+		}
+		for i, name := range a.arenaDead {
+			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x500+i), "n": name, "e": 14834, "cb": true, "dead": true})
+		}
+		if bossDead {
+			units = append(units, map[string]any{"g": "0xF1300000000600", "n": "Hakkar", "e": 14834, "cb": true, "dead": true})
 		}
 		v = ttReplyOf(a.t, map[string]any{"units": units, "n": len(units), "trunc": a.arenaTrunc})
 	case "commander":
@@ -713,10 +740,11 @@ func TestPrepullAuraFiresOnAPlainMoveStepBeforeTheBoss(t *testing.T) {
 }
 
 // The run passed the step before the boss too fast for the pause: the pause lands on the boss row itself, before the
-// pull, so the auras still go out and verify.
+// pull, with the boss standing alive out of combat in the fresh arena read, so the auras still go out and verify.
 func TestPrepullAuraAdvancedPauseAtTheBossRowFires(t *testing.T) {
 	a := newPrepullAgent(t)
 	a.statusStep = 5 // the pause confirms the run already stands on boss row 5
+	a.arenaAlive = []string{"Hakkar"}
 	w := newPrepullWalk(t, a, "role=all:22888")
 	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
 	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
@@ -734,11 +762,240 @@ func TestPrepullAuraAdvancedPauseAtTheBossRowFires(t *testing.T) {
 	}
 }
 
+// Walk 113, raid st13b: the server's run completed steps 421-424 in one tick, so the pause for boss row 425 was
+// confirmed on step 426 — past the boss row, not on it. Case 1: the boss is alive and nothing in his arena is in
+// combat, so the auras go out where the paused run stands, verify and the walk resumes. The assertion is that fire and
+// no exit: old code returns the "past the step before it" stop on any overshoot.
+func TestPrepullAuraPausePastTheBossRowFiresWhenTheBossIsNotEngaged(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6 // the pause confirms the run already passed boss row 5 and stands on 6
+	a.arenaAlive = []string{"Hakkar"}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("pause past the boss row: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the pause past the boss row sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	// The fresh arena read is what rules out an engaged boss on the overshoot; the fire's own combat watch is separate.
+	if len(a.ttCmds) != 1 || a.ttCmds[0] != "q units 60 100 200 10 all" {
+		t.Fatalf("arena reads %v", a.ttCmds)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
+		t.Fatalf("boss rows %v", f.BossRows)
+	}
+}
+
+// Case 2, the unit read shape: the overshot pause's fresh arena read lists the boss's corpse (the live report: the
+// step-418 pull killed Mandokir before his boss row). Preparing a corpse is not the run's test: no aura goes out,
+// one line says "boss already dead, no pre-pull fire", the row is not tried again, and the run is resumed and
+// continues. Old code treated a dead unit as "not engaged" and fired the whole batch at the corpse.
+func TestPrepullAuraPausePastTheBossRowWithTheBossDeadSendsNothing(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6
+	a.arenaDead = []string{"Hakkar"} // the corpse, with its `cb` too: a dead boss is no combatant and no pull
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil {
+		t.Fatalf("the dead overshoot failed the walk: %v", err)
+	}
+	if !fired {
+		t.Fatal("the dead overshoot did not report the hold it made")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the dead overshoot sent %v", a.sent)
+	}
+	if len(a.ttCmds) != 1 || a.ttCmds[0] != "q units 60 100 200 10 all" {
+		t.Fatalf("arena reads %v", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") {
+		t.Fatalf("run.log does not say the boss was dead:\n%s", log)
+	}
+	if n := strings.Count(log, "boss already dead, no pre-pull fire"); n != 1 {
+		t.Fatalf("the dead line appears %d times, want one:\n%s", n, log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the dead row was recorded as fired")
+	}
+	// No fire, so no evidence file: the row never prepared anything.
+	if _, err := os.Stat(filepath.Join(w.outDir, prepullAuraFileName)); !os.IsNotExist(err) {
+		t.Fatalf("%s exists after a run with no fire (%v)", prepullAuraFileName, err)
+	}
+	// The row is done: its own status neither pauses again nor fails as "never prepared".
+	before := len(a.verbs)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 6, Kind: planexport.KindMove, Phase: "walk", Note: "walking on"}
+	if fired, err := w.prepullAuraSendPending(context.Background(), boss, false); err != nil || fired {
+		t.Fatalf("a later status of the dead row: fired %v err %v", fired, err)
+	}
+	if len(a.verbs) != before {
+		t.Fatalf("a later status of the dead row asked the run %v", a.verbs[before:])
+	}
+}
+
+// Case 2, the walk's record shape: the boss died to an earlier pull and has despawned, so the arena read lists no
+// unit of his at all. The walk's own boss record for the row (a `boss down` status, a fight record or the end credit
+// — here the fight record the live walk had) already holds the kill, so the overshoot reads the arena not at all: no
+// aura, the same one line, and the run continues.
+func TestPrepullAuraPausePastTheBossRowWithTheBossRowAlreadyKilledSendsNothing(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.bossTracks = map[bossKey]*bossStepTrack{
+		{step: 5}: {entry: 14834, step: 5, engaged: true, killed: true, evidence: "fight 9-1: Hakkar killed (outcome kill)"},
+	}
+	prepullRunLog(t, w)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil {
+		t.Fatalf("the killed-row overshoot failed the walk: %v", err)
+	}
+	if !fired {
+		t.Fatal("the killed-row overshoot did not report the hold it made")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the killed-row overshoot sent %v", a.sent)
+	}
+	if len(a.ttCmds) != 0 {
+		t.Fatalf("arena reads %v (want none: the walk's record already holds the kill)", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") {
+		t.Fatalf("run.log does not say the boss was dead:\n%s", log)
+	}
+	if !strings.Contains(log, "the walk's boss record holds the kill") {
+		t.Fatalf("run.log does not name the record that held the kill:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the killed row was recorded as fired")
+	}
+	// The row's own status is no failure either: no second pause, no "never prepared" stop.
+	before := len(a.verbs)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	if fired, err := w.prepullAuraSendPending(context.Background(), boss, false); err != nil || fired {
+		t.Fatalf("the killed row's own status: fired %v err %v", fired, err)
+	}
+	if len(a.verbs) != before {
+		t.Fatalf("the killed row's own status asked the run %v", a.verbs[before:])
+	}
+}
+
+// Case 3: the overshot pause cannot prove the boss's state, so the walk still fails closed with no aura and the run
+// resumed — an arena read that lists no unit of the boss (a despawned corpse or a read of the wrong place), a read
+// that fails, and a read that lists a unit in combat. The not-found shape is the one the old "not engaged" reading got
+// wrong: no corpse row and no live row cannot be told apart from an unread arena, so it must not fire.
+func TestPrepullAuraPausePastTheBossRowWithoutAProvableBossFails(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(*prepullAgent)
+		reason string
+	}{
+		{"no boss unit in the read", func(*prepullAgent) {}, "lists no such boss"},
+		{"the arena read fails", func(a *prepullAgent) { a.arenaErr = errors.New("point_far") }, "arena read"},
+		{"the boss is engaged", func(a *prepullAgent) { a.arenaCombat = []string{"Hakkar"} }, "engaged"},
+	} {
+		a := newPrepullAgent(t)
+		tc.setup(a)
+		a.statusStep = 6
+		w := newPrepullWalk(t, a, "role=all:22888")
+		prepullRunLog(t, w)
+		st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+		fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+		code, reason := stopInfo(err)
+		if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, tc.reason) {
+			t.Fatalf("%s: fired %v, code %d, reason %q", tc.name, fired, code, reason)
+		}
+		if len(a.sent) != 0 {
+			t.Fatalf("%s: sent %v", tc.name, a.sent)
+		}
+		if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+			t.Fatalf("%s: verbs %q", tc.name, got)
+		}
+		if w.prepullAuraSent[5] {
+			t.Fatalf("%s: the row was recorded as done", tc.name)
+		}
+		if strings.Contains(prepullRunLogText(t, w), "boss already dead") {
+			t.Fatalf("%s: an unproven boss was reported dead", tc.name)
+		}
+	}
+}
+
+// The same overshoot with the boss engaged: the pull has started, so the walk still fails closed with no aura, and the
+// run is resumed as before. Old code also failed, but on the step alone and without the arena read; the assertion here
+// is the reason: an engaged boss, not merely a step past the row.
+func TestPrepullAuraPausePastTheBossRowWithTheBossEngagedFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 6
+	a.arenaCombat = []string{"Hakkar"}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "past the step before it") || !strings.Contains(reason, "engaged") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.ttCmds) != 1 {
+		t.Fatalf("arena reads %v (want the one the overshoot reads)", a.ttCmds)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the engaged overshoot sent %v", a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the engaged row was recorded as done")
+	}
+}
+
+// The ordinary pause stands on the step before the boss row: no arena read is needed (the fire's own combat watch is
+// the only gate) and the fire, the verification and the resume are the pre-existing path. The control for the two
+// overshoot tests above.
+func TestPrepullAuraPauseOnTheStepBeforeTheBossRowIsUnchanged(t *testing.T) {
+	a := newPrepullAgent(t) // statusStep 4: the pause confirms the run stands on the step before boss row 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("pause on the step before: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the pause on the step before sent nothing")
+	}
+	if len(a.ttCmds) != 0 {
+		t.Fatalf("arena reads %v (want none on the normal path)", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+}
+
 // The boss row became current before any fire: still before the pull (begin, no combat, the boss's arena read fresh
 // out of combat), so the walk pauses on the row, fires, verifies and resumes.
 func TestPrepullAuraBossRowCurrentPausesFiresAndResumes(t *testing.T) {
 	a := newPrepullAgent(t)
 	a.statusStep = 5
+	a.arenaAlive = []string{"Hakkar"} // the fresh read finds him standing, out of combat
 	w := newPrepullWalk(t, a, "role=all:22888")
 	// The tracker holds the boss unengaged: alive at 100 %, no target, no live target. The fresh read is the one that
 	// decides, and it is clean too.
@@ -766,6 +1023,167 @@ func TestPrepullAuraBossRowCurrentPausesFiresAndResumes(t *testing.T) {
 	f := readPrepullAuraFile(t, w)
 	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
 		t.Fatalf("boss rows %v", f.BossRows)
+	}
+}
+
+// The boss row became current with its boss already dead: the same case 2 the overshot pause has, on the row itself.
+// The gate's fresh read lists the corpse, so no aura goes out, no pause is even asked for, one run.log line says
+// "boss already dead, no pre-pull fire", and the run continues. Old code read the corpse as "not engaged" and fired
+// the batch at it.
+func TestPrepullAuraBossRowCurrentWithTheBossDeadSkipsTheFire(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	a.arenaDead = []string{"Hakkar"} // the corpse, with its `cb` too: a dead boss is no combatant and no pull
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	if err != nil {
+		t.Fatalf("the dead boss row failed the walk: %v", err)
+	}
+	if fired {
+		t.Fatal("the dead boss row reported a fire")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the dead boss row sent %v", a.sent)
+	}
+	if len(a.verbs) != 0 {
+		t.Fatalf("the dead boss row asked the run %v (want no pause: the gate's read decides)", a.verbs)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") {
+		t.Fatalf("run.log does not say the boss was dead:\n%s", log)
+	}
+	if !strings.Contains(log, "the arena read shows the boss dead") {
+		t.Fatalf("run.log does not name the read:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the dead row was recorded as fired")
+	}
+	// The row is done: its own later status neither read the arena again nor fails as "never prepared".
+	reads := len(a.ttCmds)
+	if fired, err := w.prepullAuraSendPending(context.Background(), boss, false); err != nil || fired {
+		t.Fatalf("the dead row's second status: fired %v err %v", fired, err)
+	}
+	if len(a.ttCmds) != reads || len(a.verbs) != 0 {
+		t.Fatalf("the dead row's second status read/asked again: %v / %v", a.ttCmds[reads:], a.verbs)
+	}
+}
+
+// The boss row became current with the walk's own record already holding the kill (the boss died to an earlier pull
+// and has despawned): no arena read, no pause, the same one line, and the run continues.
+func TestPrepullAuraBossRowCurrentWithTheKilledRecordSkipsTheFire(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.bossTracks = map[bossKey]*bossStepTrack{
+		{step: 5}: {entry: 14834, step: 5, engaged: true, killed: true, evidence: "fight 9-1: Hakkar killed (outcome kill)"},
+	}
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	if err != nil || fired {
+		t.Fatalf("the killed boss row: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("the killed boss row sent %v / asked %v", a.sent, a.verbs)
+	}
+	if len(a.ttCmds) != 0 {
+		t.Fatalf("arena reads %v (want none: the walk's record already holds the kill)", a.ttCmds)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire") || !strings.Contains(log, "the walk's boss record holds the kill") {
+		t.Fatalf("run.log does not name the dead row and the record:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the killed row was recorded as fired")
+	}
+}
+
+// The boss row became current before the pull and the fresh arena read lists no unit of the boss: the state cannot be
+// proven, so the walk fails closed as the overshot pause does, with no aura and no pause. Old code read the empty
+// arena as "not engaged" and fired.
+func TestPrepullAuraBossRowMissingFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5 // no arena units at all: the read lists nothing
+	w := newPrepullWalk(t, a, "role=all:22888")
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	code, reason := stopInfo(err)
+	if fired || code != exitRaidWalkFailed || !strings.Contains(reason, "boss row 5") || !strings.Contains(reason, "never sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("the missing boss sent %v / asked %v", a.sent, a.verbs)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
+	}
+}
+
+// Case 2 on the boss row's own pause (fireRow == bossRow): the gate's read finds him alive, so the walk pauses, and
+// the confirmed pause's read finds him dead — the gate said fire and the pause says skip. No aura goes out, one line
+// says so, the pause is resumed and the run continues.
+func TestPrepullAuraBossRowPausedOnAfterTheBossDiedSkipsTheFire(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5 // the pause confirms the run stands on boss row 5
+	a.arenaAlive = []string{"Hakkar"}
+	a.arenaDeadAt = 2 // the gate's read: alive; the confirmed pause's read: dead
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	if err != nil {
+		t.Fatalf("the died-before-the-pause row: %v", err)
+	}
+	if !fired {
+		t.Fatal("the died-before-the-pause row did not report the hold it made")
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the died-before-the-pause row sent %v", a.sent)
+	}
+	if len(a.ttCmds) != 2 {
+		t.Fatalf("arena reads %v (want the gate's and the pause's)", a.ttCmds)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "boss row 5: boss already dead, no pre-pull fire (the run paused at step 5") {
+		t.Fatalf("run.log does not name the paused dead row:\n%s", log)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the dead row was recorded as fired")
+	}
+}
+
+// Item 2 on the boss row's own pause: the gate's read found the boss, the confirmed pause's read lists no unit of
+// him (he despawned or the second read fell elsewhere). The pause must fail closed with no aura, exactly as the
+// overshot path does; old code read the empty arena as "not engaged" and fired.
+func TestPrepullAuraBossRowPausedOnWithTheBossMissingFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	a.arenaAlive = []string{"Hakkar"}
+	a.arenaEmptyAt = 2 // the gate's read: alive; the confirmed pause's read: nothing
+	w := newPrepullWalk(t, a, "role=all:22888")
+	prepullRunLog(t, w)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "paused on the boss row") || !strings.Contains(reason, "lists no such boss") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the missing boss sent %v", a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
+	}
+	if strings.Contains(prepullRunLogText(t, w), "boss already dead") {
+		t.Fatal("an unproven boss was reported dead")
 	}
 }
 
