@@ -2395,7 +2395,14 @@
             {"x": -11726.1, "y": -1736.4, "z": 15.49},
             {"x": -11730.4, "y": -1743.03, "z": 15.28}
           ],
-          "radius": 13.2
+          "radius": 13.2,
+          "approach": [
+            {"x": -11788.2, "y": -1735.1, "z": 11.06},
+            {"x": -11774.3, "y": -1734.8, "z": 15.35},
+            {"x": -11764.5, "y": -1733.2, "z": 17.19},
+            {"x": -11742.4, "y": -1735.9, "z": 17.53}
+          ],
+          "stand_pull": true
         },
         {
           "entries": [15043, 15043, 15043, 15043, 15043],
@@ -2563,6 +2570,7 @@
       ],
       "skip": [11374, 14758, 15091],
       "notes": [
+        "WALK 116 STEP 581 (2026-11-17, leg 7 pull group 4, the 15043 four at -11723 -1734.6): the gather anchor was the lake bed (-11774.7 -1776.5 -15.3) and the lead could never stand on it (walk 113 and 116 both paused at 581/582 with the anchor 11.6 yd above the lead). The pack's plateau is a dry island: on map 309 every route onto it swims, measured on the server path with LiquidAt every 2 yd (g3 -\u003e -11774 -1735: 52.7 of 75.4 yd wet; g3 -\u003e the stand: 45.2 of 116.2; g5 -\u003e the stand: 20.5 of 109.0; the ring band's ledge -11745 -1720 is 26.4 yd from the pack centre in a straight line but 403.3 yd of server path, so it cannot be a pull stand, and its shelf is 21.9 yd of walkable ground). The mouth of the walk's own climb is used instead: four dry approach rows the raid walked in walk 116 st16a-1 (the lead Darin at 17:07:48 UTC, -11788.2 -1735.1 z 10.5, snapped to the floor 11.06; his party cells at 17:08:02, -11774.3 -1734.8 and -11764.5 -1733.2) up the west rim to a stand on the plateau's edge (-11742.4 -1735.9, floor 17.53, 19.5 yd from the pack centre), stand_pull so the pack comes to the rim and the gather anchor is the dry stand (no anchor under water). The first hop is the swim the raid already made (53.1 yd of water of the 53.0 yd hop from group 3's row), the three rim hops are dry (14.6, 10.1 and 22.3 yd, 0 water). plan-check --floor-aware --approach-hops: 848 -\u003e 852 points, 632 -\u003e 637 lint findings (128 -\u003e 127 fail); the pack row's 122.8 yd hop_len warning and the gather's wet anchor are gone.",
         "WALK 104 T28 (2026-11-15, leg 7; TortoiseBots-audit tests/raid-zg-walk104 fz5c-1, fz5d-1, fz6e-2): every run stopped at step 553, the lead bot in water 41.9-45.6 yd from its leg point (lead in water: yes; cmd move path type 0x81; its own move failing: stay walk resting after 3 failed walks), the exporter's one water hop between the north shore's stand (-11901.4 -1497.9) and the islet rows -11873 -1634.4 (pull group 2) and -11869.8 -1668.6 / -11875.3 -1694.9 (group 3's cut and pull). The two 15043 packs on the lake islet are dropped: no dry floor reaches them (plan-probe water 40-160 yd from the north shore, the west rim, the lower ring and the east shore; every hop in game is a swim the playerbot lead cannot take), which is the walk-29 fix's own treatment of the water-only 11374 fish. The lower-ring pack (-11901.3 -1733.0) takes a dry approach around the lake's west rim instead: (-11910 -1523.8 26.2, fz5d-1 frames), (-11944.9 -1532.6 40.2, fz6a-1 frames), (-11946.7 -1600 37.3, fz6d-1 frames) and (-11886.388 -1751.4547 12.036596, the plan's own ring row); every hop is a path-check server 0x1 ground path and plan-probe 0 water, and the last point stands 22 yd from the ring pack. Leg 7 689 to 710 steps in the export (4 approach rows and the rim cut replace 3 rows on the islet); plan-check 0 failing points, cut fails 134 to 132.",
         "WALK 29 FIX 6 (2026-11-03, leg 7; research/zg-w29/WALK29-FIX-PLAN.md §5, lead decision): rows 620-637 walked the raid into the lake to pull single Hooktooth Frenzies (11374), which are fish: 14 of the leg's 38 groups were 11374-only (groups 3, 4, 5, 7, 8, 16, 17, 24, 25, 26, 30, 31, 33 and 37 at z -14.4 to +2.6) and all 30 spawns are in water. Runs e/e-r1..r3 had 0 deaths but stopped for good: the lead sat at -11855..-11858 -1506..-1508 z -13 at step 624 and -11885.5 -1488.1 z 7.8 at step 628, stuck 35.3-36.7 yd from the goal with its own move failing (lead in water: yes; cmd move path type 0x81). 11374 is in the leg's skip now and the 14 fish-only groups and their approach rows are gone; every remaining point of the leg is on land (z 2.2 and above in the lake basin). The leg's own route (vias z 78.7/65.3/51.0, to z 19.7) is unchanged.",
         "ROUTE-REGEN 0dec623+local (2026-11-03, audit §4.2): 8 points, minimum aggro margin 9.3 yd, minimum wall 4.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut",

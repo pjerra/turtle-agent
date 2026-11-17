@@ -113,3 +113,96 @@ func TestZulGurubHakkarOuterRingApproach(t *testing.T) {
 		t.Errorf("the stand is %.1f yd from the pack centre, want at most 50 (RunLeaderReachYd)", d)
 	}
 }
+
+// zgHakkarOuterGroup4Approach is the dry rim walk that reaches the plateau pack's edge in pull group 4 (the 15043 four at
+// -11723.0 -1734.6): the first point is the lead bot Darin's own position in walk 116 st16a-1 (17:07:48 UTC, z 10.5, the
+// floor 11.06), the next two are its party cells (17:08:02), and the stand is the plateau's edge (-11742.4 -1735.9, floor
+// 17.53). The first hop is the swim the raid itself made; the three rim hops are dry.
+var zgHakkarOuterGroup4Approach = []dungeon.Point{
+	{X: -11788.2, Y: -1735.1, Z: 11.06},
+	{X: -11774.3, Y: -1734.8, Z: 15.35},
+	{X: -11764.5, Y: -1733.2, Z: 17.19},
+	{X: -11742.4, Y: -1735.9, Z: 17.53},
+}
+
+// TestZGHakkarOuterGroup4DryStand: the plateau pack (15043 x4 at -11723.0 -1734.6) is pulled from a dry stand on its rim,
+// not walked to at its centre. Walk 116 step 581 (TortoiseBots-audit tests/raid-zg-walk116) stopped in the gather with the
+// anchor on the lake bed at -11774.7 -1776.5 -15.3, 11.6 yd under the lead: the plan's pull group 4 had no approach, so the
+// run leader crossed the lake to the pack and the step's gather anchor was taken in the water. With stand_pull the party
+// holds at the rim stand and the pack comes up to it, and the gather anchor is the stand's own dry row.
+func TestZGHakkarOuterGroup4DryStand(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := p.Legs[zgHakkarOuterLeg]
+	var pack *dungeon.PullGroup
+	for gi := range leg.PullGroups {
+		g := &leg.PullGroups[gi]
+		if len(g.Positions) != 4 {
+			continue
+		}
+		var cx, cy float64
+		for _, q := range g.Positions {
+			cx += float64(q.X)
+			cy += float64(q.Y)
+		}
+		if math.Abs(cx/4+11723.0) < 5 && math.Abs(cy/4+1734.6) < 5 {
+			pack = g
+		}
+	}
+	if pack == nil {
+		t.Fatalf("leg %s has no 4-body pack within 5 yd of -11723.0 -1734.6", leg.Name)
+	}
+	if !pack.StandPull {
+		t.Error("the plateau pack is not a stand pull: the run leader walks to the pack's centre and gathers on the lake bed")
+	}
+	if len(pack.Approach) == 0 {
+		t.Fatal("approach is empty: the run walks the lake to the pack and the gather stalls on the rim")
+	}
+	if len(pack.Approach) != len(zgHakkarOuterGroup4Approach) {
+		t.Fatalf("the plateau pack's approach: %d points, want %d", len(pack.Approach), len(zgHakkarOuterGroup4Approach))
+	}
+	for i, want := range zgHakkarOuterGroup4Approach {
+		got := pack.Approach[i]
+		if math.Abs(float64(got.X-want.X)) > 1e-4 || math.Abs(float64(got.Y-want.Y)) > 1e-4 ||
+			math.Abs(float64(got.Z-want.Z)) > 1e-4 {
+			t.Errorf("approach[%d]: %.3f %.3f %.3f, want %.3f %.3f %.3f", i, got.X, got.Y, got.Z, want.X, want.Y, want.Z)
+		}
+	}
+	dist := func(a, b dungeon.Point) float64 {
+		dx := float64(a.X - b.X)
+		dy := float64(a.Y - b.Y)
+		dz := float64(a.Z - b.Z)
+		return math.Sqrt(dx*dx + dy*dy + dz*dz)
+	}
+	var cx, cy, cz float64
+	for _, q := range pack.Positions {
+		cx += float64(q.X)
+		cy += float64(q.Y)
+		cz += float64(q.Z)
+	}
+	n := float64(len(pack.Positions))
+	centre := dungeon.Point{X: float32(cx / n), Y: float32(cy / n), Z: float32(cz / n)}
+	stand := pack.Approach[len(pack.Approach)-1]
+	dx, dy := float64(stand.X-centre.X), float64(stand.Y-centre.Y)
+	if d := math.Sqrt(dx*dx + dy*dy); d < 15 || d > 30 {
+		t.Errorf("the stand is %.1f yd from the pack centre (2D), want 15-30: the run leader's shot reaches it and the pack has to walk to the rim", d)
+	}
+	if d := dist(stand, centre); d > 50 {
+		t.Errorf("the stand is %.1f yd from the pack centre, want at most 50 (RunLeaderReachYd)", d)
+	}
+	// Every approach point is on the walked rim's floor (z 11.1-17.5); the lake bed under it is z -16..-12, so a point
+	// below z 5 is a point taken in the water (the trap this fix removes).
+	for i, q := range pack.Approach {
+		if q.Z < 5 {
+			t.Errorf("approach[%d] (%.1f %.1f %.1f) stands on the lake bed, not the rim", i, q.X, q.Y, q.Z)
+		}
+	}
+	// The rim chain keeps the swim to its first hop: the three hops above the rim are short and walkable in one go.
+	for i := 1; i < len(pack.Approach); i++ {
+		if d := dist(pack.Approach[i-1], pack.Approach[i]); d > 50 {
+			t.Errorf("approach[%d] -> approach[%d]: %.1f yd, want at most 50 (one run leader hop)", i-1, i, d)
+		}
+	}
+}
