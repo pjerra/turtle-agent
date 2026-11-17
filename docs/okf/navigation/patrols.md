@@ -2,17 +2,17 @@
 type: Guide
 title: Record patrols
 description: Record what walks a circle for an hour, and feed it to the checks.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
 tags: [navigation, patrols]
 sources:
   - id: patrol-record-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/patrol_record_cmd.go
     title: The patrol-record command
   - id: patrols-format
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/patrols/format.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/patrols/format.go
     title: The tb-patrols file format
   - id: patrols-analyze
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/patrols/analyze.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/patrols/analyze.go
     title: Turning samples into patrols
 generated:
   by: muse-spark-1.3/omp

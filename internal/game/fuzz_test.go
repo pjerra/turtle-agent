@@ -3,9 +3,9 @@ package game_test
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/opcode"
-	"github.com/pjerra/turtle-agent/internal/testfixture"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/testfixture"
 )
 
 // One fuzz target per SMSG parser: any bytes must give a value or an error, never a

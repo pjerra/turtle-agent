@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/capture"
+	"github.com/TortoiseBots/turtle-agent/internal/capture"
 )
 
 // hangLimit is how long one parse of one input may take. The parsers are linear in the

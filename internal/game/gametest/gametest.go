@@ -2,8 +2,8 @@
 package gametest
 
 import (
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // GroupList transcribes Group::SendUpdate (Group.cpp:1412-1443 on upstream/1181dev 5784fb0)

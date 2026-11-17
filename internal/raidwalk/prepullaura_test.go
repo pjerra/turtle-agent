@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/planexport"
 )
 
 // A --prepull-aura value is "role=<role>:<ids>": spell ids and buff preset names, with "world" the world-raid preset.
@@ -131,6 +132,51 @@ func TestClassName(t *testing.T) {
 	} {
 		if got := ClassName(class); got != want {
 			t.Errorf("class %d: %q, want %q", class, got, want)
+		}
+	}
+}
+
+// The sample tb-prepull-auras files (dungeons/prepull/zg-preraid.json and
+// dungeons/prepull/onyxia-preraid.json): one non-empty id list per role in PrepullRoles order, every id > 0. The
+// read fails when the file is missing, so deleting one breaks this test.
+func TestPrepullAuraSampleFiles(t *testing.T) {
+	for _, sample := range []struct {
+		path    string
+		tankLen int
+		allLen  int
+	}{
+		{"../../dungeons/prepull/zg-preraid.json", 5, 7},
+		{"../../dungeons/prepull/onyxia-preraid.json", 5, 8},
+	} {
+		raw, err := os.ReadFile(sample.path)
+		if err != nil {
+			t.Fatalf("%s: %v", sample.path, err)
+		}
+		list, err := ParsePrepullAuraFile(sample.path, raw)
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		if len(list) != len(PrepullRoles) {
+			t.Fatalf("%s: %d roles, want %d: %+v", sample.path, len(list), len(PrepullRoles), list)
+		}
+		for i, role := range PrepullRoles {
+			if list[i].Role != role {
+				t.Fatalf("%s: role %d is %q, want %q (PrepullRoles order)", sample.path, i, list[i].Role, role)
+			}
+			if len(PrepullIDs(list[i].Buffs)) == 0 {
+				t.Fatalf("%s: role %q names no id", sample.path, role)
+			}
+			for _, id := range PrepullIDs(list[i].Buffs) {
+				if id == 0 {
+					t.Fatalf("%s: role %q names spell id 0", sample.path, role)
+				}
+			}
+		}
+		if got := PrepullIDs(list[0].Buffs); len(got) != sample.tankLen || got[0] != 17626 || got[4] != 25661 {
+			t.Fatalf("%s: tank ids %v", sample.path, got)
+		}
+		if got := PrepullIDs(list[len(list)-1].Buffs); len(got) != sample.allLen || got[0] != 22888 || !slices.Contains(got, 23768) {
+			t.Fatalf("%s: all ids %v", sample.path, got)
 		}
 	}
 }

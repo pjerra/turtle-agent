@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Addon messages are ordinary CMSG_MESSAGECHAT / SMSG_MESSAGECHAT packets in LANG_ADDON

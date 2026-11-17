@@ -3,8 +3,8 @@ package session
 import (
 	"math"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 // Raycaster answers walkability rays and nearest-point queries on the navmesh (navmesh.Planner is one). A Planner that is one

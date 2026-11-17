@@ -5,7 +5,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // PackAggroMargin is the yards added to a pull group's radius before another mob counts as inside the pack (a mob that stands that near

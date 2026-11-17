@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/brain"
+	"github.com/TortoiseBots/turtle-agent/internal/brain"
 )
 
 const rotationUsage = "usage: turtle-agent rotation list\n" +

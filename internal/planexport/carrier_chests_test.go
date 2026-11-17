@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // zulfarrakWithoutBly builds the shipped plan with the bly leg skipped (as every export of it does: a boss that turns hostile after

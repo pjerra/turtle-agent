@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dashreplay"
+	"github.com/TortoiseBots/turtle-agent/internal/dashreplay"
 )
 
 // walk2Dumps is the API dumps R1 pinned: no replay.jsonl, so the command has

@@ -7,7 +7,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 const pathCheckUsage = "usage: turtle-agent path-check --mmaps DIR --map N [--json] -- x y z x y z"

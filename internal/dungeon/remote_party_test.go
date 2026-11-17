@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/TortoiseBots/turtle-agent/internal/tbm"
 )
 
 // The listing and the ACK of `commander status` are read as the module writes them (BotCommands.cpp, HandleCommander status).

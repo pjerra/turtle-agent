@@ -3,7 +3,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Core cites in this file are tortoise-wow upstream/1181dev 5784fb0 (TradeHandler.cpp,

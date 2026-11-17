@@ -3,7 +3,7 @@ package game
 import (
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // Pets (issue #80 step 4d): the hunter's pet and the warlock's demon. Core cites are tortoise-wow 5d79486 (the checkout the layouts

@@ -2,17 +2,17 @@
 type: Concept
 title: World exports and spawns
 description: The files that say what lives on a map, and how packs and patrols are read from them.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/worldspawn/worldspawn.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/worldspawn/worldspawn.go
 tags: [navigation, spawns]
 sources:
   - id: worldspawn
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/worldspawn/worldspawn.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/worldspawn/worldspawn.go
     title: Reading the world export
   - id: packs
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/worldspawn/packs.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/worldspawn/packs.go
     title: Packing spawns into groups
   - id: spawn-patrol
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/worldspawn/patrol.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/worldspawn/patrol.go
     title: Patrol loops from the export
 generated:
   by: muse-spark-1.3/omp

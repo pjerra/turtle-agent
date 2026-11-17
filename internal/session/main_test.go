@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
 )
 
 // The spell tables load once per process. Loading them in the middle of a test would stall the

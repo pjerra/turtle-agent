@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/preflight"
+	"github.com/TortoiseBots/turtle-agent/internal/preflight"
 )
 
 const walkPreflightUsage = "usage: turtle-agent walk-preflight [--server NAME]... [--binary PATH] [--json] <walk-dir>"

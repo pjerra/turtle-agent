@@ -2,17 +2,17 @@
 type: Guide
 title: Draw a run map
 description: Turn captures, events and plans into SVG maps and HTML replays.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
 tags: [navigation, map]
 sources:
   - id: map-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/map_cmd.go
     title: The map command
   - id: mapview-build
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/mapview/build.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/mapview/build.go
     title: Building a run from frames and events
   - id: mapview-floors
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/mapview/floors.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/mapview/floors.go
     title: Splitting a map into floors
 generated:
   by: muse-spark-1.3/omp

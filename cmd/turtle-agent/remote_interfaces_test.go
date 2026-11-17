@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // The commander driver wraps the agent's game in remoteGame, and the remote driver finds its optional abilities by asserting these

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 // ttSent is the line the method sends: the command as given (the client adds nothing but the request id it made up).

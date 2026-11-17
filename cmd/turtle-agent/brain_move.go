@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pjerra/turtle-agent/internal/brain"
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/brain"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 // The movement and sight half of the brain's Game (brain.Mover, brain.Sight, brain.Ground) over the agent's session. The brain

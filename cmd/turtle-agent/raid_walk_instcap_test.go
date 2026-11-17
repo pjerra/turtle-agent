@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 // capWalk builds a walk on a fake clock whose sleep advances it, with a ledger of n entries aged by ages.

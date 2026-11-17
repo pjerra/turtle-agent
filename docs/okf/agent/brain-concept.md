@@ -2,20 +2,20 @@
 type: Concept
 title: The brain
 description: How the trigger-action engine plays the character, and what brain_start, brain_stop and brain_status do.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/engine.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/engine.go
 tags: [agent, brain, combat, rotation]
 sources:
   - id: engine-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/engine.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/engine.go
     title: Trigger-action engine and relevance bands
   - id: controller-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/controller.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/controller.go
     title: Brain start, stop and status
   - id: strategies-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/strategies.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/strategies.go
     title: Presets and the strategy list
   - id: roles-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/roles.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/roles.go
     title: Role resolution (dps, tank, healer)
 generated:
   by: muse-spark-1.3/omp

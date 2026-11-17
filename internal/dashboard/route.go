@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
 )
 
 // The real route (README "Route editor"): the path the bots walk, as the navmesh planner draws it, instead of the straight 2D stubs of the plan

@@ -2,13 +2,13 @@
 type: Guide
 title: Probe the run leader's rows
 description: Score each run leader hop on the navmesh with plan-probe and fix bad segments.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_probe_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_probe_cmd.go
 tags: [plans, probe]
 sources:
   - id: plan-probe
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/plan_probe_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/plan_probe_cmd.go
   - id: planprobe
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/planprobe/probe.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/planprobe/probe.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:52:00+01:00

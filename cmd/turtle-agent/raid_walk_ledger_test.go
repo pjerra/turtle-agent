@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/TortoiseBots/turtle-agent/internal/raidwalk"
 )
 
 // Walk 38: a --slots file in another directory keeps its leases and its cap ledger there, so its walk cannot see the

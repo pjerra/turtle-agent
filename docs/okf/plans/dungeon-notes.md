@@ -2,11 +2,11 @@
 type: Concept
 title: Dungeon notes
 description: Per-dungeon evidence, limits and first-run risks for the five hand-written plans.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/dungeons/embed.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/dungeons/embed.go
 tags: [plans, dungeons]
 sources:
   - id: plans-doc
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/docs/PLANS.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/docs/PLANS.md
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

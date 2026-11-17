@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // fakeNav is a flat world: every point has floor, a path is the straight line, except where the test says otherwise.

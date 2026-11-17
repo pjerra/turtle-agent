@@ -3,7 +3,7 @@ package addonhost
 import (
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // Event is a 1.12 game event as the addon's OnEvent handlers read it: the event name and

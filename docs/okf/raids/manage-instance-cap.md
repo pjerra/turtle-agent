@@ -2,13 +2,13 @@
 type: Guide
 title: Stay under the instance cap
 description: How the per-account instance ledger works and how to wait, reset or walk around it.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/instcap.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/instcap.go
 tags: [raids, instance-cap]
 sources:
   - id: instcap
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/instcap.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/instcap.go
   - id: walk-instcap
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_instcap.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_instcap.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:40:00+01:00

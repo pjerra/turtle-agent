@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/objects/objtest"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/objects/objtest"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 func linearMove(g packet.GUID) []byte {

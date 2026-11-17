@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // selRig drives the selection log of a bare session: sends and echoes, no connection.

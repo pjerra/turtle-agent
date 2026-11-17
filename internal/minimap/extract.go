@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/blp"
-	"github.com/pjerra/turtle-agent/internal/mpq"
+	"github.com/TortoiseBots/turtle-agent/internal/blp"
+	"github.com/TortoiseBots/turtle-agent/internal/mpq"
 )
 
 // ArchiveOrder is the client's load order of the archives in Data: later ones override earlier ones. The numbered patches

@@ -2,20 +2,20 @@
 type: Troubleshooting
 title: Agent troubleshooting
 description: Real error messages from the agent, what they mean, and the fix.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
 tags: [agent, troubleshooting, errors, rpc]
 sources:
   - id: session-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/session.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/session.go
     title: Session and logout errors
   - id: actions-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/session/actions.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/session/actions.go
     title: Target, cast, walk and teleport errors
   - id: worldconn-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/worldconn/conn.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/worldconn/conn.go
     title: Connection and auth errors
   - id: rpc-cmd-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/rpc_cmd.go
     title: RPC client errors and exit codes
 generated:
   by: muse-spark-1.3/omp

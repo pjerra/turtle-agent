@@ -2,23 +2,23 @@
 type: Troubleshooting
 title: Combat troubleshooting
 description: Real combat error messages, what they mean, and the fix.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
 tags: [combat, troubleshooting]
 sources:
   - id: brain-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/brain_methods.go
   - id: rotation-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/rotation_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/rotation_cmd.go
   - id: tactics-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/tactics/tactics.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/tactics/tactics.go
   - id: addon-host
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/addon_host.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/addon_host.go
   - id: eluna-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/eluna_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/eluna_methods.go
   - id: lfg-methods
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/lfg_methods.go
   - id: lft-msg
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/lft/msg.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/lft/msg.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:58:00+01:00

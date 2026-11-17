@@ -2,20 +2,20 @@
 type: Reference
 title: Dungeon and party RPC
 description: commander, dungeon_run, dungeon_stage, teardown, and bot_view params and results.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
 tags: [agent, rpc, reference, dungeon, commander, teardown]
 sources:
   - id: dungeon-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/dungeon_methods.go
     title: dungeon_run, plan_check, dungeon_status, dungeon_stop, pause, resume, skip
   - id: commander-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/commander_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/commander_methods.go
     title: commander and bot_view
   - id: stage-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/stage_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/stage_methods.go
     title: dungeon_stage
   - id: teardown-methods-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/teardown_methods.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/teardown_methods.go
     title: teardown
 generated:
   by: muse-spark-1.3/omp

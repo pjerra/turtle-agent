@@ -2,11 +2,11 @@
 type: Concept
 title: The trace checks
 description: What each trace check measures, its default threshold, and when it answers n/a.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/tracecheck/tracecheck.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/tracecheck/tracecheck.go
 tags: [traces, tracecheck]
 sources:
   - id: tracecheck
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/tracecheck/tracecheck.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/tracecheck/tracecheck.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:49:00+01:00

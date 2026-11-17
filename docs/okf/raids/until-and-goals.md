@@ -2,13 +2,13 @@
 type: Concept
 title: Until clauses and autopilot goals
 description: What boss, boss-done, none, step and leg mean, and how the autopilot maps goals onto them.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/until.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/until.go
 tags: [raids, until, autopilot]
 sources:
   - id: until
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/until.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/until.go
   - id: autopilot
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/autopilot.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/raidwalk/autopilot.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:45:00+01:00

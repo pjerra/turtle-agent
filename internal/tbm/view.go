@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // The perception feed of the remote commander (TortoiseBots issue #884 phase 2, docs/guides/player-controls.md

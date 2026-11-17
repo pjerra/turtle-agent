@@ -2,15 +2,15 @@
 type: Troubleshooting
 title: Troubleshooting raids
 description: Real raid-walk, autopilot and suite error messages, what they mean, and the fix.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
 tags: [raids, troubleshooting]
 sources:
   - id: walk-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
   - id: auto-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_autopilot_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_autopilot_cmd.go
   - id: suite-cmd
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_suite_cmd.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/raid_suite_cmd.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:55:00+01:00

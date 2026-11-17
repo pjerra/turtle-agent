@@ -3,8 +3,8 @@
 package gametest
 
 import (
-	"github.com/pjerra/turtle-agent/internal/game"
-	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/TortoiseBots/turtle-agent/internal/game"
+	"github.com/TortoiseBots/turtle-agent/internal/packet"
 )
 
 // chatTagGM is CHAT_TAG_GM (Chat.h:90).

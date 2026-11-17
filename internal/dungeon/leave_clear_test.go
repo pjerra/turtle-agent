@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/TortoiseBots/turtle-agent/internal/navmesh"
 )
 
 // The leave-clearance rule (zf-r6-19z24, PLAN-ZF-LESSONS section 3 F-a/F-c): a plan names the spawns a run leaves alone (a leg's `leave`

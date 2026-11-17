@@ -2,15 +2,15 @@
 type: Tutorial
 title: First login
 description: Build turtle-agent, write the settings file, log a character in, and send one RPC call.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/README.md
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/README.md
 tags: [getting-started, tutorial, login, rpc, settings]
 sources:
   - id: readme
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/README.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/README.md
   - id: main
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/main.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/main.go
   - id: login
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/login.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/cmd/turtle-agent/login.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:25:00+01:00

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/TortoiseBots/turtle-agent/internal/events"
 )
 
 // Equipment slots of the TBM:INV_EQ lines (the core's EquipmentSlots, 1.12): the ones a pre-run check looks at.

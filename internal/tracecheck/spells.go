@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pjerra/turtle-agent/internal/kbspells"
-	"github.com/pjerra/turtle-agent/internal/spells"
-	"github.com/pjerra/turtle-agent/internal/trace"
+	"github.com/TortoiseBots/turtle-agent/internal/kbspells"
+	"github.com/TortoiseBots/turtle-agent/internal/spells"
+	"github.com/TortoiseBots/turtle-agent/internal/trace"
 )
 
 // The spell-usage report: what each class of the party cast and did, from the frames of an agent trace. It is a report, not a verdict:

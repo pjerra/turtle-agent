@@ -3,7 +3,7 @@ package game_test
 import (
 	"encoding/hex"
 
-	"github.com/pjerra/turtle-agent/internal/opcode"
+	"github.com/TortoiseBots/turtle-agent/internal/opcode"
 )
 
 // Server packet bodies copied byte for byte from live captures of a TortoiseBots server

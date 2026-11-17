@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/TortoiseBots/turtle-agent/internal/objects"
 )
 
 // fakeDeath scripts the leader's death for fakeGame: a resurrection offer, the release to a graveyard, the corpse query,

@@ -2,13 +2,13 @@
 type: Concept
 title: Run traces
 description: The bt-trace file a run writes, what each record holds, and the summary beside it.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/trace/trace.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/trace/trace.go
 tags: [traces, concept]
 sources:
   - id: trace
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/trace/trace.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/trace/trace.go
   - id: tracerun
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/tracerun/tracerun.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/tracerun/tracerun.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:43:00+01:00

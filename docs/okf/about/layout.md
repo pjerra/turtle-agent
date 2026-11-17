@@ -2,11 +2,11 @@
 type: Reference
 title: Code layout
 description: What each package in the repository does, and how the SMSG parser tests stay honest.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/README.md
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/README.md
 tags: [about, layout, packages, parsers, fuzz]
 sources:
   - id: readme
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/README.md
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/README.md
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

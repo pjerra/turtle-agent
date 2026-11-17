@@ -2,13 +2,13 @@
 type: Guide
 title: Holy paladin and resurrection
 description: Blessings by role, emergency buttons, the off-preset judge, and how the shared resurrection works.
-resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/paladin_holy.go
+resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/paladin_holy.go
 tags: [combat, paladin, healer, resurrection]
 sources:
   - id: paladin-holy-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/paladin_holy.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/paladin_holy.go
   - id: rez-go
-    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/brain/rez.go
+    resource: https://github.com/TortoiseBots/turtle-agent/blob/dev/internal/brain/rez.go
 generated:
   by: omp
   at: 2026-11-05T21:45:00+01:00

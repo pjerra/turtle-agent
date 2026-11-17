@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/dungeons"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/minimap"
+	"github.com/TortoiseBots/turtle-agent/dungeons"
+	"github.com/TortoiseBots/turtle-agent/internal/dungeon"
+	"github.com/TortoiseBots/turtle-agent/internal/minimap"
 )
 
 // uldamanWorldMap is what `turtle-agent minimap-extract --maps 70` writes for the client's Uldaman world map
