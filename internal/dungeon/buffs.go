@@ -163,22 +163,14 @@ func AurasMissing(ctx context.Context, p AuraPort, t AuraTarget, want []Buff) (m
 	return missing, seen
 }
 
-// AurasOtherMax bounds AurasOther's list: a diagnostics aid, not a copy of the target's aura bar.
+// AurasOtherMax bounds AurasRead's list of the ids the target carries outside want: a diagnostics aid, not a copy of
+// the target's aura bar.
 const AurasOtherMax = 24
 
-// AurasOther lists the spell ids the target carries that are NOT in want, sorted and de-duplicated, at most
-// AurasOtherMax of them. seen is false when the target cannot be seen. It says what a bot carries INSTEAD of an aura
-// it lacks (a Well Fed id the server refuses because the bot already holds another food buff: spell_group 1001 in the
-// core allows one), so the walk's miss is readable without a second look at the bot; it is nil when the target carries
-// nothing else.
-func AurasOther(ctx context.Context, p AuraPort, t AuraTarget, want []Buff) (ids []uint32, seen bool) {
-	_, ids, seen = AurasRead(ctx, p, t, want)
-	return ids, seen
-}
-
-// AurasRead is AurasMissing and AurasOther in ONE unit read, so a caller that wants both (the prepull fire's and the
-// top-up's read-back) does not read the same unit twice: the ids of want the target lacks, and the other spell ids it
-// carries (AurasOther's list). seen is false when the target cannot be seen, and both lists are nil then.
+// AurasRead is the one unit read behind every aura check: the ids of want the target lacks, and the other spell ids it
+// carries (at most AurasOtherMax of them, sorted), so a caller that wants both (the prepull fire's and the top-up's
+// read-back) does not read the same unit twice. seen is false when the target cannot be seen, and both lists are nil
+// then.
 func AurasRead(ctx context.Context, p AuraPort, t AuraTarget, want []Buff) (missing []Buff, others []uint32, seen bool) {
 	u, ok := p.ViewUnit(ctx, t)
 	if !ok {

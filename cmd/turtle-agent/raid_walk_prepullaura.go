@@ -312,11 +312,16 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 	// --prepull-aura-topup stands before every pull row, boss rows included (a boss pull's hires are read there, which
 	// under --prepull-aura-when start is the only read they get): it pauses the run only when it has something to send,
 	// and both the call and the pull step are bounded at 15 s (prepullAuraTopup B1-B3), so it cannot hold this loop
-	// past a boss fire. It never fails the walk and does not fire this line loop (nothing of the run's state changes,
-	// so the page's other lines are still worth handling). A boss row the boss-row fire owns is the fire's business,
-	// not the top-up's (prepullTopupBossFires).
+	// past a boss fire. It does not fire this line loop (nothing of the run's state changes, so the page's other lines
+	// are still worth handling), and the only failure of it that reaches the walk is its resume's, failed twice (the
+	// run may then be paused). A boss row the boss-row fire owns is the fire's business, not the top-up's
+	// (prepullTopupBossFires).
 	if step := w.prepullTopupStep(st, later); step != 0 {
-		w.prepullAuraTopup(ctx, st, step)
+		// The top-up stops the walk for one reason only: its resume failed twice and the run may be paused (a run left
+		// paused is a dead raid, as it is for the boss-row fire). Every other failure of it is a line.
+		if err := w.prepullAuraTopup(ctx, st, step); err != nil {
+			return false, err
+		}
 	}
 	if w.opts.prepullAuraWhen == prepullAuraWhenStart {
 		// --prepull-aura-when start fired once before the run's first move: a boss row is never a place to send
@@ -657,9 +662,12 @@ func (w *walk) prepullTopupCause(name string, missing []dungeon.Buff) string {
 //     INSIDE its read is unread, not a hire missing its whole list (its record keeps the earlier read, and it does not
 //     count toward the give-up). A walk that was itself cancelled is the one exception: it writes no budget line, takes
 //     no read-back and leaves no record, and only the resume goes out;
-//   - nothing here fails the walk. A raid read, a join, a role or a unit read, a send and a read-back that does not
-//     land are a run.log line, never a stop: a missed top-up is the run the walk was already going to have, while the
-//     boss-row fire stays fail-closed.
+//   - nothing here fails the walk except the run's own resume. A raid read, a join, a role or a unit read, a send and
+//     a read-back that does not land are a run.log line, never a stop: a missed top-up is the run the walk was already
+//     going to have, while the boss-row fire stays fail-closed. The resume is the exception because the run's state is
+//     not the top-up's to leave broken: it is tried twice in its one window, and a failure that outlives the retry
+//     stops the walk (exit 18, "prepull-aura: topup: resume failed twice; the run may be paused"), exactly as the
+//     boss-row fire does when its own resume fails.
 //
 // One run.log line names the pull step and every upgraded bot with the number of ids put back and the cause: "death"
 // when the frames saw that hire die since its last top-up, "expired" when the missing ids were seen on it before in
@@ -672,7 +680,7 @@ func (w *walk) prepullTopupCause(name string, missing []dungeon.Buff) string {
 // The step is done when every hire of the roster is done, and only then does a later status of the same step read
 // nothing. Nothing is carried to the next pull step: an aura that was present at one pull can expire seconds later, so
 // only a read at the pull itself says what the hires carry.
-func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullStep int) {
+func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullStep int) (stopErr error) {
 	roster := w.hireList()
 	if w.prepullTopupSettled(pullStep, roster) {
 		return
@@ -695,11 +703,15 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	// is idempotent. The boss-row fire resumes the same way (prepullAuraSendPending).
 	pauseTried := false
 	resumed := false
+	// resumeStop is the walk's stop when the resume failed twice: it is carried out by the function's own return (the
+	// call has no other stop), so the deferred resume below can set it too.
+	var resumeStop error
 	// resume puts the run back whatever ended the call. It is still sent once whenever a pause was attempted — an
 	// expired context would leave the raid paused silently — but with its own short context (B3): the flat 10 s is one
 	// RPC that can outlast the call's budget, and a resume that blocks past it is exactly what held the poll loop after
 	// the deadline. min(10 s, max(2 s, time left)) keeps the smallest window a slow ACK can land in. It is idempotent,
-	// so the cap, a stop and the function's own return all resume exactly once.
+	// so the cap, a stop and the function's own return all resume exactly once, and it is tried twice inside that one
+	// window: a failure that outlives the retry sets resumeStop, and the walk stops rather than run paused.
 	resume := func() {
 		if !pauseTried || resumed {
 			return
@@ -718,11 +730,30 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		}
 		rctx, rcancel := context.WithTimeout(base, wait)
 		defer rcancel()
-		if rep, err := w.commander(rctx, commanderReq{Op: "run", Verb: "resume", WaitMS: int(wait / time.Millisecond)}); err != nil {
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up failed: %v", where, err)
-		} else if rep.Reply.Err != nil {
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up was refused: %s", where, rep.Reply.Err.Message)
+		// A resume that errored or was refused is retried ONCE in its own window, the floor included: an answer lost on
+		// the way leaves the run paused until the next boss row fires, and the pull it was paused for runs on a raid
+		// nobody put back. The retry shares the one window (a second one would double the time the resume may hold the
+		// call), so a resume that spent it fails the retry too, and THAT is the failure a WARN cannot cover: the walk
+		// stops, as it does when the boss-row fire cannot resume.
+		var said string
+		for try := range 2 {
+			rep, err := w.commander(rctx, commanderReq{Op: "run", Verb: "resume", WaitMS: int(wait / time.Millisecond)})
+			switch {
+			case err != nil:
+				said = fmt.Sprintf("failed: %v", err)
+			case rep.Reply.Err != nil:
+				said = fmt.Sprintf("was refused: %s", rep.Reply.Err.Message)
+			default:
+				if try > 0 {
+					w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up %s; the retry put the run back", where, said)
+				}
+				return
+			}
+			if try == 0 {
+				w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up %s; retrying once", where, said)
+			}
 		}
+		resumeStop = stopf(exitRaidWalkFailed, "prepull-aura: topup: resume failed twice; the run may be paused")
 	}
 	capped := false
 	// capStep spends the step's budget: resume first (a run left paused stops the raid silently), then name the cap
@@ -945,9 +976,15 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		// answer never came, and an error or a refusal may still mean the command reached the run. See pauseTried. So
 		// every exit from here resumes, whatever the answer says: a resume against a running run is a no-op, a run left
 		// paused is a dead raid. The explicit resume() after the sends still runs first, so the run is unpaused before
-		// the read-back.
+		// the read-back. A resume that fails twice is the ONE exit here that is not a WARN: the walk stops with
+		// resumeStop, whatever else this call decided.
 		pauseTried = true
-		defer resume()
+		defer func() {
+			resume()
+			if resumeStop != nil {
+				stopErr = resumeStop
+			}
+		}()
 		if rep, err := w.commander(tctx, commanderReq{Op: "run", Verb: "pause", WaitMS: pauseWait}); err != nil {
 			if ended() {
 				return
@@ -1160,6 +1197,9 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	if err := w.prepullAuraWrite(); err != nil {
 		w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, err)
 	}
+	// The record is written whatever the resume did: the stop itself names the paused run, and prepull-auras.json is
+	// the evidence of what the call sent before it.
+	return stopErr
 }
 
 // prepullAuraTopupStop logs a top-up that did not go out. Unlike the boss-row fire it never stops the walk: the pull

@@ -112,9 +112,11 @@ type prepullAgent struct {
 	onResume       func()
 	advanceOnPause time.Duration // if > 0, advances a.clock on each run pause call
 	// advanceOnResume, if > 0, advances a.clock on each run resume call (a resume whose ACK outlasts the top-up's
-	// budget), and resumeWaitMS is the wait_ms of the last resume the commander was asked for.
+	// budget), resumeWaitMS is the wait_ms of the last resume the commander was asked for, and resumeWaits every one
+	// of them in order (a retry's window, compared with the attempt it follows).
 	advanceOnResume time.Duration
 	resumeWaitMS    int
+	resumeWaits     []int
 	pauseReqAt      time.Time
 	resumeAt        time.Time
 	// applyToSelf makes every ".aura" land on the commander instead of the target: the selection did not hold.
@@ -466,6 +468,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		case "resume":
 			a.resumeAt = a.clock
 			a.resumeWaitMS = p.WaitMS
+			a.resumeWaits = append(a.resumeWaits, p.WaitMS)
 			if a.advanceOnResume > 0 {
 				a.advance(a.advanceOnResume)
 			}
@@ -4493,5 +4496,41 @@ func TestPrepullAuraTopupParentCancelNotBudget(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(w.outDir, prepullAuraFileName)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("%s exists after a cancelled walk (stat error %v), want no record", prepullAuraFileName, err)
+	}
+}
+
+// (r6 MEDIUM) A resume that errors or is refused after the top-up is retried once in the same window, and a failure that
+// outlives the retry stops the walk: a run left paused waits for the next boss row to fire, and the pull it was paused
+// for runs on a raid nobody put back. On 1fc9d683 both were a WARN, the step was capped and the run stayed paused until
+// that fire.
+func TestPrepullAuraTopupResumeFailRetriesOnceThenStops(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.resumeErr = errors.New("no run is going")
+	// Each attempt spends 14 s of the call's clock: a retry that sized a window of its own would fall back to the 2 s
+	// floor, while one that stays inside the first attempt's window asks again for what that attempt asked for.
+	a.advanceOnResume = 14 * time.Second
+	w := newPrepullTopupWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false)
+	if fired {
+		t.Fatal("the top-up reported a firing")
+	}
+	if code, reason := stopInfo(err); code != exitRaidWalkFailed || reason != "prepull-aura: topup: resume failed twice; the run may be paused" {
+		t.Fatalf("the walk ended with code %d, %q; want exit %d and the resume-failed-twice line", code, reason, exitRaidWalkFailed)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume resume" {
+		t.Fatalf("the run verbs %q, want the pause and its resume retried once", got)
+	}
+	if len(a.resumeWaits) != 2 || a.resumeWaits[0] != a.resumeWaits[1] {
+		t.Fatalf("the resumes asked for %vms, want the retry to share the first one's window (each attempt of it 14 s older)", a.resumeWaits)
+	}
+	if !a.paused {
+		t.Fatal("the run was not left paused, so the stop this test checks for has no cause")
+	}
+	// The sends went out before the resume, and the stop still leaves what they did on disk.
+	if len(a.sent) != 6 {
+		t.Fatalf("the call sent %v, want the six hires' 22888", a.sent)
+	}
+	if got := len(readPrepullAuraFile(t, w).Bots); got != 6 {
+		t.Fatalf("the record holds %d bot(s), want the 6 the call sent to", got)
 	}
 }
