@@ -41,9 +41,10 @@ const (
 const (
 	// routeSampleYd is the spacing of the route samples the model measures from.
 	routeSampleYd = 2
-	// otherFloorYd is how far above or below a route sample a spawn may stand before it is taken for another floor: the
-	// navmesh's own poly search is about 5 yd, and a raid's floors are more than 15 yd apart.
-	otherFloorYd = 15
+	// OtherFloorYd is how far above or below a route sample a spawn may stand before it is taken for another floor: the
+	// navmesh's own poly search is about 5 yd, and a raid's floors are more than 15 yd apart. Exported for the
+	// dropped-pack check of a route-order plan (tools/dungeongen), which applies this file's floor rule to its walk.
+	OtherFloorYd = 15
 	// patrolStepS is the simulation step of a patrol loop, seconds.
 	patrolStepS = 0.5
 	// standReachYd is added to the aggro reach for a stand: the party stands still there (the pull stand, the revive point).
@@ -417,6 +418,23 @@ func dist2(a, b dungeon.Point) float32 {
 	return float32(math.Sqrt(float64(dx*dx + dy*dy)))
 }
 
+// FloorReach reports whether a spawn at pos stands on the route's floor: within reach (2D yd) of at least one of the
+// samples, and within OtherFloorYd of that sample's z. near says the 2D reach was met at all. floorFilter drops a spawn
+// when near && !sameFloor, and the dropped-pack check of a route-order plan (tools/dungeongen) calls this on its walked
+// path, so both count the same wake: the 3D aggro distance still has to be met by the caller.
+func FloorReach(pos dungeon.Point, samples []dungeon.Point, reach float64) (near, sameFloor bool) {
+	for _, sample := range samples {
+		if float64(dist2(pos, sample)) > reach {
+			continue
+		}
+		near = true
+		if dz := float64(pos.Z - sample.Z); dz <= OtherFloorYd && dz >= -OtherFloorYd {
+			return true, true
+		}
+	}
+	return near, false
+}
+
 // model is the per-plan evaluation state.
 type model struct {
 	opt     Options
@@ -487,29 +505,18 @@ func Check(rows planexport.Rows, w *worldspawn.World, opt Options) *Report {
 	return rep
 }
 
-// floorFilter keeps the spawns that stand on the route's floors: a spawn more than otherFloorYd above or below every sample
+// floorFilter keeps the spawns that stand on the route's floors: a spawn more than OtherFloorYd above or below every sample
 // within its 2D aggro reach is ignored (a ledge, an upper floor), and the count is the note.
 func floorFilter(spawns []worldspawn.Spawn, segs []seg, opt Options) ([]worldspawn.Spawn, int) {
+	samples := make([]dungeon.Point, 0, len(segs)*8)
+	for _, g := range segs {
+		samples = append(samples, g.samples...)
+	}
 	kept := make([]worldspawn.Spawn, 0, len(spawns))
 	ignored := 0
 	for _, s := range spawns {
-		reach := worldspawn.AggroRadius(s, opt.Level, opt.AggroRate) + opt.Spread + worldspawn.WanderYd(s)
-		reachable, sameFloor := false, false
-		for _, g := range segs {
-			for _, sample := range g.samples {
-				if dist2(s.Pos, sample) > reach {
-					continue
-				}
-				reachable = true
-				if dz := s.Pos.Z - sample.Z; dz <= otherFloorYd && dz >= -otherFloorYd {
-					sameFloor = true
-				}
-			}
-			if sameFloor {
-				break
-			}
-		}
-		if reachable && !sameFloor {
+		reach := float64(worldspawn.AggroRadius(s, opt.Level, opt.AggroRate) + opt.Spread + worldspawn.WanderYd(s))
+		if near, sameFloor := FloorReach(s.Pos, samples, reach); near && !sameFloor {
 			ignored++
 			continue
 		}
