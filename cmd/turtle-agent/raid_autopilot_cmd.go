@@ -157,6 +157,11 @@ type autoRun struct {
 	cmd     *exec.Cmd
 	pidN    int
 	adopted bool
+	// claimed says this run's attempt is counted in the goal's attempt number: launch sets it when the child
+	// started, and an adopted run restores it from the checkpoint that carried the saved run's claim (the launch
+	// claimed the budget before the checkpoint could name the run). Only a claimed run refunds its attempt when it
+	// ends in a wait, so an adopted wait spends no budget and no rollback can take another run's attempt.
+	claimed bool
 	started time.Time
 	exited  bool
 	// exitedAt is when the autopilot saw the exit (the summary may still be being written).
@@ -465,15 +470,28 @@ func groupAutoTargets(targets []raidwalk.AutoTarget) []*autoState {
 }
 
 // autoTargetFingerprint is the sha256 of a state's ordered, normalised goal lines: id, server, slot, holder, goal,
-// start and the raid-walk args, one line per goal (the line numbers of targets.txt are not part of it). The
-// checkpoint stores it per id, so a start can tell whether a saved goal and step belongs to the lines targets.txt
-// holds now: a person may edit the goals under a crashed supervisor, and a checkpoint written for the old lines must
-// not mark the new ones done or place them from an old step.
+// start, the raid-walk args, and the goal's options when they are set, one line per goal (the line numbers of
+// targets.txt are not part of it). The checkpoint stores it per id, so a start can tell whether a saved goal and step
+// belongs to the lines targets.txt holds now: a person may edit the goals under a crashed supervisor, and a checkpoint
+// written for the old lines must not mark the new ones done or place them from an old step. The budgets ride along
+// because they are taken out of Args (--max-attempts and --boss-wipe-max) or are a bare flag (--boss-wipe-fresh)
+// and would otherwise be invisible here: an offline --max-attempts edit must drop the stale stopped budget state.
+// Each option is appended only when it is set, so a line without options hashes exactly as it did before these
+// options existed and the checkpoint of an upgraded supervisor keeps its saved progress.
 func autoTargetFingerprint(st *autoState) string {
 	var b strings.Builder
 	for _, g := range st.goals {
 		t := g.target
 		fmt.Fprintf(&b, "%q %q %q %q %q %q", t.ID, t.Server, t.Slot, t.Holder, t.Goal.String(), t.Start)
+		if t.MaxAttempts > 0 {
+			fmt.Fprintf(&b, " max-attempts=%d", t.MaxAttempts)
+		}
+		if t.BossWipeMax > 0 {
+			fmt.Fprintf(&b, " boss-wipe-max=%d", t.BossWipeMax)
+		}
+		if t.BossWipeFresh {
+			b.WriteString(" boss-wipe-fresh=true")
+		}
 		for _, a := range t.Args {
 			fmt.Fprintf(&b, " %q", a)
 		}
@@ -1153,9 +1171,9 @@ func autoSameTargets(a, b *autoState) bool {
 	}
 	for i := range a.goals {
 		x, y := a.goals[i].target, b.goals[i].target
-		// The boss-wipe budget is a goal option (--boss-wipe-max is taken out of Args), so an edit of it alone is a
-		// changed goal line too.
-		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax {
+		// The boss-wipe and attempt budgets are goal options (both flags are taken out of Args), so an edit of
+		// either alone is a changed goal line too.
+		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax || x.MaxAttempts != y.MaxAttempts {
 			return false
 		}
 		if len(x.Args) != len(y.Args) {
@@ -1591,7 +1609,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
 			BossWipes: g.bossWipes, BossWipeMax: g.target.BossWipeMax, Progressed: progressed, CapWaits: st.capWaits,
-			PracticeRelaunches: g.practiceRelaunches, PracticeKilledRetry: g.practiceKilledRetry,
+			PracticeRelaunches: g.practiceRelaunches, PracticeKilledRetry: g.practiceKilledRetry, MaxAttempts: g.target.MaxAttempts,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1610,6 +1628,16 @@ func (s *autoSupervisor) startFinish(st *autoState) {
 		defer s.wg.Done()
 		s.finish(st)
 	}()
+}
+
+// refundAttempt rolls back the attempt a run's launch claimed when the run ends in a wait: a wait is no attempt (the
+// run never placed). Only a claimed run refunds, so an adopted checkpoint with no restored attempt cannot drive the
+// counter below zero and no run can refund another run's attempt. Only a goal with --max-attempts refunds at all: an
+// id without the budget uses the number to name its launches, and a wait must not renumber the runs after it.
+func refundAttempt(g *autoGoalState, r *autoRun) {
+	if g.target.MaxAttempts > 0 && r.claimed && g.attempt > 0 {
+		g.attempt--
+	}
 }
 
 // finish applies a decided finish: the walk is stopped, the slot is torn down and verified, and only then is the run
@@ -1662,8 +1690,13 @@ func (s *autoSupervisor) finish(st *autoState) {
 	switch d.Action {
 	case raidwalk.AutoHirePoolWait:
 		g.hireWaits++
+		// A decided wait is no attempt (the run never placed): the launch's claim of the budget is rolled back, so
+		// waits do not consume it. The claim is the run's own: an adopted run restores it from the checkpoint, so a
+		// wait that follows a supervisor restart spends no budget either.
+		refundAttempt(g, r)
 	case raidwalk.AutoCapWait:
 		// Waiting for an instance place is no attempt: neither a failure nor progress, as the hire-pool wait.
+		refundAttempt(g, r)
 	default:
 		g.hireWaits = 0
 		if lastStep > prevBest {
@@ -1752,8 +1785,14 @@ func (s *autoSupervisor) finish(st *autoState) {
 			esc = "stop: " + d.Reason
 		} else {
 			st.done = true
-			if st.stopping {
+			// A spent --max-attempts budget ends the strict run like a STOP file: done and stopped (never an
+			// escalation), so writeStatus reports it as stopped and finishAll exits 0 with the not-every-goal line.
+			if d.MaxAttemptsStop || st.stopping {
 				st.stopped = true
+				// A spent budget names its own stop reason; a stop file already set stopWhy at request time.
+				if d.MaxAttemptsStop && !st.stopping {
+					st.stopWhy = d.Reason
+				}
 			}
 		}
 	case raidwalk.AutoRestart:
@@ -1945,7 +1984,6 @@ func (s *autoSupervisor) launch(st *autoState) {
 		reuse = false
 	}
 	st.nextReuse = false
-	g.attempt++
 	st.seq++
 	seq := st.seq
 	out := filepath.Join(s.o.walkDir, fmt.Sprintf("%s-%d", st.id, seq))
@@ -1959,7 +1997,6 @@ func (s *autoSupervisor) launch(st *autoState) {
 			argsTarget.Goal.Cycles = remaining
 		}
 	}
-	attempt := g.attempt
 	st.mu.Unlock()
 
 	args := autoCommandArgs(s.o.binary, argsTarget, out, from, reuse, s.o.forwardInstanceCap())
@@ -1996,6 +2033,11 @@ func (s *autoSupervisor) launch(st *autoState) {
 		st.mu.Unlock()
 	}()
 	st.mu.Lock()
+	// The budget counts a started raid-walk child: the attempt is claimed only after cmd.Start succeeds. A launch
+	// failure keeps today's retry/escalation path and never spends the budget; a decided wait also never spent one.
+	g.attempt++
+	attempt := g.attempt
+	run.claimed = true
 	st.run = run
 	st.lastOut = out
 	st.launchFails = 0
@@ -2915,9 +2957,12 @@ func (s *autoSupervisor) reconcileSlot(st *autoState, sv *autoSavedID) {
 	}
 	if live && (holder == t.Holder || holder == "") && sv != nil {
 		st.mu.Lock()
+		// The restored attempt number was checkpointed together with this run: the launch that started it claimed
+		// the budget before the checkpoint named the pid, so the claim is this run's own.
 		r := &autoRun{
 			seq: st.seq, out: out, slot: t.Slot, reuse: reuse, goal: t.Goal, pidN: pid, adopted: true,
 			started: time.Now(), lastProgress: time.Now(), lastStep: sv.LastStep,
+			claimed: sv.Attempt > 0,
 		}
 		st.run = r
 		st.last = nil

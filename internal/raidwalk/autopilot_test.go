@@ -871,3 +871,102 @@ func TestPracticeNeverEngagedIsNoBossDeath(t *testing.T) {
 		t.Fatalf("%+v, want the relaunch cap to stop it", d)
 	}
 }
+
+// A strict run ends on its first non-clear exit: --max-attempts 1 stops (no
+// escalate, no relaunch) after attempt 1, whatever the exit was.
+func TestMaxAttemptsOneStopsAfterTheFirstExit(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 14515}
+	for _, code := range []int{18, 5, 19} {
+		o := AutoObservation{Exited: true, ExitCode: code, StepsReached: 51, EndReason: "the run ended"}
+		d := DecideAutoAction(o, AutoRunState{Goal: g, Attempt: 1, MaxAttempts: 1}, autoNow, 15*time.Minute)
+		if d.Action != AutoStop || d.Escalate || !strings.Contains(d.Reason, "max attempts 1") {
+			t.Fatalf("exit %d with max attempts 1: %+v, want a clean AutoStop naming the budget", code, d)
+		}
+	}
+}
+
+// The budget counts attempts, not budget checks: attempt 1 of 2 still relaunches.
+func TestMaxAttemptsTwoRelaunchesOnce(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 14515}
+	o := AutoObservation{Exited: true, ExitCode: 18, StepsReached: 0, EndReason: "place: not at the start"}
+	d := DecideAutoAction(o, AutoRunState{Goal: g, Attempt: 1, MaxAttempts: 2, Reuse: true, HasRun: true}, autoNow, 15*time.Minute)
+	if d.Action != AutoRestart {
+		t.Fatalf("attempt 1 of 2: %+v, want a restart", d)
+	}
+	d = DecideAutoAction(o, AutoRunState{Goal: g, Attempt: 2, MaxAttempts: 2, Reuse: true, HasRun: true}, autoNow, 15*time.Minute)
+	if d.Action != AutoStop || d.Escalate || !strings.Contains(d.Reason, "max attempts 2") {
+		t.Fatalf("attempt 2 of 2: %+v, want the clean stop", d)
+	}
+}
+
+// A met goal still advances under a budget, and a wait that never placed is no
+// attempt: hire-pool and instance-cap waits are unchanged.
+func TestMaxAttemptsKeepsAdvanceAndWaits(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 14507}
+	met := AutoObservation{Exited: true, ExitCode: 0, StepsReached: 193, EndReason: "boss down",
+		KilledBosses: map[uint32]bool{14507: true}}
+	if d := DecideAutoAction(met, AutoRunState{Goal: g, Attempt: 1, MaxAttempts: 1, Reuse: true}, autoNow, 15*time.Minute); d.Action != AutoAdvance {
+		t.Fatalf("goal met with max attempts 1: %+v, want advance", d)
+	}
+	hire := AutoObservation{Exited: true, ExitCode: 5, HirePoolWait: true, EndReason: "hire pool refused"}
+	if d := DecideAutoAction(hire, AutoRunState{Goal: g, Attempt: 1, MaxAttempts: 1}, autoNow, 15*time.Minute); d.Action != AutoHirePoolWait || d.Escalate {
+		t.Fatalf("hire-pool wait with max attempts 1: %+v, want the unchanged wait", d)
+	}
+	cap := AutoObservation{Exited: true, ExitCode: 26, InstanceCapWait: true, EndReason: "instance cap: no fresh place"}
+	if d := DecideAutoAction(cap, AutoRunState{Goal: g, Attempt: 1, MaxAttempts: 1}, autoNow, 15*time.Minute); d.Action != AutoCapWait || d.Escalate {
+		t.Fatalf("instance-cap wait with max attempts 1: %+v, want the unchanged wait", d)
+	}
+	// No budget is today's behaviour: the same exit relaunches.
+	plain := AutoObservation{Exited: true, ExitCode: 18, EndReason: "the run ended"}
+	if d := DecideAutoAction(plain, AutoRunState{Goal: g, Attempt: 9}, autoNow, 15*time.Minute); d.Action != AutoRestart {
+		t.Fatalf("no budget: %+v, want today's restart", d)
+	}
+}
+
+// A frozen strict run is torn down and stopped, not restarted: the stall branch
+// counts against the same budget.
+func TestMaxAttemptsStopsAStall(t *testing.T) {
+	frozen := AutoObservation{Exited: false, StepsReached: 51, LastProgress: autoNow.Add(-20 * time.Minute)}
+	d := DecideAutoAction(frozen, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14515}, Attempt: 1, MaxAttempts: 1}, autoNow, 15*time.Minute)
+	if d.Action != AutoStop || d.Escalate || !strings.Contains(d.Reason, "max attempts 1") {
+		t.Fatalf("stall with max attempts 1: %+v, want the clean stop", d)
+	}
+}
+
+// An exit 29 under a spent budget takes no fresh retry: the budget pre-empts it.
+func TestMaxAttemptsPreemptsTheExit29Retry(t *testing.T) {
+	placeFailed := AutoObservation{Exited: true, ExitCode: 29, EndReason: "place: 4 tries in the same instance, start step 582"}
+	d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Attempt: 1, Reuse: true, HasRun: true, MaxAttempts: 1}, autoNow, 15*time.Minute)
+	if d.Action != AutoStop || d.Escalate || d.Exit29Retry || !strings.Contains(d.Reason, "max attempts 1") {
+		t.Fatalf("exit 29 with max attempts 1: %+v, want the clean stop, no retry", d)
+	}
+}
+
+// --max-attempts is a goal option: it is read off the target line and never reaches raid-walk.
+func TestParseAutoTargetsMaxAttempts(t *testing.T) {
+	ts, err := ParseAutoTargets(strings.NewReader("a srv 1 h boss:14834 -- zg --sql /zg.sql --max-attempts 2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].MaxAttempts != 2 {
+		t.Fatalf("budget %d, want 2", ts[0].MaxAttempts)
+	}
+	for _, a := range ts[0].Args {
+		if strings.HasPrefix(a, "--max-attempts") {
+			t.Fatalf("--max-attempts reached the raid-walk args: %v", ts[0].Args)
+		}
+	}
+	// The = form parses the same way, and 0, negative and non-numeric budgets are invalid lines.
+	ts, err = ParseAutoTargets(strings.NewReader("a srv 1 h boss:14834 -- zg --sql /zg.sql --max-attempts=1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].MaxAttempts != 1 {
+		t.Fatalf("budget %d, want 1", ts[0].MaxAttempts)
+	}
+	for _, bad := range []string{"0", "-2", "many"} {
+		if _, err := ParseAutoTargets(strings.NewReader("a srv 1 h full -- zg --sql /zg.sql --max-attempts " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "line 1") {
+			t.Fatalf("--max-attempts %s: err %v, want a line 1 error", bad, err)
+		}
+	}
+}

@@ -132,6 +132,9 @@ type AutoTarget struct {
 	// BossWipeMax is the goal's boss-wipe budget from --boss-wipe-max: the wipes in a row without progress that stop
 	// the id (0: AutoBossWipeMax).
 	BossWipeMax int
+	// MaxAttempts is the goal's attempt budget from --max-attempts: the attempts that stop the id with a clean,
+	// non-escalated stop instead of relaunching (0: unlimited, today's behaviour).
+	MaxAttempts int
 	Line        int
 }
 
@@ -337,7 +340,7 @@ func parseAutoTargetLine(n int, line string) (AutoTarget, error) {
 	if a.BossWipeFresh && a.Start == "" {
 		return AutoTarget{}, fmt.Errorf("line %d: id %q: --boss-wipe-fresh needs --from: the fresh-after-wipe restart starts from the goal's own start", n, id)
 	}
-	t.Args, t.Start, t.BossWipeMax, t.BossWipeFresh = a.Args, a.Start, a.BossWipeMax, a.BossWipeFresh
+	t.Args, t.Start, t.BossWipeMax, t.BossWipeFresh, t.MaxAttempts = a.Args, a.Start, a.BossWipeMax, a.BossWipeFresh, a.MaxAttempts
 	return t, nil
 }
 
@@ -348,10 +351,12 @@ type autoArgs struct {
 	BossWipeMax int // --boss-wipe-max, 0 when the line names none
 	// BossWipeFresh is the --boss-wipe-fresh target flag, consumed like --boss-wipe-max (never in raid-walk args).
 	BossWipeFresh bool
+	// MaxAttempts is the --max-attempts goal budget, 0 when the line names none.
+	MaxAttempts int
 }
 
 // parseAutoArgs drops the flags the autopilot manages: it returns the raid-walk arguments left, the target's --from
-// and its boss-wipe budget.
+// and its boss-wipe and attempt budgets.
 func parseAutoArgs(in []string) (autoArgs, error) {
 	var out autoArgs
 	args, start := &out.Args, &out.Start
@@ -396,6 +401,20 @@ func parseAutoArgs(in []string) (autoArgs, error) {
 				return autoArgs{}, fmt.Errorf("--boss-wipe-max wants a number of 1 or more, not %q", val)
 			}
 			out.BossWipeMax = n
+			continue
+		case "--max-attempts":
+			val := ""
+			if hasEq {
+				_, val, _ = strings.Cut(a, "=")
+			} else if i+1 < len(in) {
+				i++
+				val = in[i]
+			}
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 {
+				return autoArgs{}, fmt.Errorf("--max-attempts wants a number of 1 or more, not %q", val)
+			}
+			out.MaxAttempts = n
 			continue
 		case "--boss-wipe-fresh":
 			if hasEq {
@@ -598,6 +617,9 @@ type AutoRunState struct {
 	BossWipes int
 	// BossWipeMax is this goal's boss-wipe budget (its --boss-wipe-max); 0 is AutoBossWipeMax.
 	BossWipeMax int
+	// MaxAttempts is this goal's attempt budget (its --max-attempts); 0 is unlimited, today's behaviour. Attempt is
+	// the 1-based number of the attempt that just ended, so a budget of N stops the id once N attempts ran.
+	MaxAttempts int
 	// Progressed says the attempt that just ended reached a step further than any earlier attempt of this goal.
 	Progressed bool
 	// PracticeRelaunches is the practice goal's exit-18 relaunches made so far (across restarts, kept in the
@@ -633,8 +655,10 @@ type AutoDecision struct {
 	// placement failed every try in the fresh instance of its automatic retry), or
 	// three consecutive exit 15s (the slot's lease is held by someone else).
 	Escalate bool
-	// Exit29Retry marks the restart as the goal's fresh-instance retry after an exit 29 (the caller counts it).
-	Exit29Retry bool
+	// MaxAttemptsStop marks the stop as the goal's spent --max-attempts budget: the caller marks the id done and
+	// stopped (a clean end of a strict run, never an escalation).
+	MaxAttemptsStop bool
+	Exit29Retry     bool
 	// FreshAfterWipe marks the restart as the fresh-instance relaunch after a wipe at a boss. It is not the goal's
 	// exit-29 retry and not a failed placement: the caller counts neither.
 	FreshAfterWipe bool
@@ -689,6 +713,11 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		}
 		if !progress.IsZero() && now.Sub(progress) >= stall {
 			reason := fmt.Sprintf("stalled: no step or boss-HP change for %s (step %d)", now.Sub(progress).Round(time.Second), o.StepsReached)
+			// A strict run's frozen attempt is still one of its budgeted attempts: it is torn down and stopped,
+			// never relaunched.
+			if maxAttemptsStop(r) {
+				return maxAttemptsDecision(r, reason)
+			}
 			d := AutoDecision{Action: AutoRestart, Reuse: true, Backoff: AutoBackoff(r.FastFailures), Reason: reason}
 			// A practice walk that keeps freezing without ever exiting is torn down and relaunched like any stall, and
 			// the relaunch spends the same persisted budget as an exit relaunch (finish counts it from
@@ -729,6 +758,16 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 			Action: AutoHirePoolWait, Reuse: true, Backoff: AutoHirePoolWaitBackoff,
 			Reason: "the shared hire pool has no mercenary of that kind: another raid of the server holds them",
 		}
+	}
+	// A spent attempt budget stops the id before any relaunch: every branch below restarts except an advance. The
+	// waits above are not attempts (the run never placed), and a met goal already advanced. The stop names the
+	// attempt's own end, like the restart it replaces would have.
+	if maxAttemptsStop(r) {
+		reason := fmt.Sprintf("exit %d: %s", o.ExitCode, shortReason(o.EndReason))
+		if RunStopped(o.EndReason) {
+			reason = "the run stopped by itself (exit 0), the goal is not met"
+		}
+		return maxAttemptsDecision(r, reason)
 	}
 	if o.ExitCode == 2 {
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 2: the walk refused its arguments (" + shortReason(o.EndReason) + ")"}
@@ -824,6 +863,24 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		reason = "the run stopped by itself (exit 0), the goal is not met"
 	}
 	return practiceRestart(AutoDecision{Action: AutoRestart, Reuse: true, Backoff: backoff, Reason: reason})
+}
+
+// maxAttemptsStop says the goal's attempt budget is spent: attempt N of N ran (Attempt counts the attempt that just
+// ended, 1-based). A zero budget is unlimited.
+func maxAttemptsStop(r AutoRunState) bool {
+	return r.MaxAttempts > 0 && r.Attempt >= r.MaxAttempts
+}
+
+// maxAttemptsDecision stops a strict id cleanly (MaxAttemptsStop, never Escalate): the finish tears the slot down
+// verified and marks the id done and stopped, and the supervisor exits 0 with "not every target's goals are met"
+// when it is the last id. what is the stall text the stop names when no run end exists; an ended run names its own
+// exit instead.
+func maxAttemptsDecision(r AutoRunState, what string) AutoDecision {
+	if what == "" {
+		what = "(no reason)"
+	}
+	return AutoDecision{Action: AutoStop, MaxAttemptsStop: true,
+		Reason: fmt.Sprintf("max attempts %d reached: %s", r.MaxAttempts, shortReason(what))}
 }
 
 // shortReason clips a run's end reason for an EVENT line.

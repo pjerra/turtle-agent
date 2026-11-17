@@ -32,7 +32,7 @@ One goal per line. Blank lines and `#` lines are skipped:
 
 The header is exactly `id server slot holder goal`, then `--`, then the raid-walk args starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg L"`) or `boss:<ENTRY>` (`--until boss-done`; done when that boss's kill is recorded). An id may repeat: its lines walk in file order, and a met goal advances to the next line.[^autopilot]
 
-`--sql FILE` is required on every line. `--from` in a line is the goal's own start (a restart with no step reached uses it). These flags are managed and dropped if present: `--server`, `--slot`, `--holder`, `--until`, `--from`, `--place`, `--reuse-instance`, `--out`, `--wipe-end` (passed as `fast` for a goal whose boss wipe takes a fresh instance), `--boss-wipe-max` (the goal's boss-wipe budget, default 3: the ZG Hakkar goals set 5), and `--boss-wipe-fresh` (needs `--from`: after an exit 19 at the boss, relaunch fresh from the goal's own start instead of resuming the step). Slot 3, `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and slot: one slot runs one walk at a time.
+`--sql FILE` is required on every line. `--from` in a line is the goal's own start (a restart with no step reached uses it). These flags are managed and dropped if present: `--server`, `--slot`, `--holder`, `--until`, `--from`, `--place`, `--reuse-instance`, `--out`, `--wipe-end` (passed as `fast` for a goal whose boss wipe takes a fresh instance), `--boss-wipe-max` (the goal's boss-wipe budget, default 3: the ZG Hakkar goals set 5), `--boss-wipe-fresh` (needs `--from`: after an exit 19 at the boss, relaunch fresh from the goal's own start instead of resuming the step), and `--max-attempts N` (N >= 1: the Nth attempt ends the id with a clean stop instead of a relaunch; unset is unlimited). Slot 3, `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and slot: one slot runs one walk at a time.
 
 ## 2. Run the supervisor
 
@@ -61,7 +61,7 @@ A restart inside a goal starts at the furthest step a run of it reached, else th
 touch <walk-dir>/STOP-<id>
 ```
 
-`STOP-<id>` stops just that raid the clean way — its run stopped, its slot torn down and verified — and the id is marked stopped and never relaunched, while the other ids keep running. Once acted on, the file is renamed `STOP-<id>.done`. A stopped id is not a met goal: when it is the last one, the supervisor ends with `not every target's goals are met ...` and exit 0.
+A strict run stops itself instead: `--max-attempts 1` on the line ends the id after its first non-clear exit (any exit code, a used-up restart budget, or a stall) with the same verified teardown, marked done+stopped. A met goal still advances, and an instance-cap or hire-pool wait (the run never placed) never triggers it. `STOP-<id>` stops just that raid the clean way — its run stopped, its slot torn down and verified — and the id is marked stopped and never relaunched, while the other ids keep running. Once acted on, the file is renamed `STOP-<id>.done`. A stopped id is not a met goal: when it is the last one, the supervisor ends with `not every target's goals are met ...` and exit 0.
 
 ## 5. Stop everything
 
