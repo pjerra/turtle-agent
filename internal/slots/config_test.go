@@ -109,6 +109,28 @@ func TestTortoiseTest3Slot3IsAlwaysReserved(t *testing.T) {
 	}
 }
 
+// tortoise-test4/3 is never leasable even when the file lists it as a normal slot:
+// the explicit path (Find) and the any-free-slot path (--any) both refuse it.
+func TestTortoiseTest4Slot3IsAlwaysReserved(t *testing.T) {
+	st := testStore(t, `{"version":1,"servers":[
+		{"name":"tortoise-test4","realmd":"10.0.0.4:3724","slots":[{"id":"3","account":"TAGENT3","character":"Tac","port":8773,"settings_from":"/s.json"}]}]}`)
+	_, slot, err := st.Cfg.Find("tortoise-test4", "3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slot.Reserved != "owner rule: never slot 3 on tortoise-test4" {
+		t.Fatalf("tortoise-test4/3 Reserved = %q", slot.Reserved)
+	}
+	// Slot 3 is the only slot, so --any has nothing to lease and names it as reserved.
+	_, err = st.Acquire("tortoise-test4", "", true, "w-a", 3*time.Hour)
+	if err == nil {
+		t.Fatal("--any leased tortoise-test4 slot 3, want a no-free-slot refusal")
+	}
+	if !strings.Contains(err.Error(), "3 reserved") {
+		t.Fatalf("message %q lacks %q", err.Error(), "3 reserved")
+	}
+}
+
 func writeSlots(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()

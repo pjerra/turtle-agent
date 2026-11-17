@@ -27,7 +27,7 @@ const (
 
 // ErrGMRefused is the practice hands' refusal on an agent not authorized for gm_kill: its dialled host:port is not the
 // configured world_addr of a test server in the slots table.
-var ErrGMRefused = fmt.Errorf("gm: refused: this agent is not a slot of a test server (m910q, tortoise-test2)")
+var ErrGMRefused = fmt.Errorf("gm: refused: this agent is not a slot of a test server (m910q, tortoise-test2, tortoise-test3, tortoise-test4)")
 
 // practiceNameRe is the character-name shape `.revive` takes (the walk's own botName rule).
 var practiceNameRe = regexp.MustCompile(`^[A-Za-z]{2,12}$`)

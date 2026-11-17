@@ -39,6 +39,7 @@ var neverLeasable = map[string]string{
 	"m910q/3":          "owner rule: never slot 3 on m910q",
 	"tortoise-test2/3": "owner rule: never slot 3 on tortoise-test2",
 	"tortoise-test3/3": "owner rule: never slot 3 on tortoise-test3",
+	"tortoise-test4/3": "owner rule: never slot 3 on tortoise-test4",
 }
 
 var (

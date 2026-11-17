@@ -462,7 +462,7 @@ func TestParsePlaceRefusesInject(t *testing.T) {
 
 func TestParsePlaceServerGuard(t *testing.T) {
 	var stderr bytes.Buffer
-	for _, server := range []string{"m910q", "tortoise-test2", "tortoise-test3"} {
+	for _, server := range []string{"m910q", "tortoise-test2", "tortoise-test3", "tortoise-test4"} {
 		stderr.Reset()
 		if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", server, "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitOK {
 			t.Fatalf("%s: exit %d, stderr %q", server, code, stderr.String())
@@ -474,6 +474,23 @@ func TestParsePlaceServerGuard(t *testing.T) {
 			!strings.Contains(stderr.String(), "test servers only") {
 			t.Fatalf("%s: exit %d, stderr %q", server, code, stderr.String())
 		}
+	}
+}
+
+// TestPlaceServersIncludeTest4: tortoise-test4 is a test server like the other three;
+// a non-test name is still refused. Fails on origin/dev, where placeServers lacks test4.
+func TestPlaceServersIncludeTest4(t *testing.T) {
+	if !placeServers["tortoise-test4"] {
+		t.Fatalf("placeServers lacks tortoise-test4: %v", placeServerList())
+	}
+	var stderr bytes.Buffer
+	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", "tortoise-test4", "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitOK {
+		t.Fatalf("tortoise-test4: exit %d, stderr %q", code, stderr.String())
+	}
+	stderr.Reset()
+	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", "prod-realm", "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitUsage ||
+		!strings.Contains(stderr.String(), "test servers only") {
+		t.Fatalf("prod-realm: exit %d, stderr %q", code, stderr.String())
 	}
 }
 

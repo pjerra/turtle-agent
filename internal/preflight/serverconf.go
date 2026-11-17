@@ -9,8 +9,8 @@ import (
 )
 
 // SSHConf reads a test server's config over a read-only, BatchMode ssh call. The ssh host is the server name of the
-// slot table (m910q, tortoise-test2): the owner's ssh config names the machines, while realmd's address can be a
-// default-switch NAT address that only the host and its siblings reach.
+// slot table (m910q, tortoise-test2, tortoise-test3, tortoise-test4): the owner's ssh config names the machines,
+// while realmd's address can be a default-switch NAT address that only the host and its siblings reach.
 type SSHConf struct {
 	Host  func(server string) string // nil: the server name
 	Paths []string                   // nil: the two test-server conf files
