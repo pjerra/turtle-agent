@@ -7,8 +7,6 @@ package main
 import (
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -47,7 +45,8 @@ var gnomerLegs = []struct {
 // dormitory rings' far side, the Fallout caves' side pockets, the west wing, the lower halls west of the tunnel, the
 // Launch Bay's lower floor and east ring, the Engineering Labs' lower floor and south wing, and the final corridors'
 // lower-deck platform. None of them stands within 18 yd of a kept pack, so 6 yd tells a re-added pack from a kept one.
-var gnomerDropped = [][3]float64{
+// TestGnomereganDroppedPacksAsleep walks the route against it.
+var gnomerDropped = packsAt([][3]float64{
 	{-532, 165, -155}, {-532, 161, -155}, {-554, 169, -155},
 	{-564, 184, -194}, {-492, 196, -194}, {-478, 165, -208},
 	{-498, 131, -209}, {-408, 159, -210}, {-398, 137, -211},
@@ -78,26 +77,7 @@ var gnomerDropped = [][3]float64{
 	{-677, 542, -286}, {-751, 600, -304}, {-740, 656, -322},
 	{-727, 652, -309}, {-745, 626, -313}, {-727, 693, -331},
 	{-709, 693, -318}, {-688, 705, -331},
-}
-
-// gnomerPlannerOrNil is the map-90 navmesh when the machine has the server's mmaps, nil otherwise.
-func gnomerPlannerOrNil(t *testing.T) *navmesh.Planner {
-	t.Helper()
-	home, _ := os.UserHomeDir()
-	for _, dir := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "turtle-agent-mmaps")} {
-		if dir == "" {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(dir, "090.mmap")); err != nil {
-			continue
-		}
-		if tiles, _ := filepath.Glob(filepath.Join(dir, "090*.mmtile")); len(tiles) == 0 {
-			continue
-		}
-		return navmesh.NewPlanner(dir)
-	}
-	return nil
-}
+})
 
 // gnomerPartyRows are the rows that put the party somewhere: an interaction row (open, loot) is not a waypoint.
 func gnomerPartyRows(kind string) bool {
@@ -149,18 +129,15 @@ func TestGnomereganRouteOrder(t *testing.T) {
 		t.Errorf("%d packs / %d units, want 79 / 163: the short route keeps the packs on the four boss walks", packs, units)
 	}
 	for _, dropped := range gnomerDropped {
-		at := dungeon.Point{X: float32(dropped[0]), Y: float32(dropped[1]), Z: float32(dropped[2])}
+		at := dropped.Centre()
 		for _, keep := range kept {
 			if d := gnomerDist(at, keep); d < 6 {
-				t.Errorf("the dropped pack at %.0f %.0f %.0f is back: a pull group stands %.1f yd from it", dropped[0], dropped[1], dropped[2], d)
+				t.Errorf("the dropped pack at %.0f %.0f %.0f is back: a pull group stands %.1f yd from it", dropped.X, dropped.Y, dropped.Z, d)
 			}
 		}
 	}
 
-	pl := gnomerPlannerOrNil(t)
-	if pl == nil {
-		t.Skip("no map 90 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 090.mmap and its tiles")
-	}
+	pl := droppedPlanner(t, p.Map, "")
 	defer pl.Close()
 
 	res, err := planexport.Build(p, planexport.Options{})
@@ -203,4 +180,22 @@ func gnomerPath(t *testing.T, pl *navmesh.Planner, mapID uint32, a, b dungeon.Po
 func gnomerDist(a, b dungeon.Point) float64 {
 	dx, dy, dz := float64(a.X-b.X), float64(a.Y-b.Y), float64(a.Z-b.Z)
 	return math.Sqrt(dx*dx + dy*dy + dz*dz)
+}
+
+// TestGnomereganDroppedPacksAsleep walks the short route on the server's navmesh against the 89 packs the order drops:
+// the dormitory's far rings, the Fallout caves' side pockets, the west wing, the Launch Bay's lower floor and east ring
+// and the lower-deck corridors are off the boss-to-boss road, and the re-order bought its 4,234 yd by leaving them alone.
+// It is the route-order audit's trash-check, kept as a test (droppedPacksAsleep: every path segment sampled every 2 yd,
+// the pack's aggro at the plan's lowest level plus the 5 yd party spread, and the trash check's 15 yd floor band as the
+// wake rule; no line of sight, as the export has no vmap), and the 48 spawns its walk comes within reach of by distance
+// alone are recorded in droppedPackKnownReachable, proven asleep by dungeon round 39 on test3 (159/159 in 4454 s, 0
+// wipes, 6 deaths; the lower deck under the last corridor and the Launch Bay's lower floor among them). A new
+// distance-reachable dropped spawn, or a recorded one the walk no longer comes near, fails the test. Skips without the
+// map-90 navmesh unless TURTLE_AGENT_MMAPS_REQUIRED=1.
+func TestGnomereganDroppedPacksAsleep(t *testing.T) {
+	p, err := dungeon.Load(gnomerPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	droppedPacksAsleep(t, p, gnomerDropped, "")
 }

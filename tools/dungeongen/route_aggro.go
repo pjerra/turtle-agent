@@ -228,10 +228,10 @@ func routePartySpread(p *dungeon.Plan) float64 {
 	return 3
 }
 
-// routeReach is a spawn's proximity wake reach: the same rule the trash check uses (worldspawn.AggroRadius, built on
-// detection_range with the party-minus-creature level difference, NO_AGGRO and the spread), plus the spawn's wander.
-// A spawn the export carries no range for wakes at the 20 yd default; a NO_AGGRO spawn never wakes.
-func routeReach(p *dungeon.Plan, c creature) float64 {
+// spawnAggroReach is a spawn's proximity wake reach without the party's spread: worldspawn.AggroRadius (the same rule the
+// trash check uses: detection_range with the party-minus-creature level difference, NO_AGGRO) at the plan's party level,
+// plus the spawn's wander. A spawn the export carries no range for wakes at the 20 yd default; a NO_AGGRO spawn wakes at 0.
+func spawnAggroReach(p *dungeon.Plan, c creature) float64 {
 	det := c.DetectionRange
 	if det <= 0 {
 		det = defaultDetectionYd
@@ -243,7 +243,12 @@ func routeReach(p *dungeon.Plan, c creature) float64 {
 		wander = 0
 	}
 	s := worldspawn.Spawn{LevelMax: c.LevelMax, DetectionYd: float32(det), FlagsExtra: c.FlagsExtra, Wander: wander}
-	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + routePartySpread(p) + float64(wander)
+	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + float64(wander)
+}
+
+// routeReach is a spawn's proximity wake reach: spawnAggroReach plus the party's spread (routePartySpread).
+func routeReach(p *dungeon.Plan, c creature) float64 {
+	return spawnAggroReach(p, c) + routePartySpread(p)
 }
 
 // RouteIntoLaterPacks lists every spawn within aggro of a straight route segment that a later row pulls (or that no
