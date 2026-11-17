@@ -528,7 +528,7 @@ func marliMmapsPlanner(t *testing.T) *navmesh.Planner {
 		t.Cleanup(p.Close)
 		return p
 	}
-	t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+	skipMissingMmaps(t, "no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
 	return nil
 }
 
@@ -991,6 +991,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	if planner != nil {
 		defer planner.Close()
 	} else {
+		missingMmapsFatal(t, "no map 309 navmesh files: the leg-4 terrace polylines cannot be recomputed")
 		t.Logf("no map 309 navmesh files: the committed polylines in %s are checked and the recomputation is skipped (set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles); the straight-line check below still runs", arlokkRoutesFixture)
 	}
 	if *updateRoutes {
@@ -1456,6 +1457,7 @@ func TestZulGurubMarliStep203RouteClearOfLaterPacks(t *testing.T) {
 	if pl != nil {
 		defer pl.Close()
 	} else {
+		missingMmapsFatal(t, "no map 309 navmesh files: the leg-2 polyline route check cannot run")
 		t.Log("no map 309 navmesh files: the polyline route check is skipped (set TURTLE_AGENT_MMAPS); the straight segments below always run")
 	}
 	worstSample := func(samples []dungeon.Point, fams []uint64) (float64, string, dungeon.Point) {
@@ -1758,6 +1760,8 @@ func TestZulGurubMarliStep203StandClearOfPack0(t *testing.T) {
 	planner := marliPlannerOrNil(t)
 	if planner != nil {
 		defer planner.Close()
+	} else {
+		missingMmapsFatal(t, "no map 309 navmesh files: the step-203 stand and walks cannot be recomputed")
 	}
 	short := func(s string) string {
 		if len(s) > 60 {

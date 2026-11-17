@@ -45,7 +45,7 @@ func zgW35Leg(t *testing.T, p *dungeon.Plan, name string) *dungeon.Leg {
 func TestZgW35WalkBackWaterBounds(t *testing.T) {
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("needs the map-309 mmaps")
+		skipMissingMmaps(t, "needs the map-309 mmaps")
 	}
 	defer pl.Close()
 	// (from, to) plan points of the implicated forward segments and the probe

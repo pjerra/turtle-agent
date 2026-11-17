@@ -938,6 +938,51 @@ func TestApproachHopsCutAPullOnAnotherLevel(t *testing.T) {
 	}
 }
 
+// The lead row before a cut approach takes its z from the floor when Options.Floor is set: the straight line from the cutter's
+// last corner to the target can run under a ramp or a ledge (route audit B6a: blackrock_depths step 717, 3.7 yd under its floor).
+// A lead point with no plain ground under it gets no row, and the warning says so.
+func TestApproachHopsLeadPointTakesTheFloor(t *testing.T) {
+	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":47,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
+	// One corner 70 yd from the pack: the standoff keeps it, so a lead row is added 30 yd out (x 70), interpolated at z 0.
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 30, Y: 0, Z: 0}}, nil, nil
+	}
+	floor := func(_ uint32, p dungeon.Point) (dungeon.Point, bool) {
+		return dungeon.Point{X: p.X, Y: p.Y, Z: 7}, true
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true, Floor: floor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lead *StepRow
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull {
+			lead = &res.Rows.Steps[i-1]
+		}
+	}
+	if lead == nil || lead.Kind != KindMove || lead.X != 70 {
+		t.Fatalf("no lead row 30 yd before the pack: %v", kinds(res.Rows, 0))
+	}
+	if lead.Z != 7 {
+		t.Fatalf("the lead row's z is %.1f, want the floor's 7: %+v", lead.Z, *lead)
+	}
+	// No plain ground under the lead point: no row there, and the warning names it.
+	noFloor := func(_ uint32, p dungeon.Point) (dungeon.Point, bool) { return dungeon.Point{}, false }
+	res, err = Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true, Floor: noFloor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range res.Rows.Steps {
+		if s.Kind == KindMove && s.X == 70 {
+			t.Fatalf("a lead row was written with no floor under it: %v", kinds(res.Rows, 0))
+		}
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "lead point") {
+		t.Fatalf("warnings: %q", w)
+	}
+}
+
 // The last approach row must stand where the run leader sees the pack or boss (at most RunLeaderReachYd away): the floor-aware
 // cutter's hop or the 25 yd standoff can leave the kept corner 70+ yd out (razorfen_kraul round 35: the boss row 73.5 yd from the
 // last approach row). A point on the path just past the standoff is the last row then; a cutter whose corner is already within the

@@ -12,6 +12,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/plancut"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/planlint"
 	"github.com/pjerra/turtle-agent/internal/rpc"
@@ -173,7 +174,7 @@ func lintCountsText(c map[string]int) string {
 // failure: the note says why the lints did not run.
 func planLints(p *dungeon.Plan, planner *navmesh.Planner, dir, spawnDir string, floorAware, approachHops bool) ([]planlint.Finding, string, error) {
 	planner.SetAvoid(p.Map, dungeon.NavBoxes(p.Avoid))
-	rows, err := planexport.Build(p, planexport.Options{Source: "plan-check", Cut: cutWith(planner, floorAware), ApproachHops: approachHops})
+	rows, err := planexport.Build(p, planexport.Options{Source: "plan-check", Cut: plancut.Cut(planner, floorAware), ApproachHops: approachHops, Floor: plancut.FloorAt(planner)})
 	if err != nil {
 		return nil, fmt.Sprintf("lints skipped: the exporter refused the plan: %v", err), nil
 	}

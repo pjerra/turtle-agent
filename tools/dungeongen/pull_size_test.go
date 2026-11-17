@@ -86,7 +86,7 @@ var pullSizeKnownCounts = map[string]int{
 	"ruins_of_ahnqiraj": 29, "temple_of_ahnqiraj": 74, "naxxramas": 150, // re-pinned for the AQ waypoint pass (was 32): three over-ceiling estimates are gone, the leg-0 stands moved out of the wasp ring, the leg-3 stand off the Rajaxx cluster walk, and leg-6 pull 4 drops 15 bodies to 9.
 	"stormwrought_ruins":   169,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
 	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.
-	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 120, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
+	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 121, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
 	"maraudon_orange": 57, "maraudon_purple": 75, "blackrock_depths": 228, "scholomance": 163, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts.
 	"razorfen_kraul": 84, "dire_maul_north": 58, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
 	"blackfathom_deeps": 58, "gnomeregan": 36, "lower_blackrock_spire": 106, "stormwind_vault": 55, // gnomeregan 88 -> 36 (route order fix 2026-11-12): 79 packs instead of 168, so 52 fewer pulls stand over the ceiling. The round-2 re-add went back to 37 and is gone (issue #1542 round 3, 2026-11-13): the lower-deck 6212/6232 pack is no pull of this leg (its only walk is the 265 yd lower-deck loop across the packs the short route drops), so 36 stands.
@@ -94,7 +94,9 @@ var pullSizeKnownCounts = map[string]int{
 	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 44, "scarlet_library": 42, "shadowfang_keep": 71,
 	"stormwind_stockade": 34, "stratholme_live": 51, "stratholme_undead": 74,
 	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
-	"crescent_grove": 96, "dragonmaw_retreat": 85, "gilneas_city": 90, "black_morass": 35,
+	// b6a (2026-11-14): crescent_grove 96 -> 94 and hateforge_quarry 120 -> 121 after the batch's approach stands (the
+	// estimated bodies of a pull are counted from its stand, so a moved stand moves the count).
+	"crescent_grove": 94, "dragonmaw_retreat": 85, "gilneas_city": 90, "black_morass": 35,
 	// fresh Onyxia plan for core 1181dev (two legs, seven packs, stand pulls): the stale map249 export holds only
 	// the five Warders, so packs 5 and 6 own no spawn of their entries (no target) until it is re-exported.
 	"onyxias_lair": 2,

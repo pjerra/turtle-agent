@@ -9,6 +9,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/plancut"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -286,9 +287,10 @@ func observePlanRows(p *dungeon.Plan, planner *navmesh.Planner) ([]planexport.Ro
 	if len(boxes) > 0 {
 		aware.SetAvoid(p.Map, boxes)
 	}
-	cut := cutWith(aware, false)
+	cut := plancut.Cut(aware, false)
 	o := base
 	o.Cut = cut
+	o.Floor = plancut.FloorAt(aware)
 	add(o, "cut hops")
 	o.ApproachHops = true
 	add(o, "cut hops and approach paths")
@@ -298,6 +300,7 @@ func observePlanRows(p *dungeon.Plan, planner *navmesh.Planner) ([]planexport.Ro
 		route := routeAround(naive, aware, boxes)
 		ro := base
 		ro.Cut, ro.Route = cut, route
+		ro.Floor = plancut.FloorAt(aware)
 		add(ro, "cut hops and avoid-box routes")
 		ro.ApproachHops = true
 		add(ro, "cut hops, approach paths and avoid-box routes")

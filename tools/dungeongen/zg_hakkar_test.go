@@ -63,7 +63,7 @@ func TestZgHakkarBossApproachOnHisPlatform(t *testing.T) {
 
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("needs the map-309 mmaps (the floor and the sight ray)")
+		skipMissingMmaps(t, "needs the map-309 mmaps (the floor and the sight ray)")
 	}
 	defer pl.Close()
 	const mapID = 309
