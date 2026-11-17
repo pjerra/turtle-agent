@@ -67,14 +67,21 @@ melee, hunter ranged, shadow/balance/elemental/mage/warlock caster). Neither the
 source: a mixed batch like walk 101b's `5h 13d` names no role for a priest, paladin, druid or shaman, while the module's
 row names the bot's own spec. The walk's mt and ot are tanks whatever their kit. A bot the snapshot leaves out, an
 incomplete snapshot, and a kit naming no spec or specs of more than one role all fail closed before any aura;
-`prepull-auras.json` records the source as `role_source` and each bot's `specs`. The batch is fail-closed: the commander and every living raid member, list or no list, are re-read for
+`prepull-auras.json` records the source as `role_source` and each bot's `specs`. A bot that comes up short also gets
+an `others` list: the spell ids it carries that are not in its list (sorted, at most 24, absent when it misses
+nothing), which is what names the food buff a bot already holds instead of the Well Fed id a fire could not put on it
+(the core's `spell_group` 1001 allows one food buff per target, so the bot's own food wins on that bot and the walk
+can only record it). The batch is fail-closed: the commander and every living raid member, list or no list, are re-read for
 combat before each `.aura` (an in-combat unit or an unreadable `unit` row stops the batch), a boss row's arena is read
 fresh from the server (`q units` around the row: a boss already engaged, a read that cannot be made or that lists no
 unit of the boss, or a unit row without its combat state, stops the walk), and every bot the walk hired must receive a
 list — a fire that reaches fewer of them, or none at all, fails with the bots and reasons named. A boss row lands in
 `boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
 By default every requested aura must verify; a miss fails the walk,
-and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot
+and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids on any ONE bot (the bound is
+per bot, not per batch). A fire whose bots miss within the tolerance logs them with a per-id tally
+(`; missing by id: 22730 x7, 18192 x5`: bots per id), because "26 of 39 bots carry their lists" with every short bot
+missing one id is 13 bots short of the same id, not 13 ids missing.
 (see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).
 Its `gm_aura` RPC is the select-then-`.aura <id>` hand behind it (see [the RPC reference](docs/okf/agent/rpc-reference.md)).
 `--prepull-aura-when start` fires the same lists ONCE instead, after the hire, the gear and the placement and before
@@ -98,10 +105,20 @@ the flasks and the world buffs expire — then reads them back. A boss row is th
 `--prepull-aura-when boss` (the default), so the top-up stays out of it and never sends a list the fire is sending;
 under `--prepull-aura-when start`, where no boss row is fired, the top-up is what reads and tops up the hires at the
 boss pull. It uses the fire's path (the commander join when the unit store cannot see the raid, the per-bot role, the
-combat recheck before each send), pauses the run only while there is something to send (at most 15 s, resumed right
-after or at the cap), never targets a dead bot, and never fails the walk: combat during the top-up stops the batch
+combat recheck before each send), pauses the run only while there is something to send, and is bounded at 15 s in two
+ways so it can never hold the poll loop past a boss fire: combat is read BEFORE the pause (an in-combat raid gets no
+pause and no `.aura`), and one call stops sending 15 s after it started, before its reads, whether the run is paused by
+it, already paused or unheld. That budget is the call's ONE budget: it is taken before the raid read, every RPC of the
+call (raid, join, roles, status, hire reads, combat rechecks, pause, sends) uses it with the time left as its own wait,
+the check is repeated after each send's own combat read, and a read it cut caps the step instead of reading as a unit
+failure. A pull step whose budget is spent is capped: every later
+status of that step reads and sends nothing (`prepull-aura: topup before step N: the 15s pause budget is spent; no
+further top-up before this pull`), and the capped call reads its sends back once with no wait, so its tally line still
+names what is short without holding the poll loop for the 5 s verify window — a hire a cut batch left half-done is read
+back and tallied with what it still lacks. It never targets a dead bot, and never
+fails the walk: combat during the top-up stops the batch
 quietly and the pull goes on. One `run.log` line names the pull and each topped bot with the ids put back and the
-cause (`death`, `expired`, or `never had`). Completion is tracked per hire: each hire is read once per pull step, and
+cause (`death`, `expired`, or `never had`), and ends with the per-id tally of what is still short. Completion is tracked per hire: each hire is read once per pull step, and
 one a status could not read (a failed unit read, a body, a hire out of the commander's view) is read again at the next
 pre-pull status of the same pull. A hire that still lacks an id after 3 sends is done for that pull step too, with one
 line naming the ids (`... still lacks <ids> after 3 tries; giving up for this step`): an aura the server will not

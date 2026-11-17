@@ -68,6 +68,17 @@
 // 0.16 s after the last `.tele`, on two unit reads of the MT that failed before the store had it. No boss row is
 // fired in this mode: at each boss pull the walk only READS which auras are still up on each bot and logs them, so a
 // walk shows the coverage the fight started with.
+//
+// --prepull-aura-topup is bounded so it can never hold the poll loop past a boss fire (walk 2m's a4-1 abort: the
+// top-up's pause hit its 15 s cap, the pause's ACK came back late after the walk's resume, and while the loop sat in
+// the top-up the run passed step 38, the boss fire's row, which then came up unprepared). Three bounds, all in
+// prepullAuraTopup: (B1) combat is read BEFORE the pause, so a pull that already started costs no GM line at all and
+// no pause is asked for during a fight, with the recheck after the pause kept; (B2) a pull step whose budget is spent
+// is capped — every later status of that step reads and sends nothing (prepullTopupSettled); (B3) one call's wall
+// budget starts before its reads and bounds every send of it, whether the run is paused by the call, already paused
+// or unheld. The read-back records what a bot carries instead of a missing id (`others`), and both the fire's
+// tolerance line and the top-up's step line carry a per-id tally, so a per-bot tolerance miss is not misread as "N
+// ids missing".
 package main
 
 import (
@@ -161,6 +172,11 @@ type prepullAuraList struct {
 }
 
 // prepullAuraRecord is one bot's line: its aura role, every id this walk sent it, and what the last read showed.
+// Others is what the read-back found the bot carrying INSTEAD of an id it lacks: the aura ids on the unit that are not
+// in its list (sorted, at most dungeon.AurasOtherMax), nil when it misses nothing. A missing Well Fed id is usually
+// this: the core's spell_group 1001 lets a target hold one food buff, and the bot already holds another (its own
+// food), which TA cannot replace. Recording it says which aura it holds instead, so the lead can pick the preset's
+// food or ask TortoiseBots.
 type prepullAuraRecord struct {
 	Bot     string   `json:"bot"`
 	Role    string   `json:"role"`
@@ -168,6 +184,7 @@ type prepullAuraRecord struct {
 	Sent    []uint32 `json:"sent"`
 	Seen    []uint32 `json:"seen"`
 	Missing []uint32 `json:"missing"`
+	Others  []uint32 `json:"others,omitempty"`
 }
 
 // prepullAuraTarget is one bot of a fire: its record, its guid, the list it must carry and what it lacked at the send.
@@ -325,12 +342,18 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 		return false, nil
 	}
 	// --prepull-aura-topup stands before every pull row, boss rows included (a boss pull's hires are read there, which
-	// under --prepull-aura-when start is the only read they get): it pauses the run only when it has something to send
-	// (capped at 15 s), never fails the walk, and does not fire this line loop (nothing of the run's state changes, so
-	// the page's other lines are still worth handling). A boss row the boss-row fire owns is the fire's business, not
-	// the top-up's (prepullTopupBossFires).
+	// under --prepull-aura-when start is the only read they get): it pauses the run only when it has something to send,
+	// and both the call and the pull step are bounded at 15 s (prepullAuraTopup B1-B3), so it cannot hold this loop
+	// past a boss fire. It does not fire this line loop (nothing of the run's state changes, so the page's other lines
+	// are still worth handling), and the only failure of it that reaches the walk is its resume's, failed twice (the
+	// run may then be paused). A boss row the boss-row fire owns is the fire's business, not the top-up's
+	// (prepullTopupBossFires).
 	if step := w.prepullTopupStep(st, later); step != 0 {
-		w.prepullAuraTopup(ctx, st, step)
+		// The top-up stops the walk for one reason only: its resume failed twice and the run may be paused (a run left
+		// paused is a dead raid, as it is for the boss-row fire). Every other failure of it is a line.
+		if err := w.prepullAuraTopup(ctx, st, step); err != nil {
+			return false, err
+		}
 	}
 	if w.opts.prepullAuraWhen == prepullAuraWhenStart {
 		// --prepull-aura-when start fired once before the run's first move: a boss row is never a place to send
@@ -498,8 +521,12 @@ func (w *walk) prepullTopupMark(pullStep int, name string) *prepullTopupHire {
 }
 
 // prepullTopupSettled reports whether every hire of the roster is done for this pull step's top-up: only then does a
-// later status of the same step read nothing at all.
+// later status of the same step read nothing at all. A step whose 15 s budget is spent counts as done (B2): every later
+// status of it reads nothing and sends nothing, because the poll loop must not sit in the top-up past a boss fire.
 func (w *walk) prepullTopupSettled(pullStep int, roster []string) bool {
+	if w.prepullTopupCapped[pullStep] {
+		return true
+	}
 	for _, name := range roster {
 		if h := w.prepullTopupDone[pullStep][strings.ToLower(name)]; h == nil || !h.read {
 			return false
@@ -519,23 +546,91 @@ func (w *walk) prepullAuraTopupSaid(pullStep int, name, format string, a ...any)
 	w.prepullAuraTopupLine(format, a...)
 }
 
-// prepullAuraTopupUnheldOnce logs that pullStep's top-up is going out without a run pause, once per step.
-func (w *walk) prepullAuraTopupUnheldOnce(pullStep int, format string, a ...any) {
-	if w.prepullTopupUnheld[pullStep] {
+// prepullAuraTopupOnce logs one line per pull step for key: a step's stop line names the same raid state on every
+// later status of the step (combat, an unheld top-up), so the second line would only repeat the first.
+func (w *walk) prepullAuraTopupOnce(pullStep int, key, format string, a ...any) {
+	if w.prepullTopupSaid[pullStep][key] {
 		return
 	}
-	if w.prepullTopupUnheld == nil {
-		w.prepullTopupUnheld = map[int]bool{}
+	if w.prepullTopupSaid == nil {
+		w.prepullTopupSaid = map[int]map[string]bool{}
 	}
-	w.prepullTopupUnheld[pullStep] = true
+	if w.prepullTopupSaid[pullStep] == nil {
+		w.prepullTopupSaid[pullStep] = map[string]bool{}
+	}
+	w.prepullTopupSaid[pullStep][key] = true
 	w.prepullAuraTopupLine(format, a...)
 }
 
-// prepullTopupPauseCap is the longest a top-up's run pause may hold the raid before resuming.
+// prepullAuraTopupUnheldOnce logs that pullStep's top-up is going out without a run pause, once per step.
+func (w *walk) prepullAuraTopupUnheldOnce(pullStep int, format string, a ...any) {
+	w.prepullAuraTopupOnce(pullStep, "unheld", format, a...)
+}
+
+// prepullTopupCapStep marks pullStep's top-up capped and names it once: its 15 s budget is spent (the run pause's, or
+// the whole call's wall budget when the pause was never held), so no later status of the step reads or sends anything
+// (B2), and the poll loop is free for the run's own lines. It reports whether this call is the one that capped it.
+func (w *walk) prepullTopupCapStep(pullStep int, where string) bool {
+	if w.prepullTopupCapped[pullStep] {
+		return false
+	}
+	if w.prepullTopupCapped == nil {
+		w.prepullTopupCapped = map[int]bool{}
+	}
+	w.prepullTopupCapped[pullStep] = true
+	w.prepullAuraTopupLine("prepull-aura: %s: the 15s pause budget is spent; no further top-up before this pull", where)
+	return true
+}
+
+// prepullTopupPauseCap is the top-up's 15 s budget, and it is one budget of two readings (B2/B3): a run pause it holds
+// is resumed when it is spent, and one top-up CALL stops sending when it is spent since the call started, before the
+// reads, whether the run was held, already paused or never held. Either way the pull step is marked capped, so every
+// later status of it reads and sends nothing.
 const prepullTopupPauseCap = 15 * time.Second
 
-// errTopupPauseCap stops ApplyAuras when a top-up's run pause reaches prepullTopupPauseCap.
-var errTopupPauseCap = errors.New("prepull-aura: top-up pause cap reached")
+// prepullTopupReadBackMin is the shortest real-time window a capped call's read-back gets when the budget has nothing
+// left: no poll, one read per sent hire, but each read still has to answer. It is a var so a test can make the window
+// expire inside the pass.
+var prepullTopupReadBackMin = time.Second
+
+// errTopupPauseCap stops ApplyAuras when a top-up's 15 s budget is spent mid-batch.
+var errTopupPauseCap = errors.New("prepull-aura: top-up 15s budget spent")
+
+// prepullTopupCtx derives the context one top-up call's RPCs are made with: a real-time bound of the budget left on the
+// walk's clock, the clock the deadline was taken on (a fake clock must not become a wall deadline). The budget is the
+// context's CAUSE, so prepullTopupCut can tell the top-up's own end from the walk's (a cancelled parent): a call with no
+// budget left starts on a cut context, so not one RPC of it can wait.
+func (w *walk) prepullTopupCtx(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
+	left := deadline.Sub(w.env.now())
+	if left <= 0 {
+		tctx, cancel := context.WithCancelCause(ctx)
+		cancel(errTopupPauseCap)
+		return tctx, func() {}
+	}
+	return context.WithDeadlineCause(ctx, time.Now().Add(left), errTopupPauseCap)
+}
+
+// prepullTopupCut reports errTopupPauseCap when the call's budget ended: its context is done for the budget's own cause,
+// or the walk's clock reached the deadline the call took at entry. A read that came back empty then was cut by the
+// budget, not answered by a broken store, and the step is capped instead of stopped. A context that is done because the
+// WALK ended (its parent was cancelled) is not a budget: the parent's own error is returned, and the caller leaves
+// without a budget line, a read-back or a record. Outside a top-up (no deadline) it never reports a cut.
+func (w *walk) prepullTopupCut(ctx context.Context) error {
+	deadline := w.prepullTopupSendDeadline
+	if deadline.IsZero() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		if errors.Is(context.Cause(ctx), errTopupPauseCap) {
+			return errTopupPauseCap
+		}
+		return err
+	}
+	if !w.env.now().Before(deadline) {
+		return errTopupPauseCap
+	}
+	return nil
+}
 
 // prepullTopupMarkSeen records the spell ids observed on name in this run.
 func (w *walk) prepullTopupMarkSeen(name string, ids []uint32) {
@@ -593,15 +688,37 @@ func (w *walk) prepullTopupCause(name string, missing []dungeon.Buff) string {
 //
 //   - only the bots that are missing something are sent to, and only their missing ids: a bot that carries its list
 //     costs no GM line and no run pause;
-//   - when there is something to send and the run is running, it pauses the run before the sends (`.bot run pause`,
-//     capped at 15 s) and resumes it right after the sends (including on every early exit path);
-//   - nothing here fails the walk. A raid read, a join, a role or a unit read, a send and a read-back that does not
-//     land are a run.log line, never a stop: a missed top-up is the run the walk was already going to have, while the
-//     boss-row fire stays fail-closed.
+//   - combat is read BEFORE anything else (B1): an in-combat raid gets no pause and no send, because a pull that has
+//     started must cost no GM line and the pause's own round trip is where a4-1 lost its ACK. The recheck after the
+//     pause stays: a pull can start during it;
+//   - the call is bounded (B3): ONE budget is taken at entry, before the raid read, and every RPC of the call is made
+//     with it and with the time left as its own wait (the pause's wait and the resume's included), so no read can spend
+//     it unseen and no RPC can outlast it. Past prepullTopupPauseCap no send of it goes out — the run held by it,
+//     "already paused", or unheld alike — and a read the budget cut caps the step instead of reading as a failure. A
+//     resume is still always sent once a pause was SENT, whatever its answer, but with its own short context
+//     (min(10 s, max(2 s, time left)): a resume that blocks past the deadline caps the call too, so it is the last RPC
+//     of it, not one that extends it; a walk cancelled around the pause resumes on a fresh 2 s window instead. A
+//     pull step whose budget is spent is capped (B2): prepullTopupSettled answers true for it, so every later status of
+//     that pull reads nothing and sends nothing, and one line says so. That is what keeps the poll loop free for the
+//     run's own lines (a4-1: the loop sat in the top-up while the run passed the boss fire's row); a capped call also
+//     waits for nothing after its last send — one immediate read-back names what is short, the 5 s verify poll is
+//     skipped, and a hire a cut batch left half-done is read back and tallied too. A call that is not capped verifies
+//     for at most the time its budget has left, and the verify window's own end (a context deadline, or the walk's
+//     clock) never skips the record: the tally line and prepull-auras.json are always written. A hire the window ended
+//     INSIDE its read is unread, not a hire missing its whole list (its record keeps the earlier read, and it does not
+//     count toward the give-up). A walk that was itself cancelled is the one exception: it writes no budget line, takes
+//     no read-back and leaves no record, and only the resume goes out;
+//   - nothing here fails the walk except the run's own resume. A raid read, a join, a role or a unit read, a send and
+//     a read-back that does not land are a run.log line, never a stop: a missed top-up is the run the walk was already
+//     going to have, while the boss-row fire stays fail-closed. The resume is the exception because the run's state is
+//     not the top-up's to leave broken: it is tried twice in its one window, and a failure that outlives the retry
+//     stops the walk (exit 18, "prepull-aura: topup: resume failed twice; the run may be paused"), exactly as the
+//     boss-row fire does when its own resume fails.
 //
 // One run.log line names the pull step and every upgraded bot with the number of ids put back and the cause: "death"
 // when the frames saw that hire die since its last top-up, "expired" when the missing ids were seen on it before in
-// this run, and "never had" when they were never seen on it. Completion is tracked PER HIRE for the pull step
+// this run, and "never had" when they were never seen on it. It is written after the read-back and ends with the
+// per-id tally ("; missing by id: 22730 x7, 18192 x5"). Completion is tracked PER HIRE for the pull step
 // (prepullTopupDone): a hire is done only after its auras were read and the ids it lacked were sent and read back, and
 // a dead, unseen or unreadable one stays retryable on the next pre-pull status of the same step, at most one read of
 // that hire per status. A hire that still lacks an id after prepullTopupTryMax sends is done for the step too, with one
@@ -609,15 +726,114 @@ func (w *walk) prepullTopupCause(name string, missing []dungeon.Buff) string {
 // The step is done when every hire of the roster is done, and only then does a later status of the same step read
 // nothing. Nothing is carried to the next pull step: an aura that was present at one pull can expire seconds later, so
 // only a read at the pull itself says what the hires carry.
-func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullStep int) {
+func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullStep int) (stopErr error) {
 	roster := w.hireList()
 	if w.prepullTopupSettled(pullStep, roster) {
 		return
 	}
 	where := fmt.Sprintf("topup before step %d", pullStep)
-	raid, err := w.prepullRaid(ctx)
-	if err != nil {
+	// B3: ONE budget for the whole call, taken before its first read and applied to every RPC of it (the raid read, the
+	// commander join, the per-bot roles, the status, every hire's aura read, the combat rechecks, the pause and the
+	// sends), so no read can spend it unseen: the poll loop stays free for the run's own lines long enough that a boss
+	// row cannot come up while the top-up still reads or writes. Past it this call sends nothing, held, "already paused"
+	// or unheld, and the step is capped.
+	sendDeadline := w.env.now().Add(prepullTopupPauseCap)
+	tctx, cancel := w.prepullTopupCtx(ctx, sendDeadline)
+	defer cancel()
+	w.prepullTopupSendDeadline = sendDeadline
+	defer func() { w.prepullTopupSendDeadline = time.Time{} }()
+	// pauseTried is set BEFORE the pause RPC goes out, not after its ACK: a cut pause may have reached the run (the
+	// `.bot run pause` line was sent, and the budget cut the wait for its answer), and so may a pause whose answer is an
+	// error, a refusal or no ACK. The resume is deferred right there, before the RPC, so every exit after an attempted
+	// pause sends it exactly once: a run left paused is worse than a resume against a run that never paused — the resume
+	// is idempotent. The boss-row fire resumes the same way (prepullAuraSendPending).
+	pauseTried := false
+	resumed := false
+	// resumeStop is the walk's stop when the resume failed twice: it is carried out by the function's own return (the
+	// call has no other stop), so the deferred resume below can set it too.
+	var resumeStop error
+	// resume puts the run back whatever ended the call. It is still sent once whenever a pause was attempted — an
+	// expired context would leave the raid paused silently — but with its own short context (B3): the flat 10 s is one
+	// RPC that can outlast the call's budget, and a resume that blocks past it is exactly what held the poll loop after
+	// the deadline. min(10 s, max(2 s, time left)) keeps the smallest window a slow ACK can land in. It is idempotent,
+	// so the cap, a stop and the function's own return all resume exactly once, and it is tried twice inside that one
+	// window: a failure that outlives the retry sets resumeStop, and the walk stops rather than run paused.
+	resume := func() {
+		if !pauseTried || resumed {
+			return
+		}
+		resumed = true
+		wait := 10 * time.Second
+		if left := sendDeadline.Sub(w.env.now()); left < wait {
+			wait = max(left, 2*time.Second)
+		}
+		// The walk's own cancellation ends ctx too, and a resume on a done context never goes out: the run is put back
+		// on a fresh 2 s window instead (prepullTopupCut tells the walk's end from the budget's), because a run left
+		// paused is worse than a resume nobody waited for.
+		base := ctx
+		if ctx.Err() != nil {
+			base, wait = context.WithoutCancel(ctx), 2*time.Second
+		}
+		rctx, rcancel := context.WithTimeout(base, wait)
+		defer rcancel()
+		// A resume that errored or was refused is retried ONCE in its own window, the floor included: an answer lost on
+		// the way leaves the run paused until the next boss row fires, and the pull it was paused for runs on a raid
+		// nobody put back. The retry shares the one window (a second one would double the time the resume may hold the
+		// call), so a resume that spent it fails the retry too, and THAT is the failure a WARN cannot cover: the walk
+		// stops, as it does when the boss-row fire cannot resume.
+		var said string
+		for try := range 2 {
+			rep, err := w.commander(rctx, commanderReq{Op: "run", Verb: "resume", WaitMS: int(wait / time.Millisecond)})
+			switch {
+			case err != nil:
+				said = fmt.Sprintf("failed: %v", err)
+			case rep.Reply.Err != nil:
+				said = fmt.Sprintf("was refused: %s", rep.Reply.Err.Message)
+			default:
+				if try > 0 {
+					w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up %s; the retry put the run back", where, said)
+				}
+				return
+			}
+			if try == 0 {
+				w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up %s; retrying once", where, said)
+			}
+		}
+		resumeStop = stopf(exitRaidWalkFailed, "prepull-aura: topup: resume failed twice; the run may be paused")
+	}
+	capped := false
+	// capStep spends the step's budget: resume first (a run left paused stops the raid silently), then name the cap
+	// once and stop sending, whether the run was held by this call, already paused or unheld (B2/B3). A capped call
+	// also waits for nothing afterwards: its read-back is one immediate read (the verify loop below).
+	capStep := func() {
+		capped = true
+		w.prepullTopupCapStep(pullStep, where)
+		resume()
+	}
+	// ended closes the call for a read its context ended: the top-up's own budget caps the step (the budget line), and
+	// the walk's own cancellation (the parent's error, see prepullTopupCut) leaves silently — no budget line, no
+	// read-back, no record — the deferred resume still puts the run back.
+	ended := func() bool {
+		cut := w.prepullTopupCut(tctx)
+		if cut == nil {
+			return false
+		}
+		if errors.Is(cut, errTopupPauseCap) {
+			capStep()
+		}
+		return true
+	}
+	// stop ends the call: a read the budget cut is the step's cap (the budget line), never a read or combat failure; any
+	// other failure keeps its own stop line.
+	stop := func(err error) {
+		if ended() {
+			return
+		}
 		w.prepullAuraTopupStop(where, err)
+	}
+	raid, err := w.prepullRaid(tctx)
+	if err != nil {
+		stop(err)
 		return
 	}
 	hired := make(map[string]string, len(roster))
@@ -641,22 +857,22 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		return
 	}
 	// The unit store only holds what the commander can see (walk 105c, 105, 104): join the raid before reading it.
-	if err := w.prepullAuraJoinRaid(ctx, raid, where); err != nil {
-		w.prepullAuraTopupStop(where, err)
+	if err := w.prepullAuraJoinRaid(tctx, raid, where); err != nil {
+		stop(err)
 		return
 	}
 	// The roles come from the module's own state rows, read once per walk.
-	if _, err := w.prepullBotSpecs(ctx); err != nil {
-		w.prepullAuraTopupStop(where, stopf(exitRaidWalkFailed, "prepull-aura: %s: the per-bot roles could not be read: %v", where, err))
+	if _, err := w.prepullBotSpecs(tctx); err != nil {
+		stop(stopf(exitRaidWalkFailed, "prepull-aura: %s: the per-bot roles could not be read: %v", where, err))
 		return
 	}
-	st, err := w.status(ctx)
+	st, err := w.status(tctx)
 	if err != nil {
-		w.prepullAuraTopupStop(where, stopf(exitRaidWalkFailed, "prepull-aura: %s: the commander's status: %v", where, err))
+		stop(stopf(exitRaidWalkFailed, "prepull-aura: %s: the commander's status: %v", where, err))
 		return
 	}
 	if st.Character == "" || st.GUID == 0 {
-		w.prepullAuraTopupStop(where, stopf(exitRaidWalkFailed,
+		stop(stopf(exitRaidWalkFailed,
 			"prepull-aura: %s: the status names no commander (character %q, guid %s), so its combat state cannot be read", where, st.Character, st.GUID))
 		return
 	}
@@ -697,7 +913,10 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 			// Read at this pull step already: it stays in the combat watch and costs no read.
 			continue
 		}
-		u, seen := port.ViewUnit(ctx, unit)
+		u, seen := port.ViewUnit(tctx, unit)
+		if ended() {
+			return
+		}
 		if seen && (u.Dead || u.Ghost) {
 			continue
 		}
@@ -725,7 +944,10 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
 			continue
 		}
-		missing, ok := dungeon.AurasMissing(ctx, port, unit, want)
+		missing, ok := dungeon.AurasMissing(tctx, port, unit, want)
+		if ended() {
+			return
+		}
 		if !ok {
 			w.prepullAuraTopupSaid(pullStep, name, "prepull-aura: %s: %s: the unit read did not answer, so its auras cannot be read: skipped", where, name)
 			continue
@@ -749,34 +971,11 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	if len(targets) == 0 {
 		return
 	}
-	pauseHeld := false
-	resumed := false
-	resume := func() {
-		if !pauseHeld || resumed {
-			return
-		}
-		resumed = true
-		w.prepullTopupPauseDeadline = time.Time{}
-		if rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up failed: %v", where, err)
-		} else if rep.Reply.Err != nil {
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run resume after the top-up was refused: %s", where, rep.Reply.Err.Message)
-		}
-	}
-	if runSt.State == tbm.RunRunning {
-		deadline := w.env.now().Add(prepullTopupPauseCap)
-		if rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err != nil {
-			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause failed (%v): the top-up goes out unheld", where, err)
-		} else if rep.Reply.Err != nil {
-			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was refused (%s): the top-up goes out unheld", where, rep.Reply.Err.Message)
-		} else if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
-			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was not acknowledged (%s): the top-up goes out unheld", where, rep.Reply.Line)
-		} else {
-			pauseHeld = true
-			w.prepullTopupPauseDeadline = deadline
-			w.logLine(w.env.now(), fmt.Sprintf("> .bot run pause (prepull-aura, %s)", where))
-			defer resume()
-		}
+	// B3: the call's budget, spent by the reads: nothing goes out and the step is capped, so the run's poll loop is not
+	// held by a top-up that can no longer finish before the pull.
+	if !w.env.now().Before(sendDeadline) {
+		capStep()
+		return
 	}
 	// The watch and the send kernel's own combat recheck: the commander and every living member, list or no list. Each
 	// check is the one immediate read.
@@ -786,73 +985,248 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 		w.prepullAuraWatch, w.prepullAuraWhat = nil, ""
 		w.prepullAuraCombatWaitEnd = time.Time{}
 	}()
-	if err := w.prepullAuraCombatClear(ctx, where); err != nil {
-		w.prepullAuraTopupStop(where, err)
+	// clearCombat is one combat recheck of the batch, bounded by the call's budget, and says whether the sends may go
+	// on. A read the budget cut caps the step with the send loop's own line: the raid is not known to fight, so the
+	// combat stop line would name a cause the walk never saw.
+	clearCombat := func() bool {
+		err := w.prepullAuraCombatClear(tctx, where)
+		if err == nil {
+			return true
+		}
+		if ctx.Err() != nil {
+			// The walk itself ended: the read proves nothing, but this is not the top-up's budget either, so neither
+			// the budget line nor a stop line is written.
+			return false
+		}
+		if errors.Is(err, errTopupPauseCap) || w.prepullTopupCut(tctx) != nil {
+			capStep()
+			return false
+		}
+		w.prepullAuraTopupStopOnce(pullStep, "combat", where, err)
+		return false
+	}
+	// B1: combat is read BEFORE the pause. A pull that already started must cost no GM line at all, and a pause the
+	// walk asks for while the raid fights is exactly the late ACK that left a4-1's run paused at the wrong moment: the
+	// top-up then sent auras under no pause of its own while the run went on into the boss row.
+	if !clearCombat() {
+		return
+	}
+	if runSt.State == tbm.RunRunning {
+		// The pause is asked for with the time the budget has left: the flat 10 s wait could outlast the budget on its
+		// own, and the poll loop would sit in it.
+		pauseWait := 10000
+		if left := sendDeadline.Sub(w.env.now()); left < time.Duration(pauseWait)*time.Millisecond {
+			pauseWait = max(int(left/time.Millisecond), 1)
+		}
+		// From here the run may be paused whatever this call returns: a pause cut by the budget sent its line, and its
+		// answer never came, and an error or a refusal may still mean the command reached the run. See pauseTried. So
+		// every exit from here resumes, whatever the answer says: a resume against a running run is a no-op, a run left
+		// paused is a dead raid. The explicit resume() after the sends still runs first, so the run is unpaused before
+		// the read-back. A resume that fails twice is the ONE exit here that is not a WARN: the walk stops with
+		// resumeStop, whatever else this call decided.
+		pauseTried = true
+		defer func() {
+			resume()
+			if resumeStop != nil {
+				stopErr = resumeStop
+			}
+		}()
+		if rep, err := w.commander(tctx, commanderReq{Op: "run", Verb: "pause", WaitMS: pauseWait}); err != nil {
+			if ended() {
+				return
+			}
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause failed (%v): the top-up goes out unheld", where, err)
+		} else if rep.Reply.Err != nil {
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was refused (%s): the top-up goes out unheld", where, rep.Reply.Err.Message)
+		} else if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
+			w.prepullAuraTopupUnheldOnce(pullStep, "prepull-aura: WARN: %s: the run pause was not acknowledged (%s): the top-up goes out unheld", where, rep.Reply.Line)
+		} else {
+			w.logLine(w.env.now(), fmt.Sprintf("> .bot run pause (prepull-aura, %s)", where))
+		}
+	}
+	// The combat recheck after the pause too: the pause's own round trip is long enough for a pull to start.
+	if !clearCombat() {
 		return
 	}
 	cfg := dungeon.AuraCfg{Gap: prepullAuraGap, Settle: prepullAuraSettle, ViewWait: prepullAuraViewWait}
 	var parts []string
 	var sent []int
 	for i := range targets {
-		if pauseHeld && !w.env.now().Before(w.prepullTopupPauseDeadline) {
-			resume()
-			w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause reached %s; resuming and stopping the top-up", where, prepullTopupPauseCap)
+		if !w.env.now().Before(sendDeadline) {
+			capStep()
 			break
 		}
 		tg := &targets[i]
 		// The attempt is counted before the send: a batch that combat stops mid-list leaves this hire's tries at the
 		// attempt it did not finish, so a later status of the step still has the budget to put the rest back.
 		w.prepullTopupMark(pullStep, tg.rec.Bot).tries++
-		if oc, err := dungeon.ApplyAuras(ctx, port, tg.unit, tg.missing, cfg, w.env.now); err != nil {
+		// What the read-back and the tally follow is whether this hire got at least one aura of THIS call, and the
+		// record cannot say that: SendAura deduplicates into rec.Sent, so a re-sent aura (one an expiry or a death
+		// stripped after an earlier pull) grows no slice, and a batch the budget cuts returns before its own end.
+		// SendAura's success path counts instead, so the hire is read back and named whatever error ended the batch.
+		w.prepullTopupSent = 0
+		oc, err := dungeon.ApplyAuras(tctx, port, tg.unit, tg.missing, cfg, w.env.now)
+		// The count is what went out, not len(tg.missing): a batch the budget cut sent one of its three ids, and the
+		// line saying "+3" would overstate the top-up and disagree with the tally's own missing ids.
+		n := w.prepullTopupSent
+		w.prepullTopupSent = 0
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%s +%d (%s)", tg.rec.Bot, n, tg.cause))
+			sent = append(sent, i)
+		}
+		if err != nil {
 			if errors.Is(err, errTopupPauseCap) {
-				resume()
-				w.prepullAuraTopupLine("prepull-aura: WARN: %s: the run pause reached %s; resuming and stopping the top-up", where, prepullTopupPauseCap)
+				// A list the cap cut mid-way may already be partly on the hire: it was recorded as sent above, so the
+				// read-back and the tally below name what it got and what it still lacks instead of nothing or
+				// everything.
+				capStep()
 				break
 			}
-			w.prepullAuraTopupStop(where, err)
+			stop(err)
 			break
-		} else if oc != dungeon.AuraTaken {
+		}
+		if oc != dungeon.AuraTaken {
 			w.note("prepull-aura: %s: the first .aura (%s) did not land on the bot", tg.rec.Bot, tg.missing[0].Name)
 		}
-		parts = append(parts, fmt.Sprintf("%s +%d (%s)", tg.rec.Bot, len(tg.missing), tg.cause))
-		sent = append(sent, i)
 	}
 	resume()
-	if len(parts) > 0 {
-		w.prepullAuraTopupLine("prepull-aura: %s: %s", where, strings.Join(parts, ", "))
+	// A walk that ended takes no read-back and leaves no record: a read its cancellation cut is no evidence about the
+	// hires, and the window below is the walk's own. The resume above already put the run back, and this is not the
+	// top-up's budget, so the cap's line is not written either.
+	if ctx.Err() != nil {
+		return
 	}
+	// A resume can still hold the clock past the deadline (a slow ACK): the call's budget is spent then, so the call
+	// counts as capped — the step gets its budget line and every later status of it reads nothing — and its read-back is
+	// the ONE immediate read below, never the verify wait.
+	if !w.env.now().Before(sendDeadline) {
+		capStep()
+	}
+	// The read-back is evidence, not a send: its reads run with the send deadline lifted (a budget-cut read would report
+	// every hire the call sent to as missing its whole list, and the per-hire give-up would fire early), and the pass is
+	// bounded by the window the verify loop always had — one immediate read per sent hire, no poll, no sleep. A call
+	// with no time left has no window: its deadline is now, so the loop below reads once and leaves.
+	rbWait := prepullAuraVerifyWait
+	if left := sendDeadline.Sub(w.env.now()); left <= 0 {
+		rbWait = 0
+	} else if left < rbWait {
+		rbWait = left
+	}
+	w.prepullTopupSendDeadline = time.Time{}
+	// The window is the walk's clock — the clock the budget was taken on, so a fake clock does not become a wall
+	// deadline — and rbctx is derived FROM that deadline, never created with the window before the deadline is known
+	// (r3: the poll then hit its own context before the clock reached the deadline, and the early return skipped the
+	// record). A context deadline is the window's own end: the loop leaves it normally and the write below always runs.
+	rbDeadline := w.env.now().Add(rbWait)
+	// The one immediate read of a capped call still needs a window to answer in: a read made under a context that is
+	// already done fails, and an unread hire is recorded as missing its whole list (the budget-cut probe r3 warned of),
+	// which also fires the per-hire give-up early. The floor is the verify poll's own second, so a store that does not
+	// answer costs the call a second, never a top-up.
+	rbctx, rbcancel := context.WithTimeout(ctx, max(rbDeadline.Sub(w.env.now()), prepullTopupReadBackMin))
+	defer rbcancel()
 	// One read-back of the ids just sent: an aura the store does not show is on disk as missing, so the record says so
-	// instead of trusting a send that left a bot short.
-	for deadline := w.env.now().Add(prepullAuraVerifyWait); ; {
-		over := 0
-		for _, i := range sent {
+	// instead of trusting a send that left a bot short. over is how many sent hires still lack one. unread names the
+	// hires the window ended before or inside: a read under a done context fails, and failing it would overwrite what an
+	// earlier read of that hire showed with "missing its whole list" (and let the per-hire give-up fire early), so the
+	// pass stops there and leaves those hires exactly as they were.
+	readBack := func() (over int, unread []string) {
+		// The window (or the walk) ended: the reads from here on are no reads of the hires.
+		ended := func() bool { return rbctx.Err() != nil || ctx.Err() != nil }
+		rest := func(n int) []string {
+			out := make([]string, 0, len(sent)-n)
+			for _, j := range sent[n:] {
+				out = append(out, targets[j].rec.Bot)
+			}
+			return out
+		}
+		for n, i := range sent {
+			if ended() {
+				unread = append(unread, rest(n)...)
+				break
+			}
 			tg := &targets[i]
-			missing, seen := dungeon.AurasMissing(ctx, port, tg.unit, tg.missing)
+			missing, others, seen := dungeon.AurasRead(rbctx, port, tg.unit, tg.want)
+			if !seen && ended() {
+				// The window ended INSIDE the call: AurasRead collapses the call's own error into !seen, so the
+				// context is the only evidence there is, and a hire straddling the window is unread — never a hire
+				// missing its whole list. Its record keeps what the earlier read showed, it is not counted short and
+				// it does not count toward the per-step give-up.
+				unread = append(unread, rest(n)...)
+				break
+			}
 			if !seen {
-				missing = tg.missing
+				missing, others = tg.want, nil
 			}
 			tg.rec.Missing = raidwalk.PrepullIDs(missing)
 			tg.rec.Seen = subtractIDs(raidwalk.PrepullIDs(tg.want), tg.rec.Missing)
-			w.prepullTopupMarkSeen(tg.rec.Bot, tg.rec.Seen)
+			tg.rec.Others = nil
 			if len(missing) > 0 {
+				tg.rec.Others = others
 				over++
 			}
+			w.prepullTopupMarkSeen(tg.rec.Bot, tg.rec.Seen)
 		}
-		if over == 0 || !w.env.now().Before(deadline) {
-			break
+		return over, unread
+	}
+	var unread []string
+	// A capped step takes the read-back once and waits no more: its budget is spent, so the poll loop must be free for
+	// the run's own lines at the cap itself, not five polls later. The tally line still names what is short.
+	if capped || rbWait <= 0 {
+		_, unread = readBack()
+	} else {
+		for {
+			var over int
+			over, unread = readBack()
+			if over == 0 || !w.env.now().Before(rbDeadline) || rbctx.Err() != nil || ctx.Err() != nil {
+				break
+			}
+			if err := w.env.sleep(rbctx, prepullAuraVerifyPoll); err != nil {
+				// The window ended between two polls (rbctx is the window): what the last read showed is written below.
+				if rbctx.Err() != nil || ctx.Err() != nil {
+					break
+				}
+				w.prepullAuraTopupStop(where, err)
+				return
+			}
 		}
-		if err := w.env.sleep(ctx, prepullAuraVerifyPoll); err != nil {
-			w.prepullAuraTopupStop(where, err)
-			return
+	}
+	// The walk ended inside the read-back: it leaves without the record, as it does before the pass (a cancelled walk's
+	// reads say nothing about the hires). The resume already went out.
+	if ctx.Err() != nil {
+		return
+	}
+	// The step's one line, written after the read-back so it can name what is still short per id: a line read as
+	// "26-31 of 39 carry their lists" says nothing about WHICH id the short bots miss, and the per-bot tolerance
+	// cannot be judged from it.
+	if len(parts) > 0 {
+		recs := make([]*prepullAuraRecord, 0, len(sent))
+		for _, i := range sent {
+			recs = append(recs, targets[i].rec)
 		}
+		// A hire the window ended before is named as such, never as verified or as short: nothing was read for it since
+		// its send, so its record and its per-step place keep what the earlier read said.
+		cut := ""
+		if len(unread) > 0 {
+			cut = "; read-back cut, not read: " + strings.Join(unread, ", ")
+		}
+		w.prepullAuraTopupLine("prepull-aura: %s: %s%s%s", where, strings.Join(parts, ", "), prepullMissTallySuffix(recs), cut)
 	}
 	// Only a hire whose ids the read-back shows are all there is done for this pull step: one the store still shows
 	// short, or does not answer for, stays pending and is read again at the next pre-pull status of the same step —
 	// until prepullTopupTryMax attempts were sent to it. An id that will not stick (the server refuses one aura on one
 	// bot; ticket T32) is then given up for this step with one line, instead of resending the batch on every status
 	// before the same pull.
+	unreadBot := make(map[string]bool, len(unread))
+	for _, name := range unread {
+		unreadBot[strings.ToLower(name)] = true
+	}
 	for _, i := range sent {
 		tg := &targets[i]
+		if unreadBot[strings.ToLower(tg.rec.Bot)] {
+			// Not read back: the hire stays exactly as it was for this step (its line above said so), so a later status
+			// of the same step reads it rather than this call marking it done off a read it never took.
+			continue
+		}
 		mark := w.prepullTopupMark(pullStep, tg.rec.Bot)
 		if len(tg.rec.Missing) == 0 {
 			mark.read = true
@@ -869,16 +1243,31 @@ func (w *walk) prepullAuraTopup(ctx context.Context, runSt tbm.RunStatus, pullSt
 	if err := w.prepullAuraWrite(); err != nil {
 		w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, err)
 	}
+	// The record is written whatever the resume did: the stop itself names the paused run, and prepull-auras.json is
+	// the evidence of what the call sent before it.
+	return stopErr
 }
 
 // prepullAuraTopupStop logs a top-up that did not go out. Unlike the boss-row fire it never stops the walk: the pull
 // goes on without the auras, and the line says so.
 func (w *walk) prepullAuraTopupStop(where string, err error) {
+	w.prepullAuraTopupLine("prepull-aura: WARN: %s; the top-up stopped and the pull goes on", prepullAuraTopupReason(where, err))
+}
+
+// prepullAuraTopupStopOnce is prepullAuraTopupStop, written once per pull step for key: the combat a later status of
+// the same step reads again is the same state, and its line would only repeat the first.
+func (w *walk) prepullAuraTopupStopOnce(pullStep int, key, where string, err error) {
+	w.prepullAuraTopupOnce(pullStep, key, "prepull-aura: WARN: %s; the top-up stopped and the pull goes on",
+		prepullAuraTopupReason(where, err))
+}
+
+// prepullAuraTopupReason is the stop line's reason: the error's own, or one named with the step when it carries none.
+func prepullAuraTopupReason(where string, err error) string {
 	_, reason := stopInfo(err)
 	if !strings.HasPrefix(reason, "prepull-aura: ") {
 		reason = fmt.Sprintf("prepull-aura: %s: %v", where, err)
 	}
-	w.prepullAuraTopupLine("prepull-aura: WARN: %s; the top-up stopped and the pull goes on", reason)
+	return reason
 }
 
 // prepullAuraTopupLine writes one top-up line to run.log and the summary.
@@ -1321,13 +1710,28 @@ func (w *walk) prepullBossArena(ctx context.Context, step int) (prepullArena, er
 // whole raid, not only the members that carry an aura list: an unhired member can pull too. where names the fire in
 // its failure ("boss row 5", or "start (row 1)"), so the walk-101 line reads as the start fire it was.
 func (w *walk) prepullAuraCombatClear(ctx context.Context, where string) error {
+	// The caller's context carries the call's budget (the top-up derives it once at entry; a fire has none), each unit
+	// waits no longer than the time left on the walk's clock, and a unit with no budget left is not read at all. A read
+	// the budget cut is no proof of anything, so it never clears the batch: errTopupPauseCap sends the caller down the
+	// cap path instead, and that step writes no more auras.
+	deadline := w.prepullTopupSendDeadline
+	shared := w.prepullAuraCombatWaitEnd
+	if !deadline.IsZero() && (shared.IsZero() || deadline.Before(shared)) {
+		shared = deadline
+	}
 	port := walkAuras{w: w}
 	for _, t := range w.prepullAuraWatch {
-		u, seen, _, err := w.prepullAuraUnitWait(ctx, port, where, t, w.prepullAuraCombatWaitEnd)
+		if err := w.prepullTopupCut(ctx); err != nil {
+			return err
+		}
+		u, seen, _, err := w.prepullAuraUnitWait(ctx, port, where, t, shared)
 		if err != nil {
 			return err
 		}
 		if !seen {
+			if cut := w.prepullTopupCut(ctx); cut != nil {
+				return cut
+			}
 			return stopf(exitRaidWalkFailed,
 				"prepull-aura: %s: the unit read of %s failed, so combat cannot be ruled out: no further auras were sent", where, t.Name)
 		}
@@ -1585,18 +1989,32 @@ func (w *walk) prepullAuraStartWait(ctx context.Context) ([]tbm.PartyRec, error)
 // store held the row a few seconds later. One run.log line records the wait - the time it took, or that it ran out -
 // and only when the first read missed, so a raid the store holds whole costs no line per bot per boss row. The read
 // stays fail-closed: the caller decides what an unseen unit means, and the wait is no licence to fire on a unit the
-// walk cannot read. waited is the time spent, for the caller's own failure line.
+// walk cannot read. waited is the time spent, for the caller's own failure line. A read the call's budget cut is not a
+// store that missed the row: the wait returns errTopupPauseCap then, so the top-up caps the step instead of reading it
+// as a combat or unit failure.
 func (w *walk) prepullAuraUnitWait(ctx context.Context, port walkAuras, where string, t dungeon.AuraTarget, shared time.Time) (u objects.Unit, seen bool, waited time.Duration, err error) {
 	begin := w.env.now()
 	if u, seen = port.ViewUnit(ctx, t); seen {
 		return u, true, 0, nil
+	}
+	// A read the call's budget cut is not a store that missed the row: the caller caps the step on it, and none of the
+	// waits below may spend more of the budget either.
+	if err := w.prepullTopupCut(ctx); err != nil {
+		return objects.Unit{}, false, 0, err
 	}
 	deadline := begin.Add(prepullUnitReadMax)
 	if !shared.IsZero() && shared.Before(deadline) {
 		deadline = shared
 	}
 	for w.env.now().Before(deadline) {
-		if err := w.env.sleep(ctx, prepullUnitReadPoll); err != nil {
+		poll := prepullUnitReadPoll
+		if left := deadline.Sub(w.env.now()); left < poll {
+			poll = left
+		}
+		if err := w.env.sleep(ctx, poll); err != nil {
+			if cut := w.prepullTopupCut(ctx); cut != nil {
+				return objects.Unit{}, false, 0, cut
+			}
 			return objects.Unit{}, false, 0, err
 		}
 		if u, seen = port.ViewUnit(ctx, t); seen {
@@ -1607,6 +2025,9 @@ func (w *walk) prepullAuraUnitWait(ctx context.Context, port walkAuras, where st
 	if seen {
 		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: the unit read of %s took %s (the first read missed it)", where, t.Name, waited))
 	} else {
+		if err := w.prepullTopupCut(ctx); err != nil {
+			return objects.Unit{}, false, waited, err
+		}
 		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: the unit read of %s ran out after %s", where, t.Name, waited))
 	}
 	return u, seen, waited, nil
@@ -1831,12 +2252,18 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 		over, within = over[:0], within[:0]
 		for i := range targets {
 			tg := &targets[i]
-			missing, seen := dungeon.AurasMissing(ctx, port, tg.unit, tg.want)
+			missing, others, seen := dungeon.AurasRead(ctx, port, tg.unit, tg.want)
 			if !seen {
-				missing = tg.want
+				missing, others = tg.want, nil
 			}
 			tg.rec.Missing = raidwalk.PrepullIDs(missing)
 			tg.rec.Seen = subtractIDs(raidwalk.PrepullIDs(tg.want), tg.rec.Missing)
+			// What the bot carries instead of a missing id: nil whenever it misses nothing, so the file only names
+			// substitutes where there is a miss to explain.
+			tg.rec.Others = nil
+			if len(missing) > 0 {
+				tg.rec.Others = others
+			}
 			w.prepullTopupMarkSeen(tg.rec.Bot, tg.rec.Seen)
 			switch {
 			case len(missing) > tol:
@@ -1857,8 +2284,12 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 			where, len(over), tol, w.prepullAuraMissSummary(over), prepullAuraFileName)
 	}
 	if len(within) > 0 {
-		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: %d bot(s) carry their lists; %d bot(s) miss auras within the tolerance of %d: %s",
-			where, len(targets)-len(within), len(within), tol, w.prepullAuraMissSummary(within)))
+		recs := make([]*prepullAuraRecord, 0, len(within))
+		for _, name := range within {
+			recs = append(recs, w.prepullAuraBots[name])
+		}
+		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: %d bot(s) carry their lists; %d bot(s) miss auras within the tolerance of %d: %s%s",
+			where, len(targets)-len(within), len(within), tol, w.prepullAuraMissSummary(within), prepullMissTallySuffix(recs)))
 	} else {
 		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: %d bot(s) carry their lists", where, len(targets)))
 	}
@@ -1876,15 +2307,17 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 
 // prepullAuraClear forgets which boss rows fired, so the rest before the next boss row (the one the wipe retries)
 // sends the lists again: a death stripped them. The bots' records keep their sent ids; the next fire's read-back
-// rewrites seen and missing. The top-up's per-step completion is forgotten too: the pull a recovery retries must be
-// read again hire by hire, and the read from before the wipe describes a raid that no longer exists.
+// rewrites seen and missing. The top-up's per-step completion is forgotten too — the lines it already wrote and a
+// budget it already spent included: the pull a recovery retries must be read again hire by hire, and the read from
+// before the wipe describes a raid that no longer exists.
 func (w *walk) prepullAuraClear() {
 	if len(w.prepullAuras) == 0 {
 		return
 	}
 	w.prepullAuraSent = nil
 	w.prepullTopupDone = nil
-	w.prepullTopupUnheld = nil
+	w.prepullTopupSaid = nil
+	w.prepullTopupCapped = nil
 }
 
 // prepullAuraRecordFor is the bot's accumulating record, created on its first fire.
@@ -2057,6 +2490,47 @@ func (w *walk) prepullAuraMissSummary(bots []string) string {
 	return strings.Join(parts, "; ")
 }
 
+// prepullMissTally sums which ids the given bots miss, as "22730 x7, 18192 x5": the count per id, the largest first
+// and ties by id. It is the line's per-ID tally, which counts BOTS per id and so reads the opposite way from
+// --prepull-aura-tolerance's per-BOT bound: a walk that stopped "26-31 of 39 carry their lists" had every short bot
+// missing one id, well within the tolerance, while the tally showed most of them missing the same food id.
+func prepullMissTally(recs []*prepullAuraRecord) string {
+	count := map[uint32]int{}
+	for _, rec := range recs {
+		if rec == nil {
+			continue
+		}
+		for _, id := range rec.Missing {
+			count[id]++
+		}
+	}
+	ids := make([]uint32, 0, len(count))
+	for id := range count {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if count[ids[i]] != count[ids[j]] {
+			return count[ids[i]] > count[ids[j]]
+		}
+		return ids[i] < ids[j]
+	})
+	words := make([]string, len(ids))
+	for i, id := range ids {
+		words[i] = fmt.Sprintf("%d x%d", id, count[id])
+	}
+	return strings.Join(words, ", ")
+}
+
+// prepullMissTallySuffix is prepullMissTally as the two lines append it: "; missing by id: 22730 x7, 18192 x5", and
+// "" when no bot misses anything.
+func prepullMissTallySuffix(recs []*prepullAuraRecord) string {
+	tally := prepullMissTally(recs)
+	if tally == "" {
+		return ""
+	}
+	return "; missing by id: " + tally
+}
+
 // prepullAuraWrite rewrites prepull-auras.json with the walk's whole prepull state.
 func (w *walk) prepullAuraWrite() error {
 	f := prepullAuraFile{Flag: w.opts.prepullAura, Tolerance: w.opts.prepullAuraTolerance, BossRows: w.prepullAuraRows,
@@ -2120,7 +2594,8 @@ type walkAuras struct{ w *walk }
 // that started after the pause stops the batch before this line goes out. A refused or failed call breaks the walk: a
 // preparation the walk could not send is not a preparation it may report.
 func (p walkAuras) SendAura(ctx context.Context, t dungeon.AuraTarget, b dungeon.Buff) error {
-	if !p.w.prepullTopupPauseDeadline.IsZero() && !p.w.env.now().Before(p.w.prepullTopupPauseDeadline) {
+	// B3: a top-up's 15 s budget, counted from before its reads, bounds every send of that call, held or not.
+	if !p.w.prepullTopupSendDeadline.IsZero() && !p.w.env.now().Before(p.w.prepullTopupSendDeadline) {
 		return errTopupPauseCap
 	}
 	if len(p.w.prepullAuraWatch) > 0 {
@@ -2128,12 +2603,21 @@ func (p walkAuras) SendAura(ctx context.Context, t dungeon.AuraTarget, b dungeon
 			return err
 		}
 	}
+	// The combat read is a round trip per watched unit, and the last of them can answer after the deadline: the check
+	// at the top of this call is not enough, and a send past the cap is exactly the boss-row overrun the cap exists to
+	// stop. Past it the step is capped like any other spent budget: this call's error, the caller's line, no send.
+	if !p.w.prepullTopupSendDeadline.IsZero() && !p.w.env.now().Before(p.w.prepullTopupSendDeadline) {
+		return errTopupPauseCap
+	}
 	line := fmt.Sprintf(".aura %d", b.ID)
 	p.w.logLine(p.w.env.now(), fmt.Sprintf("> %s (gm_aura, selected %s)", line, t.Name))
 	params := map[string]any{"guid": t.GUID.String(), "spell_id": b.ID}
 	if err := p.w.agent.Call(ctx, "gm_aura", params, nil, 15*time.Second); err != nil {
 		return stopf(exitRaidWalkFailed, "prepull-aura: %s on %s: %v", line, t.Name, err)
 	}
+	// The line went out: a top-up call's caller counts it here, not in the record below (a re-sent id is deduplicated
+	// into rec.Sent, so the slice does not grow for it).
+	p.w.prepullTopupSent++
 	if rec := p.w.prepullAuraBots[t.Name]; rec != nil && !slices.Contains(rec.Sent, b.ID) {
 		rec.Sent = append(rec.Sent, b.ID)
 	}
@@ -2141,9 +2625,19 @@ func (p walkAuras) SendAura(ctx context.Context, t dungeon.AuraTarget, b dungeon
 }
 
 // ViewUnit reads the target's unit row from the agent's store (auras included); false when the store does not hold it.
+// A top-up's send budget bounds the read too (B3): the RPC gets at most the time left, and one with none left is not
+// attempted at all - a read the budget cut is no row, so its caller reads it as "not clear".
 func (p walkAuras) ViewUnit(ctx context.Context, t dungeon.AuraTarget) (objects.Unit, bool) {
+	timeout := 10 * time.Second
+	if deadline := p.w.prepullTopupSendDeadline; !deadline.IsZero() {
+		left := deadline.Sub(p.w.env.now())
+		if left <= 0 {
+			return objects.Unit{}, false
+		}
+		timeout = min(timeout, left)
+	}
 	var u objects.Unit
-	if err := p.w.agent.Call(ctx, "unit", map[string]any{"guid": t.GUID.String()}, &u, 10*time.Second); err != nil {
+	if err := p.w.agent.Call(ctx, "unit", map[string]any{"guid": t.GUID.String()}, &u, timeout); err != nil {
 		return objects.Unit{}, false
 	}
 	if u.GUID != t.GUID {
